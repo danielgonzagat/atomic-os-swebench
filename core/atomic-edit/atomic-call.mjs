@@ -72,13 +72,30 @@ server.stdout.on('data', (d) => {
           process.exit(1);
         }
         const content = response.result?.content;
-        if (content?.[0]?.text) {
-          try {
-            console.log(JSON.stringify(JSON.parse(content[0].text), null, 2));
-          } catch {
-            console.log(content[0].text);
+        // Print EVERY content item, not just content[0]. Tools like code_readcode/code_read_symbol
+        // return a 2-item content: [0] a human summary ("Code is in the structured JSON payload") and
+        // [1] the JSON payload that ACTUALLY HOLDS THE CODE. A CLI consumer (the agent dispatch) that
+        // printed only content[0] was BLIND to the code and read-looped — a generalist representation
+        // gap handicapping the whole atomic arm. Surfacing all items fixes it for every such tool.
+        let printedText = false;
+        if (Array.isArray(content) && content.length) {
+          for (const item of content) {
+            if (item && item.text != null) {
+              try {
+                console.log(JSON.stringify(JSON.parse(item.text), null, 2));
+              } catch {
+                console.log(item.text);
+              }
+              printedText = true;
+            }
           }
-        } else {
+        }
+        const structured = response.result?.structuredContent;
+        if (structured && typeof structured === 'object' && Object.keys(structured).length) {
+          console.log(JSON.stringify(structured, null, 2));
+          printedText = true;
+        }
+        if (!printedText) {
           console.log(JSON.stringify(response.result, null, 2));
         }
         server.kill();

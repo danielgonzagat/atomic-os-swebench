@@ -32,8 +32,13 @@ preserved · time / time-to-first-write · tokens / tool-calls · receipts-trace
 
 ### Round 2 — Level 1 (same smoke3) — testing the Round-1 fix
 - arms: ATOMIC=intent (8 governed/curated: replace_text+create_file+structural reads) vs NATIVE=off.
-- status: RUNNING (concurrency=1 to avoid the Round-1.5 OOM).
-- (result pending — fills in on completion.)
+- status: VOID (contaminated) — revealed a representation gap mid-run, fixed, re-running.
+- LOSS CLASS found (generalized): **"agent blind to the code body"** — code_readcode/code_read_symbol
+  return content=[summary, JSON-with-code]; atomic-call printed only content[0] ("Code is in the
+  structured JSON payload") so the agent NEVER saw the code → read-looped, never edited. A generalist
+  representation gap handicapping the WHOLE atomic arm (every structured-payload read tool).
+- FIX (generalist, via atomic-call surface-all-content): atomic-call now emits every content item +
+  structuredContent → the code body reaches the model. Helps all read tools, all langs. Re-run pending.
 
 ## Representation gaps found = loop fuel (each a CLASS, each fixed via atomic_expand_self when generalized)
 - [FIXED] kernel dead: atomic_expand_self fresh-runtime timeout (180s) < proof budget (1.8M) → SIGKILL.
