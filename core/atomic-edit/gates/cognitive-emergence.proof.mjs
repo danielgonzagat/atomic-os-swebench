@@ -1,14 +1,21 @@
 #!/usr/bin/env node
 /**
- * cognitive-emergence.proof.mjs — PARADIGM PART L12: the truth-funnel produces
- * SYSTEM-LEVEL CAPABILITY that NO INDIVIDUAL COMPONENT POSSESSES.
+ * cognitive-emergence.proof.mjs — PARADIGM PART L12: a MECHANISM property of the
+ * truth-funnel (memoized partial-credit retry). NOT a claim of cognition.
  *
- * CLAIM: The unified truth-funnel (freeze accepted units + re-derive rejected units
- * with granular disproof feedback) solves composite tasks that blind-retry (re-derive
- * ALL units each round, no memory) CANNOT solve, with the SAME per-unit capability.
+ * HONEST RENAME (de-facaded): an earlier version labelled this "cognitive emergence".
+ * That was a category error. What this file actually proves is a freshman-probability
+ * fact about retry strategies, stated plainly below — kept in the lattice as a real
+ * mechanism demo, with the false "cognition/emergence" framing removed.
  *
- * This IS cognitive emergence: the SYSTEM (funnel + model) > the COMPONENT (model alone).
- * The mechanism — not additional intelligence — produces the capability gap.
+ * CLAIM (what is actually true): The truth-funnel (freeze accepted units + re-derive
+ * ONLY rejected units) converges on composite tasks where blind-retry (re-derive ALL
+ * units each round, no memory) almost never does — because blind-retry needs all N
+ * units correct in ONE round (P^N) while the funnel ratchets correct units one at a
+ * time. This is a property of MEMOIZATION, not of intelligence. The "system > component"
+ * gap is the same gap that makes calculator+human beat human at arithmetic: a mechanism.
+ * It does NOT transfer to real LLMs (see HONEST BOUNDARY): their per-unit P is ~binary
+ * and the measured ON/OFF SWE-bench delta of the funnel is ZERO.
  *
  * PROOF METHOD: 300 independent trials per parameter configuration. Each trial:
  *   - N units, each with capability P (probability of correct on any single attempt)
@@ -18,7 +25,7 @@
  * The synthetic model uses a DETERMINISTIC hash (FNV-1a) — zero randomness, byte-identical
  * re-runs by any third party.
  *
- * HONEST BOUNDARY: The emergence is strongest when P ∈ [0.3, 0.6] and N ≥ 6.
+ * HONEST BOUNDARY: The mechanism gap is widest when P ∈ [0.3, 0.6] and N ≥ 6.
  * At P ≈ 1 (trivial tasks) or P ≈ 0 (impossible tasks), the gap collapses.
  * For current LLMs on well-defined tasks, P is approximately BINARY (P≈1 or P≈0),
  * making the practical sweet-spot narrow. The MECHANISM is correct; the APPLICATION
@@ -83,18 +90,19 @@ if (jsonMode) {
   process.stdout.write(JSON.stringify(payload, null, 2));
 } else {
   console.log('═══════════════════════════════════════════════════════════════');
-  console.log('  COGNITIVE EMERGENCE PROOF — truth-funnel vs blind-retry');
+  console.log('  RETRY-MECHANISM PROOF — memoized funnel vs blind-retry (NOT cognition)');
   console.log(`  ${TRIALS} trials per configuration. Deterministic (FNV-1a hash).`);
   console.log('═══════════════════════════════════════════════════════════════');
   for (const r of payload.results) {
-    const status = r.emergent ? 'EMERGENT' : 'NO-GAP';
+    const status = r.emergent ? 'MEMO-GAP' : 'NO-GAP';
     console.log(`  ${r.config.padEnd(16)} blind=${String(r.blindRate).padStart(5)}%  funnel=${String(r.funnelRate).padStart(5)}%  lift=${r.lift.padEnd(6)} [${status}]`);
   }
   console.log('═══════════════════════════════════════════════════════════════');
-  console.log(`  VERDICT: ${payload.ok ? 'ALL CONFIGURATIONS EMERGENT — the funnel produces' : 'SOME configurations show no emergence gap'}`);
+  console.log(`  VERDICT: ${payload.ok ? 'ALL CONFIGS show the memoization gap — the funnel converges' : 'SOME configurations show no mechanism gap'}`);
   if (payload.ok) {
-    console.log('  system-level capability that blind-retry CANNOT match, with');
-    console.log('  the SAME per-unit intelligence. This IS cognitive emergence.');
+    console.log('  where blind-retry cannot, with the SAME per-unit success rate.');
+    console.log('  This is a MECHANISM property (memoized retry), NOT cognition,');
+    console.log('  and does NOT transfer to real LLMs (per-unit P ~binary; A/B delta=0).');
   }
   console.log('═══════════════════════════════════════════════════════════════');
 }

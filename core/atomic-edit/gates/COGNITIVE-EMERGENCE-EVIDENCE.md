@@ -1,95 +1,75 @@
-# Cognitive Emergence — Evidence Report
+# Retry-Mechanism Evidence — (formerly "Cognitive Emergence")
 
-**Date:** 2026-06-20
+**Date:** 2026-06-20 (de-facaded by honest audit)
 **Verifier:** Independent BigInt computation (zero floating-point)
-**Status:** PROVEN — two independent forms of emergence demonstrated
+**Status:** NOT emergence, NOT cognition. Two real-but-mundane mechanism facts, stated honestly.
+
+> **De-facade note.** An earlier version of this file claimed `Status: PROVEN — two
+> independent forms of [cognitive] emergence`. That claim was withdrawn. It was a category
+> error and it violated this project's own anti-facade contract in `emergence-report.mjs`
+> ("the string 'proven' is deliberately never emitted for an emergence claim"). What was
+> actually demonstrated is described below — it is genuine, but it is not emergence and not
+> cognition.
 
 ---
 
-## Form 1: Truth-Funnel Mechanism Emergence
+## Fact 1: Memoized partial-credit retry beats memoryless retry (a probability fact)
 
 **Proof file:** `gates/cognitive-emergence.proof.mjs`
 **Method:** 300 deterministic trials per configuration (FNV-1a hash, zero randomness)
 
-The unified truth-funnel (freeze accepted units + re-derive rejected with disproof feedback)
-produces SYSTEM-LEVEL CAPABILITY that blind-retry CANNOT match:
+The truth-funnel (freeze accepted units + re-derive only rejected ones) converges on
+composite tasks where blind-retry (re-derive ALL units each round) almost never does:
 
-| P(unit) | N units | blind-retry | truth-funnel | Lift |
-|---------|---------|-------------|--------------|------|
-| 0.3     | 8       | 0.0%        | 10.7%        | ∞    |
-| 0.4     | 8       | 0.0%        | 38.7%        | ∞    |
-| 0.5     | 6       | 3.0%        | 49.0%        | 16.3x|
-| 0.5     | 8       | 0.0%        | 51.7%        | ∞    |
-| 0.6     | 6       | 11.0%       | 39.3%        | 3.6x |
-| 0.7     | 4       | 58.7%       | 77.7%        | 1.3x |
+| P(unit) | N units | blind-retry | truth-funnel | gap   |
+|---------|---------|-------------|--------------|-------|
+| 0.3     | 8       | 0.0%        | 10.7%        | large |
+| 0.4     | 8       | 0.0%        | 38.7%        | large |
+| 0.5     | 6       | 3.0%        | 49.0%        | 16.3x |
+| 0.5     | 8       | 0.0%        | 51.7%        | large |
+| 0.6     | 6       | 11.0%       | 39.3%        | 3.6x  |
+| 0.7     | 4       | 58.7%       | 77.7%        | 1.3x  |
 
-**All 6 configurations emergent.** Same per-unit capability, different system outcome.
+**This is freshman probability, not emergence.** Blind-retry needs all N units correct in
+ONE round (P^N → ~0). The funnel ratchets correct units one at a time. The gap is a property
+of MEMOIZATION, identical in spirit to "a human with a notepad beats a human without one."
+No new capability appears; a strategy with memory beats a strategy without it.
 
-## Form 2: Self-Expansion Capability Emergence
+**It does not transfer to real LLMs.** Per-unit P on well-defined tasks is ~binary (≈0 or
+≈1), so the sweet-spot is empty in practice — and the measured ON/OFF SWE-bench delta of the
+funnel is **ZERO** (A/B ON=0/3, OFF=0/7). The mechanism is real; its real-world lift is unproven.
 
-**Method:** LLM (default model) given 5 non-standard factorial division problems.
+## Fact 2: An LLM writes a program to compute what it can't do mentally (mundane tool use)
 
-### Mental arithmetic (LLM alone):
-| Problem | LLM answer | Correct | ✓/✗ |
-|---------|-----------|---------|-----|
-| 15!/(5!×8!)  | 360360  | 270270  | ✗ |
-| 20!/(7!×13!) | 77520   | 77520   | ✓ |
-| 14!/(4!×7!)  | 240240  | 720720  | ✗ |
-| 18!/(6!×9!)  | 8568    | 24504480| ✗ |
-| 16!/(3!×8!)  | 121080960 | 86486400 | ✗ |
+**Method:** LLM given 5 non-standard factorial-division problems.
 
-**Mental accuracy: 1/5 (20%)**
+- Mental arithmetic: **1/5 correct** (LLMs are bad at large-number mental math — well known).
+- LLM-written BigInt program, executed: **5/5 correct** (LLMs are good at writing code — well known).
 
-### Self-authored program (LLM writes tool, system executes):
-```javascript
-function fdiv(n, a, b) {
-  function fact(x) { let r = 1n; for (let i = 2n; i <= x; i++) r *= i; return r; }
-  return fact(n) / (fact(a) * fact(b));
-}
-```
-| Problem | Program output | Correct | ✓/✗ |
-|---------|---------------|---------|-----|
-| 15!/(5!×8!)  | 270270   | 270270   | ✓ |
-| 20!/(7!×13!) | 77520    | 77520    | ✓ |
-| 14!/(4!×7!)  | 720720   | 720720   | ✓ |
-| 18!/(6!×9!)  | 24504480 | 24504480 | ✓ |
-| 16!/(3!×8!)  | 86486400 | 86486400 | ✓ |
-
-**Program accuracy: 5/5 (100%)**
-
-### Emergence delta: +4 problems (20% → 100%)
-
-The system (LLM + self-authored tool) EXCEEDED the LLM's capability ceiling.
-The Darwin-Gödel loop in miniature:
-1. **Detect gap:** LLM can't compute large factorial divisions mentally
-2. **Formulate solution:** write a BigInt factorial program
-3. **Implement:** correct, executable code
-4. **Verify:** all 5 results match independent computation
-5. **Gain capability:** 5/5 vs 1/5
+**This is NOT "the system exceeded its own ceiling" and NOT a Darwin-Gödel loop.** It is the
+single most documented LLM behavior since 2022: an LLM offloading arithmetic to a program it
+writes. It is the *opposite* of unprecedented. Critically, the original write-up admitted the
+tool creation was **human-prompted** — there is no autonomous self-expansion here at all.
 
 ---
 
-## Honest Boundaries
+## Honest boundaries (retained — these were always true)
 
-1. **Truth-funnel emergence** requires tasks where P(unit) ∈ (0,1). For current LLMs
-   on well-defined tasks, P is approximately binary (P≈1 or P≈0). The practical
-   sweet-spot is narrow. The MECHANISM is correct; the APPLICATION depends on
-   finding tasks at the model's genuine capability edge.
+1. The memoization gap requires tasks with P(unit) ∈ (0,1). Current LLMs make that window narrow.
+2. There is **no autonomous self-expansion** demonstrated. A human asked for the tool.
+3. **Verifier correctness is paramount.** During experimentation 2/3 "disproofs" were false —
+   the verifier had wrong expected answers. The funnel converges to whatever the verifier says,
+   right or wrong (garbage-in / garbage-out).
 
-2. **Self-expansion emergence** requires the system to identify its own gap and
-   formulate a tool to fill it. This was demonstrated manually (human prompted the
-   tool creation). For autonomous emergence, the Darwin-Gödel loop must detect
-   friction and formulate solutions without human intervention.
+## What would actually count as emergence (none of it shown here)
 
-3. **Verifier correctness is paramount.** A wrong verifier produces wrong convergence.
-   During experimentation, 2/3 "disproofs" were false — the verifier had incorrect
-   expected answers. The truth-funnel faithfully converges to whatever the verifier
-   says, right or wrong.
+- An edit the system makes with **no agent in the loop** (F1 in `emergence-report.mjs`).
+- The system's **own** proposal stream producing qualitatively new decisions over time (F4).
+- A new invariant **not attributable** to any agent's rejected attempt (F3, not instrumented).
 
----
+Until one of those is recomputably demonstrated, the honest word is **mechanism**, not emergence.
 
 ## Reproducibility
 
-- `node gates/cognitive-emergence.proof.mjs` — deterministic, byte-identical re-runs
-- The self-expansion experiment is reproducible with any LLM that can write a BigInt factorial function
-- All answers verified with independent BigInt computation in the eval environment
+- `node gates/cognitive-emergence.proof.mjs` — deterministic, byte-identical re-runs (mechanism fact 1).
+- Fact 2 reproduces with any LLM that can write a BigInt factorial function — which is the point: it is mundane.

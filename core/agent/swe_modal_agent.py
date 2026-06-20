@@ -41,12 +41,28 @@ _print_lock = threading.Lock()
 # loop, history, baseline, PASS_TO_PASS/FAIL_TO_PASS judging — is IDENTICAL, so the ONLY independent
 # variable between the ON and OFF arms is the edit mechanism (a clean attributable A/B).
 # Default OFF ⇒ byte-identical to the prior agent (the control arm is untouched).
-ATOMIC = os.environ.get("ATOMIC", "off").strip().lower() == "on"
+# THREE A/B arms (one variable each, run_tests verifier identical across all):
+#   off      — plain hand-rolled tools (control)
+#   governed — ON arm: str_replace routed through the slim governed headless editor (1 tool changed)
+#   full     — the COMPLETE atomic toolbox (120+ MCP tools via atomic-call.mjs) exposed to the model
+# ATOMIC_MODE wins; ATOMIC=on is kept as a back-compat alias for governed.
+ATOMIC_MODE = os.environ.get("ATOMIC_MODE", "").strip().lower()
+if not ATOMIC_MODE:
+    ATOMIC_MODE = "governed" if os.environ.get("ATOMIC", "off").strip().lower() == "on" else "off"
+ATOMIC = ATOMIC_MODE == "governed"          # legacy flag: the governed (single-tool) arm
+ATOMIC_FULL = ATOMIC_MODE == "full"         # the COMPLETE-toolbox arm
 # The slim bundle (built by core/agent/atomic-bundle.sh): dist closure + minimal typescript +
 # headless-edit.mjs. ~1.6M tgz / ~8.8M unpacked (vs 490M full node_modules).
 ATOMIC_BUNDLE = os.environ.get("ATOMIC_BUNDLE", str(Path(__file__).resolve().parent / "atomic-edit-bundle.tgz"))
+# The FULL bundle (built by atomic-full-ab/bundle-full.sh / the packaging swarm): the COMPLETE engine
+# (dist/server.js + node_modules) so atomic-call.mjs can dispatch ANY of the 120+ tools in-sandbox.
+ATOMIC_FULL_BUNDLE = os.environ.get("ATOMIC_FULL_BUNDLE", str(Path(__file__).resolve().parent / "atomic-full-bundle.tgz"))
 # Unpacks to /root/atomic-edit/ inside the sandbox; the entrypoint is headless-edit.mjs there.
 ATOMIC_SANDBOX_DIR = "/root/atomic-edit"
+# Full-arm catalog + dispatch helpers (import-only; built once below when ATOMIC_FULL).
+FULL_ATOMIC_NAMES = set()
+if ATOMIC_FULL:
+    import atomic_full_arm as _afa
 
 
 def log(iid, msg):
@@ -118,6 +134,14 @@ if ATOMIC:
                 "path": {"type": "string"}, "old": {"type": "string"}, "new": {"type": "string"},
                 "proof": {"type": "string", "description": "REQUIRED only when the edit removes/shortens code: why the removed bytes are non-correct/dead (>=20 chars)."}},
                 "required": ["path", "old", "new"]}
+
+# ATOMIC_MODE=full: REPLACE the hand-rolled toolbox with the COMPLETE atomic MCP catalog (read/analyze/
+# structural-edit/transaction/converge/prove), pulled live from the real engine so it stays in sync.
+# run_tests is re-appended by the catalog builder and stays the byte-identical verifier across arms.
+if ATOMIC_FULL:
+    _atomic_src = os.environ.get("ATOMIC_EDIT_SRC", str(Path(__file__).resolve().parent.parent / "atomic-edit"))
+    TOOLS, FULL_ATOMIC_NAMES = _afa.build_full_tool_catalog(_atomic_src)
+    FULL_ATOMIC_NAMES = {n for n in FULL_ATOMIC_NAMES if n != "run_tests"}
 
 SYS = ("You are an expert engineer fixing a real bug in a Python repo, graded by a hidden test suite. "
        "Work in the project SOURCE ONLY (never read tests or site-packages). Strategy: (1) locate the exact "
@@ -327,6 +351,8 @@ def solve(inst, f2p, p2p, test_cmd, block_files, max_steps=80):
         atomic_node = None
         if ATOMIC:
             atomic_node = _atomic_provision(sb, iid)
+        elif ATOMIC_FULL:
+            atomic_node = _afa.atomic_full_provision(sb, iid, sbexec, log, ATOMIC_FULL_BUNDLE, CONDA, ATOMIC_SANDBOX_DIR)
         messages = [{"role": "system", "content": SYS},
                     {"role": "user", "content": f"Bug/issue:\n\n{inst['problem_statement'][:6000]}\n\n"
                         f"The repo is checked out at /testbed and your shell is ALREADY there — use paths RELATIVE "
@@ -389,7 +415,14 @@ def solve(inst, f2p, p2p, test_cmd, block_files, max_steps=80):
                     log(iid, f"s{step} {fn}(...) -> REFUSED [read-lockout active; only str_replace/run_tests]")
                     messages.append({"role": "tool", "tool_call_id": c["id"], "content": res})
                     continue
-                if fn == "grep":
+                if ATOMIC_FULL and fn in FULL_ATOMIC_NAMES:
+                    # FULL arm: dispatch ANY atomic tool one-shot through the COMPLETE MCP in-sandbox
+                    # against /testbed. run_tests is NOT in FULL_ATOMIC_NAMES, so it stays the native
+                    # byte-identical verifier below. Result flows into the common log+append tail.
+                    res = _afa.sb_atomic_call(sb, sbexec, atomic_node, fn, a, ATOMIC_SANDBOX_DIR, "/testbed")
+                    if str(res).startswith("OK"):
+                        reads_since_edit = 0; read_breaks = 0; last_steered_diff = None  # an atomic op landed
+                elif fn == "grep":
                     pat = a.get("pattern", "")
                     # HONOR path+glob scoping (the model passes these expecting a scoped search; the old
                     # tool silently ignored them and grepped the whole repo, flooding the model with noise
