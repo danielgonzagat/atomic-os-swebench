@@ -532,7 +532,12 @@ async function main(): Promise<void> {
   if (cmd === '--help' || cmd === '-h') {
     printUsage();
   } else if (cmd === 'config') {
-    process.stdout.write(JSON.stringify(config, null, 2) + '\n');
+    // Never print the secret in plaintext (anti-secret-leak law): redact apiKey to presence+fingerprint.
+    const redacted = {
+      ...config,
+      apiKey: config.apiKey ? `set (…${String(config.apiKey).slice(-4)}, ${String(config.apiKey).length} chars)` : 'unset',
+    };
+    process.stdout.write(JSON.stringify(redacted, null, 2) + '\n');
   } else if (cmd === 'bench') {
     const suite = args[1] || 'swebench';
     await selfImproveLoop(suite, config.repoRoot, config);
