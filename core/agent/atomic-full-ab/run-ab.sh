@@ -17,6 +17,9 @@ IDS="${1:?usage: run-ab.sh <ids-file> [run_id]}"
 RUN_ID="${2:-ab-$(cat "$IDS" | wc -l | tr -d ' ')task}"
 ARMS="${ARMS:-off full}"
 
+echo "== [0/4] inbound sync: pull canonical atomic from origin/master (propagation) =="
+bash "$(cd "$AGENT_DIR/../atomic-edit" && pwd)/atomic-sync.sh" || true
+
 echo "== [1/4] rebuild FULL bundle from canonical core/atomic-edit (propagation) =="
 bash "$HERE/rebuild-bundle.sh"
 

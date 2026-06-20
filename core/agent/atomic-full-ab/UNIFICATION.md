@@ -42,6 +42,27 @@ origin/master = the one canonical atomic
         └──► atomic-swarm subagents: launch the same canonical atomic-edit MCP
 ```
 
+## Propagation is now LIVE (no loose ends)
+
+The single-source loop is mechanized, not a discipline:
+
+- **Inbound (everyone receives every change):** the canonical launcher's impl
+  (`atomic-edit-mcp-launcher-impl.sh`) — the single chokepoint EVERY CLI agent now launches through —
+  runs `core/atomic-edit/atomic-sync.sh` on each MCP start: pull `origin/master` (clean-master-only,
+  ff-only, ~10s budget, rate-limited 5 min, all errors swallowed) then the existing dist self-rebuild
+  compiles it. `run-ab.sh` runs the same sync first, so the benchmark also gets every cross-machine change.
+- **Outbound (every change reaches master):** `.githooks/post-commit` auto-publishes any commit on
+  `master` to `origin/master` (backgrounded, best-effort). `atomic-sync.sh` self-installs
+  `core.hooksPath=.githooks` so the hook is active everywhere after the first sync.
+- **Net effect:** an agent (any of Claude / Codex / Antigravity / Oh-my-pi / Vibe) improves atomic →
+  commit on master → auto-pushed → every other agent's next MCP launch + every benchmark run pulls and
+  rebuilds it. One evolving atomic, shared by all hosts AND the DeepSeek-V4-Pro benchmark scaffold.
+
+**Honest boundary:** propagation happens at launch / run boundaries (+ within-session hot-reload), not
+literally instant across already-running processes — git is the sync substrate, so the granularity is
+"next MCP start / next bench run," which is the strongest guarantee possible without a shared live daemon.
+Opt-outs: `ATOMIC_NO_SELFSYNC=1` (inbound), `ATOMIC_NO_AUTOPUSH=1` (outbound).
+
 ## Still open (tracked)
 
 - **Full tool coverage:** the benchmark FULL arm currently exposes a curated subset of the 123 tools.
