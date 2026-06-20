@@ -143,6 +143,16 @@ if ATOMIC_FULL:
     TOOLS, FULL_ATOMIC_NAMES = _afa.build_full_tool_catalog(_atomic_src)
     FULL_ATOMIC_NAMES = {n for n in FULL_ATOMIC_NAMES if n != "run_tests"}
 
+# Read-vs-edit tool classification, unified across arms so the anti-stuck read-lockout fires
+# symmetrically (fair A/B: FULL must not read-loop unchecked while OFF gets the read->edit push).
+_OFF_READS = {"grep", "read_file", "outline", "read_symbol", "glob"}
+_ATOMIC_READS = {"code_readcode", "code_outline", "code_read_symbol", "atomic_read_file",
+                 "atomic_grep", "atomic_glob", "atomic_locate", "atomic_outline",
+                 "atomic_ast_search", "atomic_grep_calls", "atomic_affected_tests"}
+READ_TOOL_NAMES = _OFF_READS | ((_ATOMIC_READS & FULL_ATOMIC_NAMES) if ATOMIC_FULL else set())
+# When the read-lockout engages it strips reads, leaving only edit + run_tests so the model MUST edit.
+EDIT_KEEP_NAMES = ((FULL_ATOMIC_NAMES - _ATOMIC_READS) | {"run_tests"}) if ATOMIC_FULL else {"str_replace", "run_tests"}
+
 SYS = ("You are an expert engineer fixing a real bug in a Python repo, graded by a hidden test suite. "
        "Work in the project SOURCE ONLY (never read tests or site-packages). Strategy: (1) locate the exact "
        "cause — the issue usually names the file/symbol; (2) make the SMALLEST possible fix with str_replace "
@@ -382,7 +392,7 @@ def solve(inst, f2p, p2p, test_cmd, block_files, max_steps=80):
             # it cannot read, so it MUST commit an edit. Re-enabled the moment an edit lands (reads reset).
             active_tools = TOOLS
             if read_breaks >= 3:
-                active_tools = [t for t in TOOLS if t["function"]["name"] in ("str_replace", "run_tests")]
+                active_tools = [t for t in TOOLS if t["function"]["name"] in EDIT_KEEP_NAMES]
                 if not lockout_logged:  # log the lockout ONCE, not every step (was spamming s17-s24)
                     log(iid, f"step {step} HARD READ-LOCKOUT engaged -> read tools removed from schema AND refused at dispatch; model MUST edit")
                     lockout_logged = True
@@ -407,7 +417,7 @@ def solve(inst, f2p, p2p, test_cmd, block_files, max_steps=80):
                 # and the dispatch below would execute them unconditionally (pylint-7080 v2: 8+ reads ran
                 # AFTER the lockout "fired", 0 edits, log spamming every step). REFUSE reads at execution
                 # time so the lockout actually binds: the model's only productive move becomes str_replace.
-                if read_breaks >= 3 and fn in ("grep", "read_file", "outline", "read_symbol", "glob"):
+                if read_breaks >= 3 and fn in READ_TOOL_NAMES:
                     res = ("READ-LOCKOUT ACTIVE: reading is DISABLED after repeated read-loops with no progress. "
                            "This tool call was REFUSED. Your ONLY available actions are str_replace (make/refine "
                            "the fix) and run_tests (verify). You already have enough context — edit the most "
@@ -594,7 +604,7 @@ def solve(inst, f2p, p2p, test_cmd, block_files, max_steps=80):
                     log(iid, f"step {step} run_tests -> target={'P' if rc_t==0 else 'F'} all={'P' if last_pass else 'F'} newfail={0 if rc_t!=0 else len(new_fail)} diff={dlines}L reset={resets}")
                 else:
                     res = f"No such tool {fn}. Available tools: grep, read_file, str_replace, run_tests. To list a directory, call read_file on the directory path."
-                if fn in ("grep", "read_file", "outline", "read_symbol", "glob"):
+                if fn in READ_TOOL_NAMES:
                     reads_since_edit += 1
                     _rp = a.get("path") or a.get("name") or ""
                     if _rp: read_files_hist[_rp] = read_files_hist.get(_rp, 0) + 1
