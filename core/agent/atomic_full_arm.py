@@ -56,8 +56,12 @@ DENY_TOOLS = {
 # the model 115 byte-level mutation tools as the wheel (that was the infidelity that made the FULL arm
 # lose). A tight, high-altitude surface: one intention-editor + read/locate + run_tests.
 INTENT_TOOLS = [
-    "atomic_converge",                                              # the intention->minimal-mutation envelope
-    "code_readcode", "code_outline", "code_read_symbol",            # read/understand
+    # GOVERNED targeted-intent editors that reliably write the working tree (validated pre-disk, byte
+    # at the floor). NOT atomic_converge: its receipt claims "persisted" but it does NOT change the
+    # working file (no-op in a non-git workspace; a git-commit in /testbed => empty working diff =>
+    # the SWE-bench harness extracts an empty patch). A dishonest-receipt + harness-incompatible editor.
+    "atomic_replace_text", "atomic_create_file",                    # declare targeted intent; engine validates+writes minimal
+    "code_readcode", "code_outline", "code_read_symbol",            # read/understand (structural)
     "atomic_grep", "atomic_locate", "atomic_outline",              # find
 ]
 
@@ -231,7 +235,9 @@ def sb_atomic_call(sb, sbexec, node_bin, tool, args, sandbox_dir="/root/atomic-e
         "import json,subprocess,os,sys\n"
         "d=json.loads(sys.stdin.read())\n"
         f"env={{**os.environ,'ATOMIC_WORKSPACE_ROOT':{json.dumps(workspace)},'ATOMIC_EDIT_ALLOWED_ROOTS':{json.dumps(workspace)},'ATOMIC_DISABLE_HOT_RELOAD':'1'}}\n"
-        "r=subprocess.run([d['node'],d['cli'],d['tool'],json.dumps(d['args'])],"
+        # cwd = the workspace so tools that derive the active workspace from CWD (e.g. atomic_converge's
+        # activeWorkspaceRoot) resolve targets against /testbed, not the engine's own repo root.
+        f"r=subprocess.run([d['node'],d['cli'],d['tool'],json.dumps(d['args'])], cwd={json.dumps(workspace)},"
         "stdout=subprocess.PIPE,stderr=subprocess.PIPE,universal_newlines=True,env=env)\n"
         "raw_out=(r.stdout or '')\n"
         # strip the engine's stderr banner; keep tool content. JSON tool results carry ok/error;
