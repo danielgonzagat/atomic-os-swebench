@@ -4,10 +4,10 @@ import { check, jsonBody, type PartBCtx } from "./smoke-state.js";
 
 
 export async function partBMultiTx(ctx: PartBCtx): Promise<void> {
-  const { client, fixtureAbs, fixtureRel, repoRoot } = ctx;
+  const { client, fixtureAbs, fixtureRel, repoRoot, selfRel } = ctx;
     // ── Lever #3: multi-file atomic transaction ──
-    const txA = path.join('scripts', 'mcp', 'atomic-edit', `.smoke-tx-a.${process.pid}.ts`);
-    const txB = path.join('scripts', 'mcp', 'atomic-edit', `.smoke-tx-b.${process.pid}.ts`);
+    const txA = path.posix.join(selfRel, `.smoke-tx-a.${process.pid}.ts`);
+    const txB = path.posix.join(selfRel, `.smoke-tx-b.${process.pid}.ts`);
     const txAAbs = path.join(repoRoot, txA);
     const txBAbs = path.join(repoRoot, txB);
     fs.writeFileSync(txAAbs, 'export const A = 1;\n');

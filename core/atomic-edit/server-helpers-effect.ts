@@ -21,9 +21,9 @@ import { characterDiff } from './advanced.js';
 import { REPO_ROOT } from './guard.js';
 
 const SKIP_DIRS = new Set([
-  'node_modules', '.git', 'dist', '.next', 'build', 'coverage', '.atomic', '.codex-artifacts',
-  '.codex-hook-tmp', '.turbo', 'vendor', '.cache', 'node-compile-cache', 'jest_dx', 'test-results',
-  '.serena', '.codegraph', '.claude', '.mcp-cache', '.positive-byte-sessions',
+  'node_modules', '.git', 'dist', 'dist-lkg', 'dist.broken-last', '.next', 'build', '.atomic-build-tmp', 'coverage', '.atomic',
+  '.codex-artifacts', '.codex-hook-tmp', '.turbo', 'vendor', '.cache', '.atomic-closure-cache', 'node-compile-cache',
+  'jest_dx', 'test-results', 'atomic-exec', '.serena', '.codegraph', '.claude', '.mcp-cache', '.positive-byte-sessions',
 ]);
 
 const SKIP_FILE_NAMES = new Set([

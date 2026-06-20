@@ -4,7 +4,7 @@ import { check, jsonBody, sha, type PartBCtx } from "./smoke-state.js";
 
 
 export async function partBOutlineStat(ctx: PartBCtx): Promise<void> {
-  const { client, fixtureAbs, fixtureRel, repoRoot } = ctx;
+  const { client, fixtureAbs, fixtureRel, repoRoot, selfRel } = ctx;
 
     const out = (await client.callTool({
       name: 'code_outline',
@@ -60,7 +60,7 @@ export async function partBOutlineStat(ctx: PartBCtx): Promise<void> {
 
     const missingStat = (await client.callTool({
       name: 'code_file_stat',
-      arguments: { file: `scripts/mcp/atomic-edit/.smoke-nonexistent.${process.pid}.ts` },
+      arguments: { file: path.posix.join(selfRel, `.smoke-nonexistent.${process.pid}.ts`) },
     })) as { content: { text: string }[] };
     const missingStatBody = jsonBody(missingStat);
     check(
@@ -74,7 +74,7 @@ export async function partBOutlineStat(ctx: PartBCtx): Promise<void> {
 
     const dirStat = (await client.callTool({
       name: 'code_file_stat',
-      arguments: { file: 'scripts/mcp/atomic-edit' },
+      arguments: { file: selfRel },
     })) as { content: { text: string }[] };
     const dirStatBody = jsonBody(dirStat);
     check(

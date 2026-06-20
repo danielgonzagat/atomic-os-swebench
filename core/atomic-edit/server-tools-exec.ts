@@ -179,14 +179,41 @@ function protectedWriteTarget(cmd: string, cwd: string): string | null {
   }
   for (const cand of candidates) {
     const abs = path.isAbsolute(cand) ? cand : path.resolve(cwd, cand);
-    const root = resolveAllowedRootForAbsolutePath(abs);
-    if (!root) continue; // outside an Atomic-controlled root; sandbox/effect proof will handle it.
-    const rel = path.relative(root, abs).split(path.sep).join('/');
-    if (rel.startsWith('..')) continue;
-    const hit = isProtectedRelative(rel);
-    if (hit) return `${rel} (matches \"${hit}\")`;
+    const hit = firstProtectedRelativeHit(abs, cwd);
+    if (hit) return hit;
   }
   return null;
+}
+
+function protectedRelativeHitsForAbs(absPath: string, fallbackRoot?: string): string[] {
+  const roots = [
+    resolveAllowedRootForAbsolutePath(absPath),
+    fallbackRoot,
+    REPO_ROOT,
+    atomicSelfSourceRoot(),
+  ]
+    .filter((root): root is string => Boolean(root))
+    .map((root) => path.resolve(root));
+  const uniqueRoots = [...new Set(roots)].sort((a, b) => b.length - a.length);
+  const hits: string[] = [];
+  const seen = new Set<string>();
+  for (const root of uniqueRoots) {
+    const relRaw = path.relative(root, absPath);
+    if (!relRaw || relRaw.startsWith('..') || path.isAbsolute(relRaw)) continue;
+    const rel = relRaw.split(path.sep).join('/');
+    const hit = isProtectedRelative(rel);
+    if (!hit) continue;
+    const rendered = rel + ' (matches "' + hit + '")';
+    if (!seen.has(rendered)) {
+      seen.add(rendered);
+      hits.push(rendered);
+    }
+  }
+  return hits;
+}
+
+function firstProtectedRelativeHit(absPath: string, fallbackRoot?: string): string | null {
+  return protectedRelativeHitsForAbs(absPath, fallbackRoot)[0] ?? null;
 }
 
 /**
@@ -201,13 +228,9 @@ export function protectedEffectHits(rootAbs: string, effects: { file: string }[]
   const hits: string[] = [];
   for (const e of effects) {
     const abs = path.isAbsolute(e.file) ? e.file : path.resolve(rootAbs, e.file);
-    const root = resolveAllowedRootForAbsolutePath(abs) ?? rootAbs;
-    const rel = path.relative(root, abs).split(path.sep).join('/');
-    if (rel.startsWith('..')) continue; // outside the resolved root - not a repo-protected file
-    const hit = isProtectedRelative(rel);
-    if (hit) hits.push(`${rel} (matches "${hit}")`);
+    hits.push(...protectedRelativeHitsForAbs(abs, rootAbs));
   }
-  return hits;
+  return [...new Set(hits)];
 }
 
 function guardCommand(cmd: string, cwd: string): GuardVerdict {
