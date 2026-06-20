@@ -40,6 +40,15 @@ FULL_TOOL_ALLOWLIST = [
     "atomic_prove", "atomic_lens",
 ]
 
+# Denylist (the ONLY tools withheld from the agent) — grounded by the 123-tool mastery sweep.
+# Everything else (117 of 123) is exposed: the agent uses the TOTALITY of the code-relevant atomic.
+DENY_TOOLS = {
+    "chrome_devtools_call", "chrome_devtools_list_tools", "chrome_devtools_reset",  # need a live browser
+    "atomic_expand_self", "atomic_self_evolution",                                   # edit atomic's OWN tree
+    "atomic_positive_bytes_begin", "atomic_positive_bytes_commit",                   # session blocked under /testbed
+    "atomic_positive_bytes_abort",
+}
+
 EXCLUDED_RATIONALE = (
     "Excluded from the agent surface (still PRESENT in the package, just not offered as tools): "
     "chrome_devtools_* (browser), codex_config_* (host config), positive_bytes_* (byte ledger), "
@@ -84,12 +93,16 @@ def build_full_tool_catalog(atomic_dir, include_run_tests=True, timeout=25):
     except Exception:
         tools_raw = []
 
-    by_name = {t.get("name"): t for t in tools_raw if t.get("name")}
+    # TOTALITY by denylist (not a curated allowlist): expose EVERY live tool the agent could use,
+    # excluding only the empirically-inapplicable ones (123-tool mastery sweep: chrome needs a live
+    # browser; expand_self/self_evolution edit atomic's OWN tree, not /testbed; the positive-bytes
+    # session is blocked by the self-expansion guard in a /testbed context). New tools added to the
+    # engine are auto-included — the agent's surface tracks the canonical atomic, no manual allowlist.
     out = []
     chosen = []
-    for name in FULL_TOOL_ALLOWLIST:
-        t = by_name.get(name)
-        if not t:
+    for t in tools_raw:
+        name = t.get("name")
+        if not name or name in DENY_TOOLS:
             continue
         params = t.get("inputSchema") or {"type": "object", "properties": {}}
         out.append({"type": "function", "function": {
