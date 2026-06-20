@@ -21,9 +21,11 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const SRC_DIR = path.dirname(fileURLToPath(import.meta.url)); // scripts/mcp/atomic-edit
-const SCRIPTS_MCP_DIR = path.resolve(SRC_DIR, '..');
-const REPO_ROOT = process.env.ATOMIC_EDIT_REPO_ROOT || path.resolve(SRC_DIR, '..', '..', '..');
+const SRC_DIR = path.dirname(fileURLToPath(import.meta.url)); // flattened package dir
+// Flattened package layout: bootstrap + impl are SIBLINGS of this supervisor
+// (same dir), and the package dir IS the self-contained repo root.
+const SCRIPTS_MCP_DIR = SRC_DIR;
+const REPO_ROOT = process.env.ATOMIC_EDIT_REPO_ROOT || SRC_DIR;
 const BOOTSTRAP_PATH = path.join(SCRIPTS_MCP_DIR, 'atomic-edit-mcp-launcher.sh');
 const IMPL_PATH = path.join(SCRIPTS_MCP_DIR, 'atomic-edit-mcp-launcher-impl.sh');
 const SUPERVISOR_PATH = path.join(SRC_DIR, 'launcher-supervisor.mjs');

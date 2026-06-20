@@ -17,11 +17,14 @@
 
 set -euo pipefail
 
-# launcher lives at scripts/mcp/atomic-edit-mcp-launcher.sh
+# launcher lives at the flattened package root (core/atomic-edit/)
 CALLER_WORKSPACE_ROOT="$(pwd -P)"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # scripts/mcp
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"                # repo root
-SRC_DIR="${SCRIPT_DIR}/atomic-edit"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # flattened package dir
+SRC_DIR="${SCRIPT_DIR}"                                       # dist/node_modules/build are siblings here
+# Self-contained package: the package dir IS the repo root. Honor an explicit
+# ATOMIC_EDIT_REPO_ROOT override (matches launcher-supervisor.mjs), else default
+# to the flattened package dir itself.
+REPO_ROOT="$(cd "${ATOMIC_EDIT_REPO_ROOT:-${SCRIPT_DIR}}" && pwd)"
 DIST="${SRC_DIR}/dist/server.js"
 
 cd "${REPO_ROOT}"
@@ -100,7 +103,7 @@ function containsPath(root, target) {
   return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
 function brokerResponds(endpoint) {
-  const client = path.join(repoRootReal, "scripts/mcp/atomic-edit/atomic-exec-broker-client.mjs");
+  const client = path.join(repoRootReal, "atomic-exec-broker-client.mjs");
   if (!fs.existsSync(client)) return false;
   const probe = childProcess.spawnSync(process.execPath, [client, endpoint], {
     cwd: repoRootReal,
@@ -270,7 +273,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const repoRoot = process.argv[1];
 const endpoint = process.argv[2];
-const client = path.join(repoRoot, "scripts/mcp/atomic-edit/atomic-exec-broker-client.mjs");
+const client = path.join(repoRoot, "atomic-exec-broker-client.mjs");
 if (!endpoint || !fs.existsSync(client)) process.exit(1);
 const probe = childProcess.spawnSync(process.execPath, [client, endpoint], {
   cwd: repoRoot,

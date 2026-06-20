@@ -15,8 +15,8 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # scripts/mcp
-SRC_DIR="${SCRIPT_DIR}/atomic-edit"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # flattened package dir
+SRC_DIR="${SCRIPT_DIR}"                                       # dist/supervisor/blessed are siblings here
 IMPL="${SCRIPT_DIR}/atomic-edit-mcp-launcher-impl.sh"
 SUPERVISOR="${SRC_DIR}/launcher-supervisor.mjs"
 BLESSED="${SRC_DIR}/launcher-blessed"
