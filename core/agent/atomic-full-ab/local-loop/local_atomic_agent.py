@@ -171,6 +171,8 @@ def main():
     workdir = str(Path(args.workdir).resolve())
     task = Path(args.task).read_text()
     tree = subprocess.run(["git", "ls-files"], cwd=workdir, capture_output=True, text=True).stdout
+    NO_GATE = args.gate.strip().upper() == "NONE"   # one-shot mode: no local test feedback
+    active_tools = [t for t in TOOLS if not (NO_GATE and t["function"]["name"] == "run_tests")]
 
     metrics = {"arm": "atomic-cli-deepseek-v4-pro", "task": args.task, "workdir": workdir,
                "steps": 0, "tool_calls": {}, "edits_applied": 0, "invalid_states_prevented": 0,
@@ -178,16 +180,19 @@ def main():
                "diff_lines": 0, "wall_s": 0.0, "transcript": []}
     t0 = time.time()
 
-    system = (
-        "You are the Atomic-CLI coding agent. You solve a software task by editing a real repository, "
-        "using ONLY atomic tools for every read, search, and edit, plus run_tests to verify. You have no "
-        "other tools. Be efficient with calls: to understand the code, FIRST call atomic_survey(glob) once "
-        "to outline the whole region, then atomic_read_many(items) to read all the relevant files in ONE "
-        "call — do NOT read files one at a time. Then make minimal faithful edits with atomic_replace / "
-        "atomic_create (supply proofOfIncorrectness when you remove code), then run_tests. Iterate until "
-        "run_tests is fully green, then STOP by replying with a short summary and NO tool call. Paths are "
-        "relative to the repo root."
-    )
+    survey = ("Be efficient with calls: to understand the code, FIRST call atomic_survey(glob) once to "
+              "outline the region, then atomic_read_many(items) to read the relevant files in ONE call — "
+              "do NOT read files one at a time. Then make minimal faithful edits with atomic_replace / "
+              "atomic_create (supply proofOfIncorrectness when you remove code). ")
+    if NO_GATE:
+        system = ("You are the Atomic-CLI coding agent. Solve the task by editing a real repository using "
+                  "ONLY atomic tools. " + survey + "You CANNOT run the project's tests — there is no "
+                  "run_tests tool. Implement the fix described in the issue carefully and completely, then "
+                  "STOP by replying with a short summary and NO tool call. Paths are relative to the repo root.")
+    else:
+        system = ("You are the Atomic-CLI coding agent. Solve the task by editing a real repository using "
+                  "ONLY atomic tools, plus run_tests to verify. " + survey + "Then run_tests; iterate until "
+                  "fully green, then STOP with a short summary and NO tool call. Paths are relative to the repo root.")
     user = f"# Repository files\n{tree}\n\n# Your task\n{task}\n\nBegin. Use atomic tools only."
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
@@ -198,7 +203,7 @@ def main():
     for step in range(1, args.max_steps + 1):
         metrics["steps"] = step
         try:
-            msg, usage = deepseek(messages, TOOLS)
+            msg, usage = deepseek(messages, active_tools)
         except Exception as e:
             metrics["transcript"].append(f"s{step} DEEPSEEK-ERROR {str(e)[:200]}")
             break
@@ -213,13 +218,16 @@ def main():
 
         if not calls:
             empties += 1
-            if last_pass:
-                metrics["transcript"].append(f"s{step} DONE (no tool call, gate green)")
+            if last_pass or (NO_GATE and metrics["edits_applied"] > 0):
+                metrics["transcript"].append(f"s{step} DONE (no tool call{'; one-shot fix submitted' if NO_GATE else '; gate green'})")
                 break
             if empties >= 3:
-                metrics["transcript"].append(f"s{step} STOP (gave up, gate not green)")
+                metrics["transcript"].append(f"s{step} STOP (gave up)")
                 break
-            messages.append({"role": "user", "content": "Tests are not green yet. Do NOT stop — make a minimal fix with atomic_replace/atomic_create and call run_tests."})
+            nudge = ("You have not edited anything yet. Implement the fix now with atomic_replace/atomic_create, then stop."
+                     if NO_GATE else
+                     "Tests are not green yet. Do NOT stop — make a minimal fix with atomic_replace/atomic_create and call run_tests.")
+            messages.append({"role": "user", "content": nudge})
             continue
         empties = 0
 
@@ -267,8 +275,11 @@ def main():
             messages.append({"role": "user", "content": "You have read a lot without editing. You likely have enough context — make the edit now with atomic_replace/atomic_create, then run_tests."})
 
     # final scoring (authoritative) + diff
-    final_pass, _, _ = run_gate(workdir, args.gate)
-    metrics["gate_pass"] = final_pass
+    if NO_GATE:
+        metrics["gate_pass"] = None  # scored externally by the official SWE-bench Docker harness
+    else:
+        final_pass, _, _ = run_gate(workdir, args.gate)
+        metrics["gate_pass"] = final_pass
     d = git_diff(workdir)
     metrics["diff_lines"] = diff_lines(d)
     metrics["wall_s"] = round(time.time() - t0, 1)
