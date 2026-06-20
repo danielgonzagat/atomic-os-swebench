@@ -184,14 +184,18 @@ def main():
               "outline the region, then atomic_read_many(items) to read the relevant files in ONE call — "
               "do NOT read files one at a time. Then make minimal faithful edits with atomic_replace / "
               "atomic_create (supply proofOfIncorrectness when you remove code). ")
+    lean = ("Prefer the smallest correct behavioral delta: preserve existing exports, comments, and "
+            "call graph where possible; avoid rewriting unrelated helpers; when two touched functions "
+            "need the same logic, implement one canonical helper and have wrappers delegate instead of "
+            "duplicating state machines or parsers. ")
     if NO_GATE:
         system = ("You are the Atomic-CLI coding agent. Solve the task by editing a real repository using "
-                  "ONLY atomic tools. " + survey + "You CANNOT run the project's tests — there is no "
+                  "ONLY atomic tools. " + survey + lean + "You CANNOT run the project's tests — there is no "
                   "run_tests tool. Implement the fix described in the issue carefully and completely, then "
                   "STOP by replying with a short summary and NO tool call. Paths are relative to the repo root.")
     else:
         system = ("You are the Atomic-CLI coding agent. Solve the task by editing a real repository using "
-                  "ONLY atomic tools, plus run_tests to verify. " + survey + "Then run_tests; iterate until "
+                  "ONLY atomic tools, plus run_tests to verify. " + survey + lean + "Then run_tests; iterate until "
                   "fully green, then STOP with a short summary and NO tool call. Paths are relative to the repo root.")
     user = f"# Repository files\n{tree}\n\n# Your task\n{task}\n\nBegin. Use atomic tools only."
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
@@ -255,6 +259,17 @@ def main():
             except Exception:
                 a = {}
             metrics["tool_calls"][fn] = metrics["tool_calls"].get(fn, 0) + 1
+
+            # CLASS-S2-A teeth: when force-edit is active, REFUSE reads at dispatch (the model ignores a
+            # restricted schema and re-emits reads from history). Not blind — it has FORCE_EDIT_AFTER+ reads
+            # of context; refusing further reads makes edit the only productive move. Feedback then refines.
+            if reads_since_edit >= FORCE_EDIT_AFTER and fn in {"atomic_survey", "atomic_read_many", "atomic_outline", "atomic_read", "atomic_grep"}:
+                res = ("READING DISABLED — you have read 12+ times with no edit; you have enough context. "
+                       "Emit atomic_replace (or atomic_create) with your single best fix NOW" +
+                       ("." if NO_GATE else "; then run_tests will show if it's right and you can refine."))
+                metrics["transcript"].append(f"s{step} {fn} REFUSED (force-edit active)")
+                messages.append({"role": "tool", "tool_call_id": c["id"], "content": res})
+                continue
 
             if fn == "run_tests":
                 metrics["run_tests_calls"] += 1
