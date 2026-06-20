@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# ABSOLUTE-UNIFICATION proof gate: nothing broken propagates to the shared canonical master.
+# Before any push to master, run the atomic core gates (build + smoke + paradigm-verify) and BLOCK
+# the push if any is red. This is what makes "change one -> change all" safe: what reaches everyone
+# was already proven. Emergency opt-out: ATOMIC_NO_PROOF_GATE=1 (use only when consciously bypassing).
+[ "${ATOMIC_NO_PROOF_GATE:-0}" = "1" ] && exit 0
+pushing_master=0
+while read -r _l _ls remote_ref _rs; do case "$remote_ref" in */master) pushing_master=1;; esac; done
+[ "$pushing_master" = "1" ] || exit 0
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; PKG="$ROOT/core/atomic-edit"
+[ -d "$PKG" ] || exit 0
+node="$(command -v node || echo /opt/homebrew/bin/node)"
+run_gate() { # name cmd  — with one retry for the known P1/smoke flake
+  local name="$1" cmd="$2"
+  ( cd "$PKG" && eval "$cmd" ) >"/tmp/pg-$name.log" 2>&1 && return 0
+  ( cd "$PKG" && eval "$cmd" ) >"/tmp/pg-$name.log" 2>&1 && return 0
+  echo "  PROOF-GATE BLOCKED: $name failed (see /tmp/pg-$name.log):" >&2; tail -4 "/tmp/pg-$name.log" >&2; return 1
+}
+echo "atomic proof-gate: build + smoke + paradigm-verify before propagating to master..." >&2
+run_gate build "$node build.mjs"          || exit 1
+run_gate smoke "$node smoke.mjs"          || exit 1
+run_gate paradigm "$node paradigm-verify.mjs" || exit 1
+echo "atomic proof-gate: GREEN — safe to propagate to master." >&2
+exit 0

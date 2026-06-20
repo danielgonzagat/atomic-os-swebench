@@ -54,6 +54,10 @@ The single-source loop is mechanized, not a discipline:
 - **Outbound (every change reaches master):** `.githooks/post-commit` auto-publishes any commit on
   `master` to `origin/master` (backgrounded, best-effort). `atomic-sync.sh` self-installs
   `core.hooksPath=.githooks` so the hook is active everywhere after the first sync.
+- **Proof gate (nothing broken propagates):** `.githooks/pre-push` runs the atomic core gates
+  (build + smoke + paradigm-verify, with one retry for the known P1 flake) before ANY push to master
+  and BLOCKS the push if red. This is the integrity that makes "change one → change all" safe: what
+  reaches everyone was already proven green. Emergency opt-out: `ATOMIC_NO_PROOF_GATE=1`.
 - **Net effect:** an agent (any of Claude / Codex / Antigravity / Oh-my-pi / Vibe) improves atomic →
   commit on master → auto-pushed → every other agent's next MCP launch + every benchmark run pulls and
   rebuilds it. One evolving atomic, shared by all hosts AND the DeepSeek-V4-Pro benchmark scaffold.
