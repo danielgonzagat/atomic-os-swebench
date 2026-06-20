@@ -205,15 +205,25 @@ def sb_atomic_call(sb, sbexec, node_bin, tool, args, sandbox_dir="/root/atomic-e
         f"env={{**os.environ,'ATOMIC_WORKSPACE_ROOT':{json.dumps(workspace)},'ATOMIC_EDIT_ALLOWED_ROOTS':{json.dumps(workspace)},'ATOMIC_DISABLE_HOT_RELOAD':'1'}}\n"
         "r=subprocess.run([d['node'],d['cli'],d['tool'],json.dumps(d['args'])],"
         "stdout=subprocess.PIPE,stderr=subprocess.PIPE,universal_newlines=True,env=env)\n"
-        "out=(r.stdout or '').strip()\n"
-        "lines=[l for l in out.splitlines() if l.strip().startswith('{')]\n"
-        "raw=lines[-1] if lines else out\n"
-        "try: v=json.loads(raw)\n"
-        "except Exception: print('RESULT(unparsed): '+out[-800:]); sys.exit()\n"
-        "ok=v.get('ok'); \n"
-        "if ok is True: print('OK: '+json.dumps(v)[:1200])\n"
-        "elif ok is False: print('REFUSED/ERROR: '+(v.get('error') or v.get('reason') or json.dumps(v))[:800])\n"
-        "else: print('RESULT: '+json.dumps(v)[:1200])\n"
+        "raw_out=(r.stdout or '')\n"
+        # strip the engine's stderr banner; keep tool content. JSON tool results carry ok/error;
+        # read/analysis tools (code_readcode/outline/grep) return plain text — pass it through
+        # cleanly and generously (head-biased, ~3000 chars) so the FULL arm reads code as well as
+        # the OFF arm does (fair A/B), not a scary truncated 'unparsed' blurb.
+        "out=raw_out.strip()\n"
+        "lines=[l for l in out.splitlines() if l.strip().startswith('{') and '\\\"ok\\\"' in l]\n"
+        "v=None\n"
+        "for ln in reversed(lines):\n"
+        "  try: v=json.loads(ln.strip()); break\n"
+        "  except Exception: pass\n"
+        "if v is not None:\n"
+        "  ok=v.get('ok')\n"
+        "  if ok is True: print('OK: '+json.dumps(v)[:1500])\n"
+        "  elif ok is False: print('REFUSED/ERROR: '+str(v.get('error') or v.get('reason') or json.dumps(v))[:1200])\n"
+        "  else: print('RESULT: '+json.dumps(v)[:1500])\n"
+        "else:\n"
+        "  body=out if len(out)<=3000 else out[:3000]+'\\n...[truncated]'\n"
+        "  print(body or '(no output)')\n"
     )
     payload = json.dumps({"node": node_bin, "cli": f"{sandbox_dir}/atomic-call.mjs", "tool": tool, "args": a})
     b64 = base64.b64encode(driver.encode()).decode()
