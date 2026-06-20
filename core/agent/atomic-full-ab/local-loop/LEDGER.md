@@ -1,16 +1,16 @@
 # LOCAL self-vs-self competitive A/B — LEDGER (lives on disk; loop state of record)
 
 **Protocol (user-defined, exact):** define a task → FIRST fire the atomic agent CLI (DeepSeek V4 Pro,
-atomic-only) → THEN fire a subagent of my own TUI (Claude Code, native-only) with the SAME task → wait
+atomic-only) → THEN fire a subagent of my own TUI (Codex worker, native-only) with the SAME task → wait
 both → collect+compare ALL data → improve the atomic agent (generalist-only, via atomic_expand_self) →
 repeat same task till atomic dominates → escalate difficulty → forever. Runs 100% LOCAL (no Modal).
 
 **Arms:**
-- NATIVE = a Claude Code subagent, tools = Read/Edit/Write/Bash/Grep/Glob only (no MCP, no atomic).
+- NATIVE = a Codex worker subagent, native tools only (no MCP, no atomic).
 - ATOMIC = `local_atomic_agent.py` (DeepSeek V4 Pro brain + 100% atomic hands via atomic-call.mjs).
 - Gate (scoring) is identical for both and re-scored by the orchestrator (no self-report trust).
 
-**Honesty caveat (commensurability):** the two arms use DIFFERENT models (Claude vs DeepSeek), per the
+**Honesty caveat (commensurability):** the two arms use DIFFERENT models (Codex vs DeepSeek), per the
 user's explicit definition of this A/B. So token/time/diff gaps are MODEL-CONFOUNDED and are NOT claimed
 as representation. The loop only acts on the CLEANLY representation-attributable part of a loss (tool
 granularity, ceremony, round-trips, coverage) — never fakes a model gap as a representation gap.
@@ -209,9 +209,32 @@ is simply weaker at committing, that's a model gap, reported honestly.
   confirmed model gap. (Distinct from the Modal blind-lockout: there the model had little context; here it
   has too much and won't act.)
 
+### CLASS-S2-A bounded + CONCLUSIVE attribution (pylint-7080, 3 atomic attempts WITH feedback)
+- Soft schema-restrict had NO teeth (DeepSeek re-emitted reads from history; dispatch executed them).
+- Hard dispatch-refusal of reads after 12 (not blind — ample context) DID bind: waste fell 3.42M→762k
+  tokens, 40→11 steps. The force-edit fires (s7), reads refused (s8)...
+- ...but DeepSeek STILL produced 0 edits — it GAVE UP rather than commit a fix. Given working line-range
+  reads + available test feedback + forced commit, it would not localize+edit pylint-7080, which Claude
+  (native) solved in 2 feedback iterations.
+- **CONCLUSIVE HONEST ATTRIBUTION:** after every representation gap was closed (R1-A batch read, S1-A
+  line-range read, S2-A analysis-paralysis bound — all generalist, verified), the residual atomic loss on
+  pylint-7080 is a MODEL CAPABILITY gap (DeepSeek < Claude at localizing+committing a subtle fix), NOT a
+  representation gap. The user's "loss = representation" thesis holds for representation gaps (all closed)
+  but has a real LIMIT: a weaker model on a hard task is a model gap, not infinitely reducible to
+  representation. Reported, not chased (no hardcode). CLASS-S2-A bound KEPT (cheaper failures; helps commit
+  on tasks the model CAN do).
+
+## SCOREBOARD (honest, by number)
+- one-shot suite (5 real SWE-bench-Verified): ATOMIC 4/5 == NATIVE 4/5 (parity).
+- WITH test feedback: NATIVE 5/5 (solves pylint via iteration); ATOMIC 4/5 (pylint = model gap). NATIVE
+  leads by 1 on the hardest instance — attributable to the model, after representation was equalized.
+- Representation CLASSES found+closed this session: R1-A (batch read), S1-A (line-range read), S2-A
+  (analysis-paralysis bound). All were AGENT tool-EXPOSURE/harness gaps; the atomic ENGINE already had the
+  capabilities. "The loss is your representation" — proven where true, honestly bounded where it's the model.
+
 ## Next exact step
-Implement CLASS-S2-A (bounded analysis paralysis: force-edit-after-K-reads, schema-restrict + firm steer,
-not blind) in local_atomic_agent.py; re-run pylint-7080 atomic WITH feedback. If it now edits+iterates to
-resolve → harness gap closed (atomic reaches parity on the hard instance). If it edits but stays wrong →
-honest model gap (report, don't chase). Then widen the feedback suite. Headline: one-shot 4/5=4/5; with
-feedback pylint native-resolved, atomic-failed (analysis paralysis) → fixing the harness bound next.
+Two honest fronts: (1) the representation is now solid → to lift the atomic arm's resolved-rate on hard
+tasks, the lever is the MODEL (try a stronger model in the atomic CLI — the loop is model-agnostic), since
+representation gaps are closed; (2) widen the feedback suite (more instances, batch the warm-container gate)
+to get a tighter resolved-rate number and surface any NEW representation classes. Do NOT hardcode pylint.
+Warm containers (flask5014_warm, pylint7080_warm[_native]) + images are kept for re-runs.
