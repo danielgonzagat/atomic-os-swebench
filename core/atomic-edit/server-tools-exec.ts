@@ -456,12 +456,10 @@ function createSandboxTempRoot(): string {
   // to keep them private to this run. Generalist fix for the cross-language
   // sandbox case.
   const cacheSubdirs = [
-    'go-build', 'gopath',
-    'cargo', 'rustup',
-    'gradle',
-    'gem', 'bundle',
+    'go-build',
     'node-compile-cache', 'xdg-cache', 'npm-cache', 'yarn-cache', 'pnpm-home',
     'pip-cache',
+    'bundle',
   ];
   for (const sub of cacheSubdirs) {
     try { fs.mkdirSync(path.join(root, sub), { recursive: true, mode: 0o700 }); } catch { /* best effort */ }
@@ -490,18 +488,19 @@ function sandboxTempEnv(tempRoot: string | null): Record<string, string> {
     YARN_CACHE_FOLDER: path.join(tempRoot, 'yarn-cache'),
     PNPM_HOME: path.join(tempRoot, 'pnpm-home'),
     PIP_CACHE_DIR: path.join(tempRoot, 'pip-cache'),
-    // Language toolchain caches that default to user-global paths outside the
-    // sandbox write boundary. Each is redirected into tempRoot so compile/test
-    // commands work without weakening the sandbox profile. Generalist fix for
-    // the cross-language benchmark/CI case (Gap E in LEDGER).
+    // Language BUILD-ARTIFACT caches — these are write-heavy and live under
+    // user-global paths the sandbox denies. Redirect to tempRoot (writable).
+    // NOTE: do NOT redirect GOPATH / CARGO_HOME / RUSTUP_HOME themselves —
+    // those hold the MODULE cache which only needs READ access (covered by
+    // the sandbox's `(allow file-read*)` rule). Redirecting them breaks
+    // module resolution for projects whose deps were `go mod download`-ed
+    // to the user's default GOPATH/pkg/mod.
     GOCACHE: path.join(tempRoot, 'go-build'),
-    GOPATH: path.join(tempRoot, 'gopath'),
-    CARGO_HOME: path.join(tempRoot, 'cargo'),
-    RUSTUP_HOME: path.join(tempRoot, 'rustup'),
-    GRADLE_USER_HOME: path.join(tempRoot, 'gradle'),
+    // Maven/Gradle local repo (~/.m2, ~/.gradle/caches) — read-heavy but the
+    // user's cache has the artifacts; do NOT redirect, reads are allowed.
     MAVEN_OPTS: '-Duser.home=' + tempRoot,
-    GEM_HOME: path.join(tempRoot, 'gem'),
-    GEM_PATH: path.join(tempRoot, 'gem'),
+    // Ruby bundler/GEM — write-heavy for install, but for test runs reads are
+    // enough; do NOT redirect GEM_HOME/GEM_PATH (breaks gem resolution).
     BUNDLE_PATH: path.join(tempRoot, 'bundle'),
   };
 }
