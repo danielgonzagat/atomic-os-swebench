@@ -169,11 +169,22 @@ def atomic_full_provision(sb, iid, sbexec, log, full_bundle_path, conda, sandbox
         f"env={{**os.environ,'ATOMIC_WORKSPACE_ROOT':'/tmp/_afw','ATOMIC_EDIT_ALLOWED_ROOTS':'/tmp/_afw','ATOMIC_DISABLE_HOT_RELOAD':'1'}}\n"
         f"r=subprocess.run([{json.dumps(nb)},'{sandbox_dir}/atomic-call.mjs','atomic_replace_text',args],"
         "stdout=subprocess.PIPE,stderr=subprocess.PIPE,universal_newlines=True,env=env)\n"
-        "print((r.stdout or '').strip()[-400:] or (r.stderr or '').strip()[-400:])\n"
+        "out=(r.stdout or '')\n"
+        # robust: parse ok from ANY json line (atomic-call may print a diff-preview after the JSON),
+        # and also accept the ground truth: the file actually got the edit.
+        "ok=False\n"
+        "for ln in out.splitlines():\n"
+        "  s=ln.strip()\n"
+        "  if s.startswith('{') and '\\\"ok\\\"' in s:\n"
+        "    try:\n"
+        "      if json.loads(s).get('ok') is True: ok=True; break\n"
+        "    except Exception: pass\n"
+        "if not ok and 'full selftest' in open('/tmp/_afw/m.py').read(): ok=True\n"
+        "print('SELFTEST_OK' if ok else ('SELFTEST_FAIL '+out[-300:]+(r.stderr or '')[-200:]))\n"
     )
     b64 = base64.b64encode(st.encode()).decode()
     out, _ = sbexec(sb, f"python3 -c \"import base64;exec(base64.b64decode('{b64}').decode())\"", timeout=120)
-    if '"ok": true' not in out and '"ok":true' not in out:
+    if 'SELFTEST_OK' not in out:
         raise RuntimeError(f"ATOMIC_FULL_PROVISION: full-MCP selftest failed in sandbox: {out[:400]}")
     log(iid, f"atomic-full: node {ver.strip()} ready; COMPLETE MCP bundle staged + full-call selftest GREEN")
     return nb
