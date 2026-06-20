@@ -1,0 +1,135 @@
+diff --git a/src/_pytest/reports.py b/src/_pytest/reports.py
+index 4682d5b6e..824446709 100644
+--- a/src/_pytest/reports.py
++++ b/src/_pytest/reports.py
+@@ -3,6 +3,7 @@ from typing import Optional
+ 
+ import py
+ 
++from _pytest._code.code import ExceptionChainRepr
+ from _pytest._code.code import ExceptionInfo
+ from _pytest._code.code import ReprEntry
+ from _pytest._code.code import ReprEntryNative
+@@ -178,12 +179,33 @@ class BaseReport:
+ 
+             reprtraceback["reprentries"] = new_entries
+ 
+-            return {
++            d = {
+                 "reprcrash": reprcrash,
+                 "reprtraceback": reprtraceback,
+                 "sections": rep.longrepr.sections,
+             }
+ 
++            if hasattr(rep.longrepr, "chain"):
++                chain = []
++                for rtb, rc, descr in rep.longrepr.chain:
++                    s_rtb = rtb.__dict__.copy()
++                    s_new_entries = []
++                    for entry in s_rtb["reprentries"]:
++                        entry_data = {
++                            "type": type(entry).__name__,
++                            "data": entry.__dict__.copy(),
++                        }
++                        for key, value in entry_data["data"].items():
++                            if hasattr(value, "__dict__"):
++                                entry_data["data"][key] = value.__dict__.copy()
++                        s_new_entries.append(entry_data)
++                    s_rtb["reprentries"] = s_new_entries
++                    s_rc = rc.__dict__.copy() if rc is not None else None
++                    chain.append((s_rtb, s_rc, descr))
++                d["chain"] = chain
++
++            return d
++
+         d = self.__dict__.copy()
+         if hasattr(self.longrepr, "toterminal"):
+             if hasattr(self.longrepr, "reprtraceback") and hasattr(
+@@ -220,40 +242,53 @@ class BaseReport:
+                 reprtraceback = reportdict["longrepr"]["reprtraceback"]
+                 reprcrash = reportdict["longrepr"]["reprcrash"]
+ 
+-                unserialized_entries = []
+-                reprentry = None
+-                for entry_data in reprtraceback["reprentries"]:
+-                    data = entry_data["data"]
+-                    entry_type = entry_data["type"]
+-                    if entry_type == "ReprEntry":
+-                        reprfuncargs = None
+-                        reprfileloc = None
+-                        reprlocals = None
+-                        if data["reprfuncargs"]:
+-                            reprfuncargs = ReprFuncArgs(**data["reprfuncargs"])
+-                        if data["reprfileloc"]:
+-                            reprfileloc = ReprFileLocation(**data["reprfileloc"])
+-                        if data["reprlocals"]:
+-                            reprlocals = ReprLocals(data["reprlocals"]["lines"])
+-
+-                        reprentry = ReprEntry(
+-                            lines=data["lines"],
+-                            reprfuncargs=reprfuncargs,
+-                            reprlocals=reprlocals,
+-                            filelocrepr=reprfileloc,
+-                            style=data["style"],
+-                        )
+-                    elif entry_type == "ReprEntryNative":
+-                        reprentry = ReprEntryNative(data["lines"])
+-                    else:
+-                        _report_unserialization_failure(entry_type, cls, reportdict)
+-                    unserialized_entries.append(reprentry)
+-                reprtraceback["reprentries"] = unserialized_entries
+-
+-                exception_info = ReprExceptionInfo(
+-                    reprtraceback=ReprTraceback(**reprtraceback),
+-                    reprcrash=ReprFileLocation(**reprcrash),
+-                )
++                def unserialize_entries(reprtraceback):
++                    unserialized_entries = []
++                    for entry_data in reprtraceback["reprentries"]:
++                        data = entry_data["data"]
++                        entry_type = entry_data["type"]
++                        if entry_type == "ReprEntry":
++                            reprfuncargs = None
++                            reprfileloc = None
++                            reprlocals = None
++                            if data["reprfuncargs"]:
++                                reprfuncargs = ReprFuncArgs(**data["reprfuncargs"])
++                            if data["reprfileloc"]:
++                                reprfileloc = ReprFileLocation(**data["reprfileloc"])
++                            if data["reprlocals"]:
++                                reprlocals = ReprLocals(data["reprlocals"]["lines"])
++
++                            reprentry = ReprEntry(
++                                lines=data["lines"],
++                                reprfuncargs=reprfuncargs,
++                                reprlocals=reprlocals,
++                                filelocrepr=reprfileloc,
++                                style=data["style"],
++                            )
++                        elif entry_type == "ReprEntryNative":
++                            reprentry = ReprEntryNative(data["lines"])
++                        else:
++                            _report_unserialization_failure(entry_type, cls, reportdict)
++                        unserialized_entries.append(reprentry)
++                    reprtraceback["reprentries"] = unserialized_entries
++
++                unserialize_entries(reprtraceback)
++
++                if "chain" in reportdict["longrepr"]:
++                    chain = []
++                    for s_rtb, s_rc, descr in reportdict["longrepr"]["chain"]:
++                        unserialize_entries(s_rtb)
++                        chain.append((
++                            ReprTraceback(**s_rtb),
++                            ReprFileLocation(**s_rc) if s_rc is not None else None,
++                            descr,
++                        ))
++                    exception_info = ExceptionChainRepr(chain)
++                else:
++                    exception_info = ReprExceptionInfo(
++                        reprtraceback=ReprTraceback(**reprtraceback),
++                        reprcrash=ReprFileLocation(**reprcrash),
++                    )
+ 
+                 for section in reportdict["longrepr"]["sections"]:
+                     exception_info.addsection(*section)
