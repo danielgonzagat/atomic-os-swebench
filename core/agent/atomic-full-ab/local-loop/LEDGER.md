@@ -171,3 +171,21 @@ catastrophic read-loop (40 steps, 3.49M tokens) caused by CLASS-S1-A.
 ### Model-confounded / variance (recorded, not representation)
 - atomic token use is high + high-variance (flask same task: 72k in R2' vs 240k here) = DeepSeek vs Claude.
   Tracked as context; the loop only closes representation gaps.
+
+### CLASS-S1-A fix — VALIDATED (pylint re-run with line-range read)
+- Re-ran pylint-7080 atomic with the fix: line-range reads now WORK (transcript s3-s18 all return real
+  content "Atomic read …Lx-Ly", no more signature-fallback). Catastrophe halved: 3.49M→1.44M tokens,
+  40→21 steps. So the representation gap is genuinely closed + verified by number.
+- BUT atomic still did NOT solve pylint-7080 (explored 18 reads, gave up, 0 edits). Native also failed
+  (committed a wrong fix). pylint-7080 is hard ONE-SHOT (subtle ignore-paths-for-files, no test feedback).
+  This residual is MODEL localization + TASK difficulty, NOT representation — both arms fail it. Honest:
+  not every fix flips a hard-task outcome; do not hardcode.
+
+## Next exact step
+The decisive lever to move HARD instances (where both arms fail one-shot) is TEST FEEDBACK: let each arm
+iterate against the real failing test. Build the warm-container feedback gate (instance Docker image kept
+alive; per run_tests: apply arm diff + test_patch in /testbed, run F2P+P2P, revert) so both arms iterate
+fairly — then atomic's pre-disk-validity guarantee + iteration can actually pull AHEAD on hard tasks
+(native may iterate into a wrong fix; atomic edits stay valid). Re-run the suite WITH feedback; compare
+resolved-rate. Alternatively/also: widen the suite (more instances) for a tighter resolved-rate number.
+Headline so far: atomic 4/5 = native 4/5 (one-shot); 2 representation CLASSES closed (R1-A, S1-A).
