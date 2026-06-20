@@ -41,11 +41,13 @@ The system formulates causal hypotheses from observed patterns, designs interven
 | Languages | 11 (WASM tree-sitter) |
 | Self-host LOC | 64,242 (496 files) |
 | Multi-agent confluence | 92% (300 edits) |
-| Corpus records | 10,063 |
+| Corpus records | 56 (disproof witnesses) |
 | Hash chain | Valid |
-| Prediction accuracy | 75% |
-| Calibrated confidence | 87% |
-| Non-template hypotheses | 100% (45/45) |
+| t3_corpus verification | 171,712 pairs, 0 false-independence |
+| Truth-funnel emergence | 38.7% vs 0% (P=0.4, 300 trials) |
+| Self-expansion emergence | 5/5 vs 1/5 (LLM writes tool, +400%) |
+| Auto-synthesized gates | 1 (lift 15.67x, holdout 100%) |
+| Darwin-Gödel cycle | 4-step closed loop, 31s |
 | Continuous cycles | 12 (0 crashes) |
 
 ## 4. Related Work
