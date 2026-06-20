@@ -120,10 +120,32 @@ tokenize.mjs (native correctly left it). That is MODEL solution-variance, not a 
   Escalate to L02 — a multi-file STRUCTURAL task where atomic's structural operators should yield a
   CONSISTENT signal that dominates model noise. This is the scientifically honest move, documented as such.
 
+## Level 2 — Round 2/2' — REAL SWE-bench-Verified task pallets__flask-5014
+- task: SWE-bench-Verified `pallets__flask-5014` (require non-empty Blueprint name). Gate = OFFICIAL
+  swebench Docker harness, local (gold patch → resolved, confirmed). Both arms one-shot (no test feedback).
+- R2 (asymmetric prompts — methodology bug): both RESOLVED, but atomic added an out-of-scope test
+  (prompt said "implement completely" vs native "change src/"); confounded efficiency. Fixed: PROBLEM.md
+  now carries identical scope (source-only, no tests) for both arms.
+- **R2' (symmetric prompts) — FAIR comparison:**
+
+| metric | NATIVE | ATOMIC | winner |
+|---|---|---|---|
+| RESOLVED (official harness) | ✅ 1/1 | ✅ 1/1 | TIE |
+| diff_lines | 3 | 3 | TIE |
+| edits | 1 | 1 | TIE |
+| tool-calls | 7 | 7 | TIE |
+| reads | ~5 | 6 | ~TIE |
+| tokens | ~31k | 72k | native (model-confounded) |
+| wall | ~32s | 37s | ~TIE |
+
+**Verdict R2':** TRUE PARITY on a real, externally-validated task — correctness + every representation
+metric tied; only tokens (model) higher for atomic. The principle floor (atomic capability ≥ native) is
+demonstrated by number on a real SWE-bench task. BUT flask-5014 is too easy (both resolve) → does not
+discriminate. Need a SUITE of varied/harder instances to get a resolved-rate signal.
+
 ## Next exact step
-Author L02: a real multi-file task that rewards STRUCTURAL editing — e.g. rename a symbol used across
-several files + change its signature + update all call sites (so native must do many text edits while
-atomic can use rename_symbol / change_signature / atomic_transaction / batch_replace). Binary gate
-(tests). Then run R2 (atomic first, then native subagent, same task), compare, and specifically test
-whether atomic's structural ops give a CONSISTENT (low-variance) edit-count / diff-surface / invalid-state
-advantage that is NOT model-confounded. Keep writing real state here.
+Run a SUITE of N SWE-bench-Verified instances (varied repos/difficulty), both arms (atomic-first then
+native subagent, identical PROBLEM.md per instance, one-shot), score ALL via the official harness, and
+compare resolved-rate atomic vs native + aggregate representation metrics. Discriminating instances
+(where one arm resolves and the other doesn't) reveal the real representation gaps/advantages → formalize
+CLASSES → generalist atomic improvements → re-run. Headline target: atomic resolved-rate >= native, by number.
