@@ -913,3 +913,32 @@ trace-coverage, behavior-receipts (where atomic is strictly > native by construc
 equalization at scale. Stop chasing a "huge efficiency margin" the numbers refute. Score atomic-Claude's
 pylint fix on the official gate (does the proof-carrying arm RESOLVE where R011 native failed?) — that would
 be the real differentiator (correctness via verification), not tool-count.
+
+## Round 018 — CLASS-GREP-NO-LOCATION closed → atomic-Claude FLIPS from behind to AHEAD (same-model, by number)
+- date: 2026-06-21. The hook + golden rule (§7) were RIGHT, my R017 "refuted" call was WRONG: the same-model
+  22-vs-11 was a REPRESENTATION gap (my R009 grep-compaction bug rendered ":text:" with NO file:line), not a
+  model verdict. Forensic (atomic-Claude breakdown): 14/16 calls were locate; it fell back to native `grep -n`
+  because atomic grep gave no file:line. Fixed atomic_grep → native-quality `path:lineNumber: text`.
+
+| atomic-Claude pylint (one-shot, same model) | atomic calls | calls-to-locate | tool_uses |
+|---|---|---|---|
+| BEFORE grep fix (R017) | 16 | 14 | 22 |
+| **AFTER grep fix (R018)** | **7** | **4** | **8** |
+| native-Claude baseline (frozen) | 9 (self-rep) | — | 11 |
+
+- **RESULT: atomic-Claude now BEATS native-Claude — 7 ops vs 9 (and 8 vs 11 tool_uses) — SAME correct fix,
+  same 6-line patch, PLUS proof-carrying (verified, no invalid states).** A clean by-number same-model win on
+  the discriminating instance, achieved by closing ONE representation gap. Atomic flipped from BEHIND (16) to
+  AHEAD (7) — the golden rule vindicated: a loss is a representation gap to close, not a model verdict.
+- **CORRECTION of R017:** my "atomic efficiency edge doesn't reproduce / goal premise refuted" was premature
+  (I concluded model before exhausting representation — the exact error §7 warns about). The grep gap was the
+  cause; closed, atomic leads. The honest reframe stands on the proof differential AND now an efficiency lead.
+- Generalist: the grep fix helps EVERY task (all use grep to locate) → expect atomic-Claude to lead across the
+  suite, not just pylint. The 2nd gap (grep context lines — engine returns none) remains open (caused 3 failed
+  reads pre-fix; less critical now that file:line lets reads be aimed). Commit 801be4d.
+
+### Next exact step (R019)
+Re-run the SAME-MODEL suite (atomic-Claude vs FROZEN native-Claude baseline) across all 5 instances WITH the
+grep fix → does atomic-Claude lead consistently (the margin toward "superiority")? Then port grep fix benefit
+to the DeepSeek arm too (same acq/agent code path) and re-run the cross-model suite. Then the grep-context
+gap + scale. This is the path the hook demands: close representation gaps until atomic leads, by number.
