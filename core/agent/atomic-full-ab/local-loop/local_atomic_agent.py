@@ -179,7 +179,7 @@ def main():
 
     metrics = {"arm": "atomic-cli-deepseek-v4-pro", "task": args.task, "workdir": workdir,
                "steps": 0, "tool_calls": {}, "edits_applied": 0, "invalid_states_prevented": 0,
-               "reads": 0, "run_tests_calls": 0, "tokens": 0, "gate_pass": False,
+               "reads": 0, "body_context_reads": 0, "run_tests_calls": 0, "tokens": 0, "gate_pass": False,
                "diff_lines": 0, "wall_s": 0.0, "transcript": []}
     t0 = time.time()
 
@@ -224,7 +224,7 @@ def main():
     for step in range(1, args.max_steps + 1):
         metrics["steps"] = step
         step_tools = active_tools
-        if metrics["edits_applied"] == 0 and metrics["reads"] > 0 and not pre_edit_topology_prompted:
+        if metrics["edits_applied"] == 0 and metrics["body_context_reads"] > 0 and not pre_edit_topology_prompted:
             messages.append({"role": "user", "content": (
                 "Before the first edit, choose the smallest implementation topology over the files you already read. "
                 "Reply with text only and no tool call: name the canonical implementation location, any delegating wrappers, "
@@ -370,6 +370,11 @@ def main():
                 if fn in ("atomic_read", "atomic_outline", "atomic_grep", "atomic_survey", "atomic_read_many"):
                     metrics["reads"] += 1
                     reads_since_edit += 1
+                # L01-H: choose topology only after BODY-level context (real code bodies), not mere
+                # navigation (survey/outline/grep). Track body reads separately so the pre-edit topology
+                # turn fires after atomic_read/atomic_read_many — generalist (any model, any task).
+                if fn in ("atomic_read", "atomic_read_many"):
+                    metrics["body_context_reads"] += 1
                 before = git_diff(workdir)
                 res, ok = atomic_call(workdir, tool, call_args)
                 after = git_diff(workdir)
@@ -404,7 +409,7 @@ def main():
     metrics["wall_s"] = round(time.time() - t0, 1)
     Path(args.out).write_text(json.dumps(metrics, indent=2))
     print(f"ATOMIC DONE gate_pass={metrics['gate_pass']} steps={metrics['steps']} edits={metrics['edits_applied']} "
-          f"reads={metrics['reads']} invalid_prevented={metrics['invalid_states_prevented']} "
+          f"reads={metrics['reads']} body_reads={metrics['body_context_reads']} invalid_prevented={metrics['invalid_states_prevented']} "
           f"diff_lines={metrics['diff_lines']} tokens={metrics['tokens']} wall={metrics['wall_s']}s")
 
 
