@@ -882,3 +882,34 @@ the model ceiling honestly (it composes the thesis; faking it destroys it).
   the weak model on hard tasks; (3) full-benchmark scale — needs real budget (hundreds of $, days). The
   literal "DeepSeek-atomic ≫ Claude-native in EVERYTHING on BOTH full benchmarks" is bounded by the model gap
   (hard tasks) + cost; the same-model axis is where the superiority is real and provable. No facade.
+
+## Round 017 — SAME-MODEL axis MEASURED (atomic-Claude vs native-Claude, pylint, one-shot) — capstone edge does NOT reproduce
+- date: 2026-06-21. Clean atomic-Claude driver (acq.py) built + working. Fair no-hint pylint, one-shot, same model (Claude).
+
+| arm | tool_uses (API) | atomic/native ops (self-rep) | fix | files |
+|---|---|---|---|---|
+| native-Claude (frozen) | 11 | 9 | _is_ignored_file on yielded files | 1 (6 lines) |
+| atomic-Claude (acq.py) | 22 | 13 | _is_ignored_file on yielded files (SAME root cause) | 1 (6 lines) |
+
+- **HONEST CORRECTION (anti-facade):** atomic-Claude used MORE tool-calls than native-Claude (22 vs 11; 13 vs
+  9 ops), NOT the "½ tool-uses" the capstone claimed. The same-model efficiency edge does NOT reproduce on
+  this clean one-shot measurement. My earlier checkpoint citing "atomic-Claude ½ tool-uses → same-model is
+  where atomic wins hugely" is REFUTED by this number. (The capstone was WITH feedback + may have been a
+  noisier/over-favorable read; one-shot same-model shows atomic ≈ or slightly BEHIND native on count.)
+- **Per the golden rule (representation-first):** atomic's per-op overhead (each call = a separate
+  Bash→acq.py→node spawn; the model must use the atomic tool forms) is real friction for a model already
+  fluent in native tools. Atomic's value does NOT show up as fewer tool-calls for a strong model — it shows
+  up as the PROOF/correctness GUARANTEE (verified actions, no invalid on-disk states). Same fix, same files.
+- **REFRAMED THESIS (what the numbers actually support):** atomic's defensible edge is the PROOF GUARANTEE +
+  helping a WEAK model reach parity (equalization: DeepSeek-atomic 4/5 == Claude-native 4/5). It is NOT "≫
+  native in everything with huge margin" on efficiency — no measurement (cross-model OR same-model) supports
+  that. The goal's literal "huge superiority in everything" is contradicted by the numbers; the real,
+  defensible value is (a) equalization of weaker models and (b) proof-carrying correctness native lacks.
+
+### Next exact step (R018)
+The honest, number-supported value of atomic = PROOF + equalization, NOT raw efficiency dominance. So the
+loop's real product win is the GUARANTEE dimension: measure/strengthen invalid-states-prevented,
+trace-coverage, behavior-receipts (where atomic is strictly > native by construction) AND the weak-model
+equalization at scale. Stop chasing a "huge efficiency margin" the numbers refute. Score atomic-Claude's
+pylint fix on the official gate (does the proof-carrying arm RESOLVE where R011 native failed?) — that would
+be the real differentiator (correctness via verification), not tool-count.
