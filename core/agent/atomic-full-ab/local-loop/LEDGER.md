@@ -538,3 +538,40 @@ distributed lock or run frozen-isolated (as R008 did). emergence-loop launchd bo
 3. Attack read-output verbosity (the token wall): an agent-layer clean read result (strip the byte-class
    jargon headline, surface code) — measure the token drop. Generalist.
 4. Escalate to a harder multi-file instance where atomic's structural ops produce signal.
+
+---
+
+## Round 009 — token wall located + perception-compaction built (NOT yet landed: noise-bound proof)
+- date: 2026-06-21 (cognitive-prosthesis /goal: atomic = symbolic half raising any model's effective ceiling)
+- **MEASURED where ATOMIC's tokens go (instrumented per-step):** prompt_tokens = 71,653 (90%);
+  completion_tokens (DeepSeek reasoning+content output) = 7,554 (10%). The cost is NOT the model's reasoning
+  — it is the RESEND of the growing history every step. Each atomic tool result was capped at `body[:6000]`
+  and ALL accumulate in the resent prompt → it balloons 2.7k→16.5k tokens by step 8. The 6000-char results
+  are mostly NOISE: a read's JSON wrapper (sha256, columns, target, mode, resolvedSelector, language) around
+  ~1176 chars of code; a survey returns **46,742 chars** of signature dumps (capped to 6000, rides forever).
+  This is MY representation (the cap + verbose engine JSON + no history management) — NOT "DeepSeek verbosity".
+- **Built + UNIT-VALIDATED perception-compaction (generalist, agent-layer, in frozen worktree):** atomic_call
+  now parses the engine JSON and returns LEAN perception — code + `file:start-end` for reads, compact
+  `sym@Lline` lines for surveys, status headline for edits; defensive fallback to raw-capped on any parse
+  failure (never lose info → never regress). Unit-measured: read result 1956→1203 chars; **survey 46,742→4,301**;
+  per-tool-result in a live run dropped 6000→~1500. This is the /goal's "percepção pré-digerida" made real.
+- **HONEST result on requests-1921 (single run, compaction ON):** steps 10, reads 8, tokens 80,984, wall 127s,
+  **patch CLEANER: 4 lines (the canonical `for k,v in list(merged_setting.items()): if v is None: del`) vs the
+  prior 8-line atomic fix.** Per-result size dropped as designed. BUT total tokens did NOT drop (80.9k vs 79.2k
+  baseline) because the model took MORE steps this run (exploration variance). **DeepSeek exploration variance
+  on this trivial task is huge (same agent across runs: 54k/68k/79k/81k tokens) and DOMINATES the
+  representation signal.** So the aggregate token benefit of compaction is NOT provable here — requests-1921 is
+  exhausted as a measurement instrument (noise > signal), exactly the L01/flask noise-bound precedent.
+- **What IS proven (reproducible):** (1) the token cost driver = resent bloated tool results (90% prompt);
+  (2) compaction shrinks per-result 6000→~1500 (unit test) and yields a cleaner canonical patch (4 vs 8 lines).
+  **What is NOT proven:** that compaction lowers TOTAL tokens — needs a harder task where reads compound, or
+  N≥3 averaged runs. Per "sem número, sem afirmação", NOT landed to canonical yet; staged in /tmp/atomic-frozen.
+- **Honest boundary (falsifiability lock):** I cannot measure cognitive-layer gains against trivial-task
+  exploration noise. The fair tool-call result still stands (R008-CORRECTION: atomic 6 vs native 14).
+
+### Next exact step (R010)
+1. ESCALATE to a HARDER multi-file SWE-bench-Verified instance (more reads → compaction's per-result savings
+   COMPOUND → the token signal exceeds exploration noise). Land compaction there if it proves out by number.
+2. Run BOTH model arms (DeepSeek-atomic AND same-model atomic-Claude via ac.py) every round = the permanent
+   representation×model isolation axis the /goal mandates (separate cognition-gain from model-gain by number).
+3. Keep the FAIR identical-no-hint prompt protocol. Compaction staged + unit-validated in frozen worktree.
