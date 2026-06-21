@@ -34,9 +34,12 @@ ATOMIC_CALL = os.environ.get(
 
 # ── DeepSeek client (reasoning model: content may be empty when tool_calls present) ──
 def deepseek(messages, tools):
-    body = json.dumps({"model": MODEL, "messages": messages, "tools": tools,
-                       "temperature": float(os.environ.get("DEEPSEEK_TEMP", "0")),
-                       "max_tokens": 4000}).encode()
+    payload = {"model": MODEL, "messages": messages,
+               "temperature": float(os.environ.get("DEEPSEEK_TEMP", "0")),
+               "max_tokens": 4000}
+    if tools:
+        payload["tools"] = tools
+    body = json.dumps(payload).encode()
     req = urllib.request.Request("https://api.deepseek.com/v1/chat/completions", data=body,
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {API_KEY}"})
     for attempt in range(5):
@@ -166,6 +169,7 @@ def main():
     ap.add_argument("--gate", default="node --test")
     ap.add_argument("--out", required=True)
     ap.add_argument("--max-steps", type=int, default=60)
+    ap.add_argument("--hint-cmd", default="", help="run once at start; output = localization anchor (e.g. failing-test traceback)")
     args = ap.parse_args()
 
     workdir = str(Path(args.workdir).resolve())
@@ -197,24 +201,67 @@ def main():
         system = ("You are the Atomic-CLI coding agent. Solve the task by editing a real repository using "
                   "ONLY atomic tools, plus run_tests to verify. " + survey + lean + "Then run_tests; iterate until "
                   "fully green, then STOP with a short summary and NO tool call. Paths are relative to the repo root.")
-    user = f"# Repository files\n{tree}\n\n# Your task\n{task}\n\nBegin. Use atomic tools only."
+    hint = ""
+    if args.hint_cmd:
+        try:
+            ho = subprocess.run(args.hint_cmd, shell=True, capture_output=True, text=True, timeout=200).stdout
+        except Exception:
+            ho = ""
+        if ho.strip():
+            hint = ("\n\n# Failing test output (your localization anchor — read this FIRST to find where to fix)\n"
+                    + ho[-2800:] + "\n")
+    user = f"# Repository files\n{tree}{hint}\n\n# Your task\n{task}\n\nBegin. Use atomic tools only."
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
     last_pass = False
     reads_since_edit = 0
     empties = 0
     forced = False
+    green_minimize_prompted = False
+    green_minimize_active = False
+    green_minimize_start_lines = 0
+    green_minimize_edits = 0
+    pre_edit_topology_prompted = False
+    pre_edit_topology_active = False
     # CLASS-S2-A: bound analysis paralysis. A model that over-reads (DeepSeek read 38× / 0 edits on
     # pylint, never entering the feedback loop) needs the loop to FORCE a commit. After this many reads
     # with no edit, offer ONLY edit+test tools + a firm steer. Not blind (ample context already gathered);
     # feedback (run_tests) lets it refine. Generalist (any over-reading model, any task).
     FORCE_EDIT_AFTER = 12
     EDIT_TEST_NAMES = {"atomic_replace", "atomic_create", "run_tests"}
+    MINIMIZE_NAMES = {"atomic_replace", "run_tests"}
 
     for step in range(1, args.max_steps + 1):
         metrics["steps"] = step
         step_tools = active_tools
-        if reads_since_edit >= FORCE_EDIT_AFTER:
+        if metrics["edits_applied"] == 0 and metrics["reads"] > 0 and not pre_edit_topology_prompted:
+            messages.append({"role": "user", "content": (
+                "Before the first edit, choose the smallest implementation topology over the files you already read. "
+                "Reply with text only and no tool call: name the canonical implementation location, any delegating wrappers, "
+                "and why this preserves public exports while minimizing changed bytes. If multiple exported functions need "
+                "the same semantics, prefer one canonical implementation plus wrappers before writing duplicated logic.")})
+            metrics["transcript"].append(f"s{step} PRE-EDIT-TOPOLOGY requested")
+            pre_edit_topology_prompted = True
+            pre_edit_topology_active = True
+        if last_pass and not green_minimize_prompted and not NO_GATE:
+            current_diff = git_diff(workdir)
+            green_minimize_start_lines = diff_lines(current_diff)
+            messages.append({"role": "user", "content": (
+                f"The acceptance gate is green. Current diff surface is {green_minimize_start_lines} changed lines. "
+                "You get ONE bounded diff-minimization pass: if a strictly smaller equivalent patch is obvious "
+                "from your own edits (for example by sharing one canonical helper instead of duplicated logic), "
+                "emit exactly one atomic_replace, then run_tests. If no strictly smaller equivalent is obvious, "
+                "STOP with no tool call. Do not read more files and do not broaden behavior.")})
+            metrics["transcript"].append(f"s{step} GREEN-MINIMIZE offered (diff_lines={green_minimize_start_lines})")
+            green_minimize_prompted = True
+            green_minimize_active = True
+        if pre_edit_topology_active:
+            step_tools = []
+            metrics["transcript"].append(f"s{step} PRE-EDIT-TOPOLOGY tools withheld (text-only)")
+        elif green_minimize_active:
+            allowed = {"run_tests"} if green_minimize_edits >= 1 else MINIMIZE_NAMES
+            step_tools = [t for t in active_tools if t["function"]["name"] in allowed]
+        elif reads_since_edit >= FORCE_EDIT_AFTER:
             step_tools = [t for t in active_tools if t["function"]["name"] in EDIT_TEST_NAMES]
             if not forced:
                 messages.append({"role": "user", "content": (
@@ -238,6 +285,13 @@ def main():
             metrics["transcript"].append(f"s{step} SAY: {' '.join(msg['content'].split())[:200]}")
 
         if not calls:
+            if pre_edit_topology_active:
+                decision = ' '.join((msg.get("content") or "").split())[:400]
+                metrics["transcript"].append(f"s{step} PRE-EDIT-TOPOLOGY decision: {decision}")
+                pre_edit_topology_active = False
+                empties = 0
+                messages.append({"role": "user", "content": "Now implement that topology with the smallest faithful atomic edit(s), then run_tests."})
+                continue
             empties += 1
             if last_pass or (NO_GATE and metrics["edits_applied"] > 0):
                 metrics["transcript"].append(f"s{step} DONE (no tool call{'; one-shot fix submitted' if NO_GATE else '; gate green'})")
@@ -260,6 +314,13 @@ def main():
                 a = {}
             metrics["tool_calls"][fn] = metrics["tool_calls"].get(fn, 0) + 1
 
+            if pre_edit_topology_active:
+                res = ("PRE-EDIT TOPOLOGY DECISION REQUIRED — reply in text only, no tool call. "
+                       "Choose the canonical implementation location and delegating wrappers before the first edit.")
+                metrics["transcript"].append(f"s{step} {fn} REFUSED (pre-edit topology active)")
+                messages.append({"role": "tool", "tool_call_id": c["id"], "content": res})
+                continue
+
             # CLASS-S2-A teeth: when force-edit is active, REFUSE reads at dispatch (the model ignores a
             # restricted schema and re-emits reads from history). Not blind — it has FORCE_EDIT_AFTER+ reads
             # of context; refusing further reads makes edit the only productive move. Feedback then refines.
@@ -268,6 +329,22 @@ def main():
                        "Emit atomic_replace (or atomic_create) with your single best fix NOW" +
                        ("." if NO_GATE else "; then run_tests will show if it's right and you can refine."))
                 metrics["transcript"].append(f"s{step} {fn} REFUSED (force-edit active)")
+                messages.append({"role": "tool", "tool_call_id": c["id"], "content": res})
+                continue
+            if green_minimize_active and fn in {"atomic_survey", "atomic_read_many", "atomic_outline", "atomic_read", "atomic_grep"}:
+                res = ("READING DISABLED — gate is already green and this is a bounded diff-minimization pass. "
+                       "Use exactly one atomic_replace if it strictly shrinks the accepted diff; otherwise stop.")
+                metrics["transcript"].append(f"s{step} {fn} REFUSED (green-minimize active)")
+                messages.append({"role": "tool", "tool_call_id": c["id"], "content": res})
+                continue
+            if green_minimize_active and green_minimize_edits >= 1 and fn in {"atomic_replace", "atomic_create"}:
+                res = "DIFF-MINIMIZATION EDIT LIMIT REACHED — run_tests now; do not make a second post-green edit."
+                metrics["transcript"].append(f"s{step} {fn} REFUSED (green-minimize edit limit)")
+                messages.append({"role": "tool", "tool_call_id": c["id"], "content": res})
+                continue
+            if green_minimize_active and fn == "atomic_create":
+                res = "FILE CREATION DISABLED — post-green minimization may only shrink an accepted diff with atomic_replace."
+                metrics["transcript"].append(f"s{step} {fn} REFUSED (green-minimize create disabled)")
                 messages.append({"role": "tool", "tool_call_id": c["id"], "content": res})
                 continue
 
@@ -282,6 +359,11 @@ def main():
                     res = f"pass={np_} fail={nf_} all_green={last_pass}\n" + gate_out[-1500:]
                     if last_pass:
                         reads_since_edit = 0
+                        if green_minimize_active:
+                            minimized_lines = diff_lines(git_diff(workdir))
+                            metrics["transcript"].append(
+                                f"s{step} GREEN-MINIMIZE result diff_lines={minimized_lines} start={green_minimize_start_lines}")
+                            green_minimize_active = False
                 metrics["transcript"].append(f"s{step} run_tests -> {res.splitlines()[0][:120]}")
             elif fn in DISPATCH:
                 tool, mapper = DISPATCH[fn]
@@ -303,9 +385,13 @@ def main():
                 after = git_diff(workdir)
                 if fn in ("atomic_replace", "atomic_create"):
                     if after != before:
+                        if last_pass:
+                            last_pass = False  # a new edit invalidates the previous green gate
                         metrics["edits_applied"] += 1
                         reads_since_edit = 0
                         forced = False
+                        if green_minimize_active and fn == "atomic_replace":
+                            green_minimize_edits += 1
                     elif any(m in res.lower() for m in REFUSAL_MARKERS):
                         metrics["invalid_states_prevented"] += 1
                 metrics["transcript"].append(f"s{step} {fn}({json.dumps(a)[:90]}) -> {res.splitlines()[0][:120] if res else '(empty)'}")
