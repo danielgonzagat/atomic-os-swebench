@@ -764,6 +764,41 @@ memory/corpus layer (edit-correction is its first seed).
 
 ---
 
+## Round 015 — pylint-7080 feedback thesis test — INCONCLUSIVE (harness/API liveness gap exposed)
+- date: 2026-06-21. Atomic-only DeepSeek V4 Pro on `pylint-dev__pylint-7080`, warm-container feedback
+  gate. Native baseline was NOT re-fired.
+- attempt A evidence: `/private/tmp/atomic-r015-20260621144821`.
+  - Agent produced a source edit (`pylint/lint/pylinter.py`) but no final result JSON/stdout.
+  - Manual gate on the intermediate diff: `15 passed / 1 failed`, failure was
+    `AttributeError: 'PyLinter' object has no attribute '_ignore_paths'`.
+  - Process was manually interrupted after it stopped producing observable progress.
+- attempt B evidence: `/private/tmp/atomic-r015b-20260621145657`.
+  - Relaunched from a clean clone at base commit `3c5eca2ded3dd2b59ebaf23eb289453b5d2930f0` under an
+    external 900s wrapper timeout.
+  - Agent produced a different source edit (`pylint/lint/expand_modules.py`) but did not finish.
+  - The warm container `pylint7080_warm` died with `Exited (137)` during the round. A manual gate before
+    restart reported Docker container-not-running and emitted `# tests 16 / # pass 0 / # fail 0`, which is
+    an invalid feedback shape for a failed infrastructure command.
+  - After restarting the same container name, manual gate on the observed diff still failed:
+    `15 passed / 1 failed`, failure `assert 20 == 0`.
+  - Wrapper ended `status=timeout`, `rc=124`, `wall_s=900.1`; no final result JSON.
+
+**Verdict R015:** no valid thesis measurement. This is not a solved round and not a dominance result.
+The useful finding is a harness/product gap:
+- **OPEN, CLASS=WARM-CONTAINER-LIVENESS-FEEDBACK:** if the SWE warm container is stopped/OOM-killed, the gate
+  must surface an infrastructure failure (`fail >= 1`, explicit reason, non-test metric excluded from model
+  scoring) instead of emitting `pass 0 / fail 0` and letting the agent treat it like normal test feedback.
+- **OPEN, CLASS=MODEL-CALL-LIVENESS:** hard rounds need a product-level request/run timeout and heartbeat in
+  the Atomic Agent CLI result envelope; a missing final JSON is not an acceptable product behavior.
+
+### Next exact step (R016)
+Close the liveness classes before re-running the thesis test: make `swe_docker_gate.sh` fail explicitly when
+the target container is not running (or restart through a receipt-bearing warm-container manager), and run
+`pylint-7080` under a first-class bounded Atomic runner so timeout produces a structured result JSON. Then
+repeat the same `pylint-7080` feedback round; do not interpret R015 as a model ceiling.
+
+---
+
 ## Round 015 — THESIS TEST on pylint-7080 WITH feedback (DeepSeek-atomic, full cognitive stack)
 - date: 2026-06-21. Warm-container feedback gate (validated: gold patch → 16 passed). Full stack: compaction +
   edit-correction + line-range reads + force-edit bound. max-steps 30.
@@ -829,3 +864,21 @@ atomic ≫ native, model-controlled) — this is where "huge superiority" is rea
 layer** (active memory/corpus — the only thing that can lift the WEAK model on hard tasks); (3) **scale** the
 Verified suite for statistical power (budget-permitting). Do NOT fake the cross-model hard-task win — record
 the model ceiling honestly (it composes the thesis; faking it destroys it).
+
+## Round 017 — same-model axis BLOCKED on driver; next step recorded (honest)
+- date: 2026-06-21. Attempted the same-model arm (atomic-Claude via ac.sh) on pylint — the cleanest proof the
+  goal's intent ("atomic ≫ native") is real (capstone: atomic-Claude ½ the tool-uses of native-Claude on
+  pylint). BLOCKER: ac.sh passes raw JSON tool-args through the shell → JSON.parse fails / cwd falls back to
+  repo-root (the path-resolution gotcha local_atomic_agent.py solves by building args in Python, never shell).
+- **R017 next step (precise):** build a clean atomic-Claude driver — either (a) a tiny Python `acq.py` that
+  imports local_atomic_agent.atomic_call and takes (workdir, tool, json) without shell-quoting, OR (b) drive
+  the atomic-Claude subagent through the SAME local_atomic_agent wrapped-tool schemas (not raw engine tools).
+  Then run the same-model suite (atomic-Claude vs FROZEN native-Claude baseline) → the model-controlled proof
+  of atomic superiority (where "huge margin" is honest, per doctrine §7). This costs NO DeepSeek balance
+  (Claude subagents) — the budget-friendly path to the goal's provable core.
+- **Honest checkpoint:** representation walls on Level-1 SWE-bench-Verified are CLOSED (parity 4/5==4/5,
+  tool-calls 23==23 + proof differential). Remaining levers toward the goal, all multi-session: (1) clean
+  same-model driver + suite (above) — provable atomic edge, no $; (2) cognitive corpus/memory layer — lifts
+  the weak model on hard tasks; (3) full-benchmark scale — needs real budget (hundreds of $, days). The
+  literal "DeepSeek-atomic ≫ Claude-native in EVERYTHING on BOTH full benchmarks" is bounded by the model gap
+  (hard tasks) + cost; the same-model axis is where the superiority is real and provable. No facade.
