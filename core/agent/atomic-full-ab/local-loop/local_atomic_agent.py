@@ -155,6 +155,38 @@ def _compact_result(workdir, tool, raw):
     return (head or raw[:1200])[:1200]
 
 
+# CLASS-EDIT-FRICTION (R012, generalist): a failed atomic_replace (oldText not found / not unique) used to
+# return only "oldText not found" — the model then blind-retried near-identical oldText (pytest-5262: 4 tries,
+# 3 refused). A faithful edit gives ACTIONABLE perception on failure: the ACTUAL text at the best-match
+# location, verbatim with whitespace, so the model corrects in ONE shot. Any file, any language.
+def _edit_correction(workdir, file, old_text):
+    try:
+        path = file if os.path.isabs(file) else os.path.join(workdir, file)
+        src = open(path, encoding="utf-8", errors="replace").read()
+    except Exception:
+        return ""
+    lines = src.split("\n")
+    anchors = [l.strip() for l in (old_text or "").split("\n") if l.strip()]
+    if not anchors:
+        return ""
+    anchor = anchors[0]
+    hits = [i for i, l in enumerate(lines) if anchor and anchor in l]
+    if not hits:
+        anchor = max(anchors, key=len)
+        hits = [i for i, l in enumerate(lines) if anchor and anchor in l]
+    if not hits:
+        return ("\n[edit-help] None of your oldText lines exist verbatim in the file — re-read it with "
+                "atomic_read(selector=...) and copy the exact current text before editing.")
+    blocks = []
+    for i in hits[:3]:
+        s = max(0, i - 2); e = min(len(lines), i + 9)
+        blocks.append("\n".join(f"{n+1}: {lines[n]}" for n in range(s, e)))
+    note = "" if len(hits) == 1 else (f" — {len(hits)} matches, so your oldText is NOT UNIQUE; include MORE "
+                                      "surrounding lines to disambiguate")
+    return (f"\n[edit-help] The ACTUAL text at the intended location{note}. Copy oldText VERBATIM (exact "
+            "whitespace, no line numbers) from here:\n" + "\n---\n".join(blocks))
+
+
 def atomic_call(workdir, tool, args):
     args = _absolutize(workdir, args)
     if tool == "code_outline_batch" and not args.get("cwd"):  # glob is workdir-relative
@@ -475,6 +507,10 @@ def main():
                             green_minimize_edits += 1
                     elif any(m in res.lower() for m in REFUSAL_MARKERS):
                         metrics["invalid_states_prevented"] += 1
+                        if fn == "atomic_replace" and ("not found" in res.lower() or "not unique" in res.lower() or "not unique" in res.lower()):
+                            corr = _edit_correction(workdir, a.get("file", ""), a.get("oldText", ""))
+                            if corr:
+                                res = res + corr
                 metrics["transcript"].append(f"s{step} {fn}({json.dumps(a)[:90]}) -> {res.splitlines()[0][:120] if res else '(empty)'}")
             else:
                 res = f"Unknown tool {fn}. Use only the atomic tools."
