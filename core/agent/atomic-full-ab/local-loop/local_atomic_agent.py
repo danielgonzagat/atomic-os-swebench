@@ -140,14 +140,28 @@ def _compact_result(workdir, tool, raw):
             f = _rel(workdir, d.get("file", ""))
             names = ", ".join(f"{sy.get('selector')}@L{sy.get('startLine')}" for sy in d["symbols"] if isinstance(sy, dict))
             return f"{f}: {names}"
-        # grep
+        # grep — CLASS-GREP-NO-LOCATION (R018): the engine returns {path, lineNumber, line(=text)}; the old
+        # compaction looked for m['file']/m['line'] (wrong keys) → rendered ":text:" with NO file:line, so the
+        # model could not navigate to a match and had to re-grep/read (measured: 14/16 atomic-Claude calls were
+        # locate, with a native-grep fallback). Render native-Grep-quality `relpath:lineNumber: text`.
         if isinstance(d.get("matches"), list):
+            base = os.path.basename(workdir.rstrip("/"))
+            def _grep_rel(p):
+                p = p or ""
+                i = p.find(base + "/")
+                return p[i + len(base) + 1:] if i >= 0 else _rel(workdir, p)
             out = []
             for m in d["matches"]:
                 if isinstance(m, dict):
-                    out.append(f"{_rel(workdir, m.get('file',''))}:{m.get('line')}: {(m.get('text') or '').strip()}")
+                    p = _grep_rel(m.get("path") or m.get("file") or "")
+                    ln = m.get("lineNumber") if m.get("lineNumber") is not None else m.get("line_number", "")
+                    txt = (m.get("line") if isinstance(m.get("line"), str) else (m.get("text") or "")).strip()
+                    out.append(f"{p}:{ln}: {txt}")
+            note = ""
+            if d.get("limitReached") or (d.get("totalMatches") and len(out) < d.get("totalMatches")):
+                note = f"\n({len(out)} shown of {d.get('totalMatches', len(out))} matches; narrow the pattern/path for more)"
             if out:
-                return "\n".join(out[:80])
+                return "\n".join(out[:80]) + note
     except Exception:
         return raw[:6000]
     # edits / unknown: keep the headline (status), drop the JSON scaffold
