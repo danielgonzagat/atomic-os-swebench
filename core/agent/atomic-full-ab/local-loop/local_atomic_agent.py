@@ -154,6 +154,10 @@ def _compact_result(workdir, tool, raw):
             for m in d["matches"]:
                 if isinstance(m, dict):
                     p = _grep_rel(m.get("path") or m.get("file") or "")
+                    # CLASS-GREP-NOISE (R021): the engine greps atomic's OWN metadata (.atomic/ traces) +
+                    # caches → noise matches that mislead the model and bloat results. Skip non-source dirs.
+                    if any(seg in p for seg in ("/.atomic/", ".atomic/", "__pycache__/", "/.git/", ".git/", "node_modules/")):
+                        continue
                     ln = m.get("lineNumber") if m.get("lineNumber") is not None else m.get("line_number", "")
                     txt = (m.get("line") if isinstance(m.get("line"), str) else (m.get("text") or "")).strip()
                     out.append(f"{p}:{ln}: {txt}")
