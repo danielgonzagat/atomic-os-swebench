@@ -20,9 +20,14 @@ if [ -z "$diff" ]; then echo "(empty diff — make an edit first, then test)"; e
 
 TARGETS=""
 while IFS= read -r l; do [ -n "$l" ] && TARGETS="$TARGETS $l"; done < <(python3 - "$META" "${SWE_P2P_SAMPLE:-15}" <<'PY'
-import json,sys
+import json,sys,re
 m=json.load(open(sys.argv[1])); n=int(sys.argv[2])
-print("\n".join(m["FAIL_TO_PASS"] + m["PASS_TO_PASS"][:n]))
+# Keep only real pytest node ids; drop dataset junk like "[100%]" progress artifacts in PASS_TO_PASS.
+def ok(t):
+    t=t.strip()
+    if not t or re.match(r'^\[\d+%\]$', t): return False
+    return ("::" in t) or t.endswith(".py")
+print("\n".join(t for t in (m["FAIL_TO_PASS"] + m["PASS_TO_PASS"][:n]) if ok(t)))
 PY
 )
 
@@ -37,7 +42,7 @@ git checkout -- . >/dev/null 2>&1; git clean -fdq >/dev/null 2>&1 || true
 git apply /tmp/arm.diff 2>/tmp/aerr || { echo ARM_PATCH_FAILED; sed -n '1,5p' /tmp/aerr; git checkout -- . >/dev/null 2>&1; exit 3; }
 git apply /tmp/test.diff >/dev/null 2>&1 || git apply --3way /tmp/test.diff >/dev/null 2>&1 || true
 source /opt/miniconda3/bin/activate $CENV >/dev/null 2>&1 || source activate $CENV >/dev/null 2>&1 || true
-python -m pytest -p no:cacheprovider -q --no-header $TARGETS 2>&1 | tail -12
+python -m pytest -p no:cacheprovider -q $TARGETS 2>&1 | tail -12
 rc=\${PIPESTATUS[0]}
 git checkout -- . >/dev/null 2>&1; git clean -fdq >/dev/null 2>&1 || true
 exit \$rc
