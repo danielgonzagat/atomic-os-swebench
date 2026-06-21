@@ -325,6 +325,7 @@ def main():
     reads_since_edit = 0
     empties = 0
     forced = False
+    force_refused = 0  # CLASS-FORCE-EDIT-DEADLOCK: consecutive refused reads under force-edit (deadlock-spin detector)
     green_minimize_prompted = False
     green_minimize_active = False
     green_minimize_start_lines = 0
@@ -342,7 +343,7 @@ def main():
     for step in range(1, args.max_steps + 1):
         metrics["steps"] = step
         step_tools = active_tools
-        if metrics["edits_applied"] == 0 and metrics["body_context_reads"] > 0 and not pre_edit_topology_prompted:
+        if os.environ.get("ATOMIC_TOPOLOGY_TURN", "1") == "1" and metrics["edits_applied"] == 0 and metrics["body_context_reads"] > 0 and not pre_edit_topology_prompted:
             messages.append({"role": "user", "content": (
                 "Before the first edit, choose the smallest implementation topology over the files you already read. "
                 "Reply with text only and no tool call: name the canonical implementation location, any delegating wrappers, "
@@ -413,6 +414,7 @@ def main():
             messages.append({"role": "user", "content": nudge})
             continue
         empties = 0
+        deadlock_break = False
 
         for c in calls:
             fn = c["function"]["name"]
@@ -433,11 +435,19 @@ def main():
             # restricted schema and re-emits reads from history). Not blind — it has FORCE_EDIT_AFTER+ reads
             # of context; refusing further reads makes edit the only productive move. Feedback then refines.
             if reads_since_edit >= FORCE_EDIT_AFTER and fn in {"atomic_survey", "atomic_read_many", "atomic_outline", "atomic_read", "atomic_grep"}:
+                force_refused += 1
                 res = ("READING DISABLED — you have read 12+ times with no edit; you have enough context. "
                        "Emit atomic_replace (or atomic_create) with your single best fix NOW" +
                        ("." if NO_GATE else "; then run_tests will show if it's right and you can refine."))
-                metrics["transcript"].append(f"s{step} {fn} REFUSED (force-edit active)")
+                metrics["transcript"].append(f"s{step} {fn} REFUSED (force-edit active, {force_refused})")
                 messages.append({"role": "tool", "tool_call_id": c["id"], "content": res})
+                # CLASS-FORCE-EDIT-DEADLOCK: refusing reads removes the model's move without giving it
+                # edit-confidence; a model that keeps re-emitting reads will spin to max-steps (pylint:
+                # 18 wasted steps / 1.5M tokens, 0 edits). After K consecutive refused reads with still 0
+                # edits, STOP — break with an honest "could-not-commit" outcome instead of burning tokens.
+                if force_refused >= 4 and metrics["edits_applied"] == 0:
+                    metrics["transcript"].append(f"s{step} FORCE-EDIT DEADLOCK — {force_refused} refused reads, 0 edits; stopping (model would not commit)")
+                    deadlock_break = True
                 continue
             if green_minimize_active and fn in {"atomic_survey", "atomic_read_many", "atomic_outline", "atomic_read", "atomic_grep"}:
                 res = ("READING DISABLED — gate is already green and this is a bounded diff-minimization pass. "
@@ -503,6 +513,7 @@ def main():
                         metrics["edits_applied"] += 1
                         reads_since_edit = 0
                         forced = False
+                        force_refused = 0  # an edit landed → spin broken
                         if green_minimize_active and fn == "atomic_replace":
                             green_minimize_edits += 1
                     elif any(m in res.lower() for m in REFUSAL_MARKERS):
@@ -515,6 +526,9 @@ def main():
             else:
                 res = f"Unknown tool {fn}. Use only the atomic tools."
             messages.append({"role": "tool", "tool_call_id": c["id"], "content": res})
+
+        if deadlock_break:
+            break  # CLASS-FORCE-EDIT-DEADLOCK: model spun on refused reads without committing; stop the waste
 
         # light read-loop steer (NO blind lockout — keep it honest; looping is a measured class)
         if reads_since_edit and reads_since_edit % 6 == 0:
