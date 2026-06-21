@@ -742,3 +742,56 @@ even with feedback (analysis paralysis) BEFORE these landed; re-test now. If sol
 demonstrated by number on the hard instance. If not → honest MODEL ceiling, recorded (atomic-Claude solves
 it → representation sufficient, model insufficient). Then: harder multi-file instances + begin the active
 memory/corpus layer (edit-correction is its first seed).
+
+### R014 replay note — Codex continuation
+- date: 2026-06-21. Independent replay using a temporary no-topology runner at
+  `/private/tmp/r014_no_topology_agent.py`; no canonical agent code was changed.
+- evidence root: `/private/tmp/atomic-r014-20260621143411`.
+
+| instance | frozen native | R013 atomic | R014 replay steps | R014 replay tool_calls | official gate |
+|---|---:|---:|---:|---:|---|
+| requests-1921 | 7 | 7 | 8 | 8 | PASS 21/21 |
+| pytest-5262 | 5 | 6 | 9 | 8 | PASS 15/15 |
+| pytest-7982 | 5 | 5 | 5 | 4 | PASS 16/16 |
+| flask-5014 | 6 | 5 | 5 | 4 | PASS 16/16 |
+| **TOTAL** | **23** | **23** | **27** | **24** | **4/4 PASS** |
+
+- Result is consistent with the existing R014 verdict even though the raw per-instance counts differ:
+  topology-OFF preserves correctness but loses the cost objective (`27` steps / `24` tool calls vs R013
+  `23` and frozen native `23`). Do not land topology removal.
+- Next exact step remains R015: run the feedback/cognitive thesis test on `pylint-7080`, with secrets via env
+  only and no native re-run until task escalation.
+
+---
+
+## Round 015 — THESIS TEST on pylint-7080 WITH feedback (DeepSeek-atomic, full cognitive stack)
+- date: 2026-06-21. Warm-container feedback gate (validated: gold patch → 16 passed). Full stack: compaction +
+  edit-correction + line-range reads + force-edit bound. max-steps 30.
+- **RESULT: FAILED — gate_pass=False, 0 edits, 0 run_tests, 30 steps (max), 12 reads, 1.94M tokens.** DeepSeek
+  NEVER committed an edit even with feedback available — analysis paralysis persists on the hard instance.
+- **Two findings (per the golden rule: exhaust representation before concluding model):**
+  1. **MODEL ceiling (honest, falsifiability lock):** DeepSeek-atomic reached the RIGHT area (found
+     expand_modules / _is_ignored_file / ignore-paths — same region as native-Claude's fix) but would not
+     commit an edit. The capstone proved atomic-Claude solves this SAME instance on the SAME atomic layer →
+     representation SUFFICIENT, the weak model INSUFFICIENT here. Recorded, not hidden.
+  2. **NEW REPRESENTATION/HARNESS WALL (CLASS-FORCE-EDIT-DEADLOCK):** the force-edit "teeth" (refuse reads
+     after 12) did NOT induce an edit — the model kept emitting reads (s11–s30), each REFUSED, spinning 18
+     steps / ~1.5M tokens to max-steps producing NOTHING. Refusing reads removes the model's move without
+     giving edit-confidence → deadlock-spin, not a commit. Generalist (any over-reading model). The harness
+     amplified the model failure catastrophically (1.94M tokens for 0 progress).
+- **Verdict:** the cognitive stack did NOT lift DeepSeek past its one-shot ceiling on the hard instance
+  (model gap, capstone-attributed). BUT the loop found a real harness wall (force-edit deadlock-spin) that
+  wastes 1.5M tokens — closeable, generalist, independent of the model gap.
+
+### Next exact step (R016)
+Close CLASS-FORCE-EDIT-DEADLOCK (generalist): when force-edit is active and the model emits K consecutive
+REFUSED reads with still 0 edits, STOP spinning — break with an honest "could-not-localize/commit" outcome
+instead of burning to max-steps (saves ~1.5M tokens). Optionally escalate the refusal to a hard
+commit-or-stop ultimatum on the first refused read. Validate (agent-gate battery), re-run pylint-feedback,
+measure token waste drop. Then: cognitive corpus/memory layer (the real frontier) + harder multi-file tasks.
+
+### RAM hygiene (this session, at user request)
+Reaped ~22 leaked orphan atomic procs (ppid=1, dead-host stacks) + stale relay + AppleSpell (209MB) + stopped
+idle pylint7080_warm container. 4 live hosts (Claude/Codex/AGY/OMP) + their atomic stacks + Codex r014
+containers PRESERVED. RAM 6%→9% free. Honest: bulk of RAM = the 4 live agent loops + macOS wired (~3.3GB),
+not reclaimable junk; containers are tiny (3-33MiB each).
