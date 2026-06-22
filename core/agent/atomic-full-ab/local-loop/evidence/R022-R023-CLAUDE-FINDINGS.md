@@ -428,3 +428,15 @@ FORBIDDEN task-specific guidance. So the residual is bounded by model-synthesis/
 limit, NOT a representation wall I can generically close without cheating. sympy-20438: one-shot both-fail; atomic
 gate-ON 92/1 close-but-unresolved (vs pylint-7080/8898 which gate-ON RESOLVED — those were single-file algorithms;
 sympy's is multi-file architectural, the harder class).
+
+## R053 — step-budget test (max-steps 150): PARTLY my wall, but synthesis-completeness is the dominant residual
+R052 hit cap=80 at 92/1 climbing. R053 (steps=150): atomic reached 95/1 AND pivoted strategy to edit comparison.py
+(a GOLD @dispatch handler) — so the step-cap WAS partly my wall (more budget → closer + better strategy; 2 of 3
+gold files now: relational.py + comparison.py). BUT it then PLATEAUED at 95/1 for 53 steps (s95→s148) — never added
+the 3rd gold file issubset.py (the ProductSet⊆FiniteSet is_subset dispatch handler), so the last F2P test stayed
+failing. Verdict (honest, nuanced): (a) step-cap of 80 was modestly too low for hard multi-file (raise generalist —
+but adaptive, since it plateaus); (b) the DOMINANT residual is multi-handler synthesis-COMPLETENESS: the model adds
+2 of 3 @dispatch sibling handlers and misses the 3rd, plateauing. Possible lever: dispatch-family perception (when
+editing one @dispatch handler, surface the SIBLING handlers registering the same generic) — but uncertain + risks
+task-specificity. sympy-20438 NOT resolved even at 150 steps (95/1). Gate-ON loop value still shown (0-edit→95/1).
+Sympy frontier now EXHAUSTIVELY explored: 4 demolitions (16/17/18 + step-budget insight) + honest dominant residual.
