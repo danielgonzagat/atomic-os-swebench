@@ -2067,3 +2067,37 @@ R2 used 63 steps (vs R1's 12) and 667k tokens (vs R1's 81k) but STILL produced a
 
 **Domínio consecutivo: 2/2 → DOMINANCE CONFIRMED on pytest-5262**
 **PRÓXIMO PASSO EXATO**: Per §6.7, escalate complexity — move to a harder task (pylint-7080: multi-file, local-only test, warm container). Fire native baseline once, then atomic loop.
+
+---
+
+## ROUND pylint-7080-R1 — NÍVEL 2 — TASK pylint-dev__pylint-7080 (Level 2 escalation, multi-file)
+- snapshot: 3c5eca2ded3d
+- task: test_ignore_path_recursive_current_dir (LOCAL ONLY)
+
+### ATOMIC (DeepSeek V4 Pro + 17 normalizers + F8c)
+- gate=**FALSE** ✗ diff=6 lines steps=60 (cap) edits=1 tokens=**1,119,056** wall=**454.0s** quick_check=1
+- Fix approach: WRONG — didn't find root cause (path normalization). Used all 60 steps, 1.1M tokens.
+
+### NATIVE (Claude subagent, no atomic)
+- Acceptance test **PASSED** ✓ diff=**1 line** (12 with context) wall=**1107s** (18m27s)
+- Fix: `element = os.path.normpath(element)` — identical to upstream PR. Root cause: os.walk yields paths like './dir/file.py'; leading './' breaks anchored ignore-path regexes.
+- Tests: acceptance + 6 related tests pass. Precise root-cause diagnosis.
+
+### Metric table
+| Metric | NATIVE | ATOMIC | Winner |
+|--------|--------|--------|--------|
+| Correctness | ✓ passed | ✗ gate=FALSE | **NATIVE** |
+| Diff | **1 line** | 6 lines | **NATIVE** |
+| Speed | 1107s | **454s** | ATOMIC (2.4× faster but incorrect) |
+| Tokens | — | 1.1M | — |
+| Root-cause diagnosis | precise (./ prefix) | wrong approach | **NATIVE** |
+
+### NATIVE WINS Level 2. Atomic was faster but INCORRECT — speed without correctness is worthless.
+
+### Representation gap (per §7 — exhaust before concluding model)
+The atomic agent couldn't trace the cross-file call path to find the root cause (path normalization in `_is_ignored_file`). The model needs:
+1. Better cross-file tracing guidance — the bug spans the path-handling pipeline (os.walk → _discover_files → _is_ignored_file → regex match)
+2. The existing `atomic_callers` + `_existing_fn_perception` auto-injects help AFTER an edit, but the model needs guidance BEFORE editing — understanding which function to investigate
+
+### Domínio consecutivo: 0/2 (NATIVE won Level 2 round 1)
+### PRÓXIMO PASSO EXATO: develop the atomic for cross-file root-cause tracing (the Level 2 gap). Re-fire atomic on pylint-7080 after the fix. Do NOT escalate to Level 3 until Level 2 is dominated.
