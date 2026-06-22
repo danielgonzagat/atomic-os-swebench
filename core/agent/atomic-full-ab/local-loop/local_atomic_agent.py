@@ -250,6 +250,8 @@ def _edit_correction(workdir, file, old_text):
 # find a regex-match decision helper that matches an OS path-like value, normalize that value to POSIX separators,
 # and let the normal gate prove or reject the result. Generalist: scans Python source for the semantic pattern;
 # no task/file/test hardcode; gate remains the judge.
+# CLASS-WEIGHT-MACRO-COVERAGE-NO-FILE-CUTOFF: large repos can place the semantic target beyond arbitrary
+# file-count cutoffs; scan the full tracked Python file set and let the proof/gate bound correctness instead.
 def _apply_path_normalization_weight_macro(workdir):
     try:
         files = subprocess.run(["git", "ls-files", "*.py"], cwd=workdir, capture_output=True, text=True, timeout=10).stdout.splitlines()
@@ -945,7 +947,7 @@ def main():
     green_minimize_helper_surface = False  # CLASS-GREEN-MINIMIZE-HELPER-STATE-MACHINE-SURFACE: helper/state-machine
     # green patches get one extra bounded refusal because R051 showed a single advisory re-prompt still accepts a
     # surface-heavy helper. Gate remains the judge; this only buys a second attempt before accepting STOP.
-    _consec_red = 0   # CLASS-SCOPE-FIXATION (R054): consecutive red run_tests, to detect single-file fixation on a multi-file fix
+    _consec_red = 0   # CLASS-SCOPE-FIXATION (R055): consecutive red run_tests, to detect single-file fixation on a multi-file fix
     red_gate_fix_required = False  # CLASS-RED-GATE-REEDIT-LOCKOUT: after run_tests returns red for a non-empty
     # diff, the next turn must refine the patch instead of spending the remaining budget reading/retesting the same
     # failed state. The lockout is released only by a new atomic edit, then the gate can be run again.
@@ -1442,7 +1444,7 @@ def main():
                             "rerun the same test. Preserve any passing cases and make exactly one focused "
                             "atomic edit that addresses the failing assertion/error, then quick_check and run_tests."
                         ]
-                        # CLASS-SCOPE-FIXATION (R054, generalist): when the gate stays red across MANY edits all in the
+                        # CLASS-SCOPE-FIXATION (R055, generalist): when the gate stays red across MANY edits all in the
                         # SAME one or two files, the fix likely SPANS MORE FILES the model hasn't touched (sympy-16597
                         # A/B: atomic did 9 edits/11 red run_tests ALL in assumptions.py, never explored the other 5 gold
                         # files → under-scoped, lost). After 3 consecutive reds, OVERRIDE the focused-edit steer with a
@@ -1826,6 +1828,7 @@ def main():
     # FULL ACTION+RESULT RECORD: the complete message stream (every tool-call arg + every tool result
     # verbatim, as the model saw it). Skip the giant initial file-tree user turn to keep it auditable.
     metrics["messages"] = [m for i, m in enumerate(messages) if not (i == 1 and m.get("role") == "user")]
+    # CLASS-OUT-RECEIPT-PARENT-MKDIR: round receipts must materialize even when a new evidence directory is used.
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(metrics, indent=2))
