@@ -376,3 +376,12 @@ official SCORING harness handles sympy (repo-specific) → scoring/correctness n
 local iterate-loop feedback is pytest-bounded. Honest boundary recorded; not chasing sympy's native runner now
 (big repo-specific effort, uncertain payoff — sympy-20438 is hard for BOTH arms one-shot). The bare-name fix is
 kept (helps any bare-name PYTEST repo). 16th fix (deadlock-at-zero-edits) validated separately via R049 one-shot.
+
+## R046 — green-then-broke fix validation (gate-ON N=3): s1✓, s2✗ (DIFFERENT mode), s3 pending
+s1 gate_pass=True. s2 gate_pass=False but NEVER reached green (stuck pass=14/1 — an INCOMPLETE fix, the model
+couldn't close the last F2P test) → the green-then-broke restore correctly stayed DORMANT (no green to restore).
+So the 15th fix is sound (only fires on reached-green-then-broke); s2 is a distinct failure mode (incomplete fix
+= model/task limit on the hard algorithm). HONEST gate-ON reliability on pylint-8898 across R044+R045+R046 ≈ 5/7
+(~71%) vs one-shot ~25% — the proof-carrying loop is a large boost, bounded by the model's ability to close the
+last test on a hard algorithm. The two failure modes are now distinguished: (a) green-then-broke [15th fix], (b)
+incomplete-fix-never-green [model/task hardness, honest residual].
