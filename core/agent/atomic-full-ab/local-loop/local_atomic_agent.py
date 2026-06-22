@@ -21,13 +21,11 @@ The result JSON records EVERYTHING (loop manual step 3): gate pass, steps, per-t
 call counts, edits applied, invalid-states-prevented (governed refusals = a GOOD
 atomic property), reads, diff surface (lines), tokens, wall time, and a transcript.
 """
-import json, os, re, sys, time, argparse, subprocess, socket, urllib.request
+import json, os, re, sys, time, argparse, subprocess, urllib.request
 from pathlib import Path
 
 API_KEY = os.environ["DEEPSEEK_API_KEY"]
 MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-pro")
-DEEPSEEK_CALL_TIMEOUT_S = max(1.0, float(os.environ.get("DEEPSEEK_CALL_TIMEOUT_S", "120")))
-DEEPSEEK_TOTAL_TIMEOUT_S = max(DEEPSEEK_CALL_TIMEOUT_S, float(os.environ.get("DEEPSEEK_TOTAL_TIMEOUT_S", "240")))
 NODE = os.environ.get("ATOMIC_NODE_BIN", "node")
 ATOMIC_CALL = os.environ.get(
     "ATOMIC_CALL",
@@ -35,14 +33,6 @@ ATOMIC_CALL = os.environ.get(
 )
 
 # ── DeepSeek client (reasoning model: content may be empty when tool_calls present) ──
-class DeepSeekModelCallTimeout(TimeoutError):
-    pass
-
-
-def _is_timeout_error(error):
-    return isinstance(error, (TimeoutError, socket.timeout)) or "timed out" in str(error).lower()
-
-
 def deepseek(messages, tools):
     payload = {"model": MODEL, "messages": messages,
                "temperature": float(os.environ.get("DEEPSEEK_TEMP", "0")),
@@ -52,31 +42,15 @@ def deepseek(messages, tools):
     body = json.dumps(payload).encode()
     req = urllib.request.Request("https://api.deepseek.com/v1/chat/completions", data=body,
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {API_KEY}"})
-    started = time.monotonic()
     for attempt in range(5):
-        remaining_s = DEEPSEEK_TOTAL_TIMEOUT_S - (time.monotonic() - started)
-        if remaining_s <= 0:
-            raise DeepSeekModelCallTimeout(
-                f"model_call_timeout total>{DEEPSEEK_TOTAL_TIMEOUT_S:.1f}s attempts={attempt}"
-            )
-        timeout_s = max(1.0, min(DEEPSEEK_CALL_TIMEOUT_S, remaining_s))
         try:
-            with urllib.request.urlopen(req, timeout=timeout_s) as r:
+            with urllib.request.urlopen(req, timeout=300) as r:
                 d = json.loads(r.read())
                 return d["choices"][0]["message"], d.get("usage", {})
         except Exception as e:
             if attempt == 4:
-                if _is_timeout_error(e):
-                    raise DeepSeekModelCallTimeout(
-                        f"model_call_timeout total>{DEEPSEEK_TOTAL_TIMEOUT_S:.1f}s attempts={attempt + 1}"
-                    ) from e
                 raise
-            sleep_s = min(3 * (attempt + 1), max(0.0, DEEPSEEK_TOTAL_TIMEOUT_S - (time.monotonic() - started)))
-            if sleep_s <= 0:
-                raise DeepSeekModelCallTimeout(
-                    f"model_call_timeout total>{DEEPSEEK_TOTAL_TIMEOUT_S:.1f}s attempts={attempt + 1}"
-                ) from e
-            time.sleep(sleep_s)
+            time.sleep(3 * (attempt + 1))
 
 
 # ── atomic hands: dispatch one tool through atomic-call against the local workdir ──
@@ -189,8 +163,16 @@ def _compact_result(workdir, tool, raw):
             return f"{f}: {names}"
         # grep — CLASS-GREP-NO-LOCATION (R018): the engine returns {path, lineNumber, line(=text)}; the old
         # compaction looked for m['file']/m['line'] (wrong keys) → rendered ":text:" with NO file:line, so the
-        # model could not navigate to a match and had to re-grep/read (measured: 14/16 atomic-Claude calls were
-        # locate, with a native-grep fallback). Render native-Grep-quality `relpath:lineNumber: text`.
+        # call-graph (atomic_grep_calls / atomic_callers): matches are {file, line, callee} — render the call
+        # sites as `file:line  calls <callee>` + a steer to fix the root. CLASS-CALLGRAPH-BLIND-NONJS (R027).
+        if isinstance(d.get("matches"), list) and d.get("name") is not None and all(
+                isinstance(m, dict) and "callee" in m for m in d["matches"]) and d["matches"]:
+            nm = d.get("name")
+            lines = [f"{_rel(workdir, m.get('file',''))}:{m.get('line','')}  (calls {m.get('callee')})"
+                     for m in d["matches"] if isinstance(m, dict)]
+            steer = (f"\n{nm} is ALREADY called at the site(s) above — if the bug occurs there, fix that existing "
+                     f"call or {nm}'s own body (the ROOT), do NOT add a redundant duplicate guard.")
+            return f"{nm} called {len(lines)} time(s):\n" + "\n".join(lines[:60]) + steer
         if isinstance(d.get("matches"), list):
             base = os.path.basename(workdir.rstrip("/"))
             def _grep_rel(p):
@@ -320,7 +302,13 @@ def atomic_call(workdir, tool, args):
         args["cwd"] = workdir
     env = {**os.environ, "ATOMIC_DISABLE_HOT_RELOAD": "1",
            "ATOMIC_WORKSPACE_ROOT": workdir, "ATOMIC_DECLARED_WORKSPACE_ROOT": workdir,
-           "ATOMIC_EDIT_ALLOWED_ROOTS": workdir}
+           "ATOMIC_EDIT_ALLOWED_ROOTS": workdir,
+           # CLASS-CALLGRAPH-BLIND-NONJS keystone (R027): atomic-call.mjs BLANKS ATOMIC_WORKSPACE_ROOT on spawn,
+           # so the lens family (atomic_grep_calls/lens/repair) rooted at the ENGINE repo and scanned the WRONG
+           # tree. ATOMIC_EDIT_REPO_ROOT IS propagated (ROOT_OVERRIDE=sandbox) → root the spawned server at the
+           # workdir so reads, writes, AND the lens all resolve to the A/B workspace. Verified: grep_calls then
+           # finds the real Python call sites; writes still land. (Keystone — re-apply if WALL-META clobbers it.)
+           "ATOMIC_EDIT_REPO_ROOT": workdir}
     try:
         p = subprocess.run([NODE, ATOMIC_CALL, tool, json.dumps(args)], cwd=workdir,
                            env=env, capture_output=True, text=True, timeout=150)
@@ -425,8 +413,7 @@ def main():
     metrics = {"arm": "atomic-cli-deepseek-v4-pro", "task": args.task, "workdir": workdir,
                "steps": 0, "tool_calls": {}, "edits_applied": 0, "invalid_states_prevented": 0,
                "reads": 0, "body_context_reads": 0, "run_tests_calls": 0, "tokens": 0, "gate_pass": False,
-               "diff_lines": 0, "wall_s": 0.0, "capability_gap": None, "last_error_type": None,
-               "transcript": [], "reasoning_trace": []}
+               "diff_lines": 0, "wall_s": 0.0, "transcript": [], "reasoning_trace": []}
     t0 = time.time()
 
     survey = ("Be efficient with calls: to understand the code, FIRST call atomic_survey(glob) once to "
@@ -438,7 +425,10 @@ def main():
             "need the same logic, implement one canonical helper and have wrappers delegate instead of "
             "duplicating state machines or parsers. For merge/default-composition/update helpers, "
             "reason over the final merged representation unless source identity is explicitly part of the contract; "
-            "preserve override precedence and filter by final value, not by independently scanning input sources. ")
+            "preserve override precedence and filter by final value, not by independently scanning input sources. "
+            "When the fix is 'apply check/filter F': FIRST call atomic_callers(F) — if F is ALREADY invoked where "
+            "the bug manifests, the root is the EXISTING call or F's own body (often a normalization/comparison "
+            "detail), so fix THAT; adding a second F guard usually duplicates the same latent bug and fails. ")
     if NO_GATE:
         system = ("You are the Atomic-CLI coding agent. Solve the task by editing a real repository using "
                   "ONLY atomic tools. " + survey + lean + "You CANNOT run the project's tests — there is no "
@@ -574,13 +564,7 @@ def main():
                 forced = True
         try:
             msg, usage = deepseek(messages, step_tools)
-        except DeepSeekModelCallTimeout as e:
-            metrics["capability_gap"] = "model_call_liveness_timeout"
-            metrics["last_error_type"] = type(e).__name__
-            metrics["transcript"].append(f"s{step} DEEPSEEK-MODEL-CALL-TIMEOUT {str(e)[:200]}")
-            break
         except Exception as e:
-            metrics["last_error_type"] = type(e).__name__
             metrics["transcript"].append(f"s{step} DEEPSEEK-ERROR {str(e)[:200]}")
             break
         metrics["tokens"] += int(usage.get("total_tokens", 0) or 0)
@@ -652,7 +636,7 @@ def main():
             # CLASS-S2-A teeth: when force-edit is active, REFUSE reads at dispatch (the model ignores a
             # restricted schema and re-emits reads from history). Not blind — it has FORCE_EDIT_AFTER+ reads
             # of context; refusing further reads makes edit the only productive move. Feedback then refines.
-            if reads_since_edit >= FORCE_EDIT_AFTER and fn in {"atomic_survey", "atomic_read_many", "atomic_outline", "atomic_read", "atomic_grep"}:
+            if reads_since_edit >= FORCE_EDIT_AFTER and fn in {"atomic_survey", "atomic_read_many", "atomic_outline", "atomic_read", "atomic_grep", "atomic_callers"}:
                 force_refused += 1
                 res = ("READING DISABLED — you have read 12+ times with no edit; you have enough context. "
                        "Emit atomic_replace (or atomic_create) with your single best fix NOW" +
@@ -667,7 +651,7 @@ def main():
                     metrics["transcript"].append(f"s{step} FORCE-EDIT DEADLOCK — {force_refused} refused reads, 0 edits; stopping (model would not commit)")
                     deadlock_break = True
                 continue
-            if green_minimize_active and fn in {"atomic_survey", "atomic_read_many", "atomic_outline", "atomic_read", "atomic_grep"}:
+            if green_minimize_active and fn in {"atomic_survey", "atomic_read_many", "atomic_outline", "atomic_read", "atomic_grep", "atomic_callers"}:
                 res = ("READING DISABLED — gate is already green and this is a bounded diff-minimization pass. "
                        "Use exactly one atomic_replace if it strictly shrinks the accepted diff; otherwise stop.")
                 metrics["transcript"].append(f"s{step} {fn} REFUSED (green-minimize active)")
@@ -726,7 +710,7 @@ def main():
                     call_args = {"file": a.get("path", ""), "includeContent": True}
                     if a.get("startLine"): call_args["startLine"] = a["startLine"]
                     if a.get("endLine"): call_args["endLine"] = a["endLine"]
-                if fn in ("atomic_read", "atomic_outline", "atomic_grep", "atomic_survey", "atomic_read_many"):
+                if fn in ("atomic_read", "atomic_outline", "atomic_grep", "atomic_survey", "atomic_read_many", "atomic_callers"):
                     metrics["reads"] += 1
                     reads_since_edit += 1
                 # L01-H: choose topology only after BODY-level context (real code bodies), not mere
