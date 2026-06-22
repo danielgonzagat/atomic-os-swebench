@@ -825,3 +825,22 @@ repo path-normalize instance would need dataset search + image build). So the ho
 (0/10→3/10, modest+unreliable); weight-GENERALIZES-across-class = UNTESTED. The directive's thesis is PARTIALLY supported
 (advice steers a weak model on the derivation instance) but NOT yet validated for generalization. Don't overclaim. Next
 rigorous step: a fresh path-normalization instance the weight did NOT see, or the locked-DeepSeek config (funds).
+
+## ★★★★ GENERALIZATION TEST — NEGATIVE/INCONCLUSIVE: weight did NOT lift a cross-repo instance (pytest-5840, 0/5 = baseline 0/5)
+The rigorous generalization test (the directive's actual thesis "captura a CLASSE"): a FRESH cross-repo path-normalization
+instance the weight never saw — pytest-5840 (pytest, "conftest ImportError, path lowercased"). N=5 constrained-shallow,
+official. GOLD resolves=1 (harness valid). RESULT: baseline=0/5 AND weight=0/5 — the weight added NO lift, and NEITHER arm
+resolved. WHY: (1) the problem statement reveals "path converted to lower case" → baseline ALREADY finds the area
+(unique_path/normcase) = NO location-gap for the weight to fill (unlike pylint-7080's hidden gap); (2) 9/10 arms fixed
+unique_path's BODY (normcase→realpath/normpath) but the GOLD REMOVES unique_path's usage in config/__init__.py (+ uses
+directory.realpath().parts()) — a different specific fix → none resolved (likely breaks the dedup P2P or doesn't match the
+test). HONEST CONCLUSION — the weight's GENERALIZATION is LIMITED: it transfers the broad LOCATION-CUE (look at path
+normalization) but NOT the RESOLUTION (instance-specific). It lifts ONLY when BOTH (a) baseline has a location-gap the
+weight fills AND (b) the weight's specific guidance matches the instance's fix. On pylint-7080 (DERIVATION) both held →
+0/10→3/10. On pytest-5840 (cross-repo) neither held → no lift. So the directive's thesis "weight LIFTS any model on the
+CLASS" is NOT supported by generalization evidence: the only non-circular test showed no lift. NET HONEST STATUS of the
+weight-substrate arc: substrate mechanics PROVEN (deterministic); weight-as-advice lifts its DERIVATION instance (circular,
+0/10→3/10) but did NOT generalize to a cross-repo same-broad-class instance (0/5). The weight (prompt-injection advice) is
+NARROW. This strengthens the gate>advice synthesis: ENFORCEMENT (proof-gate, which resolves where one-shot fails — proven)
+is the real lifting substrate; advisory weights are a weak, narrow, derivation-fit delivery. Recorded the negative result
+honestly — the loop does not bury a falsification.
