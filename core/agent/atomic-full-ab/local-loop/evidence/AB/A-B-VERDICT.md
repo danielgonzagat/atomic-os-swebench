@@ -117,3 +117,15 @@ sympy structures). NOT overwhelming dominance; NOT never-loses; repo-dependent. 
 to MATCH Claude on pylint/sklearn and WIN the rare verification-gap, but do NOT overcome a genuine sympy navigation/commitment
 weakness. Honesty held end-to-end: caught 3 of my own harness bugs (shared-container, pylint-grep, json-collision), re-validated
 with working gates, and did NOT let the bug-fix falsely rescue the atomic — the sympy weakness is real, recorded straight.
+
+## R6 sympy-13877 re-validated (working gate) — confirmed LOSS, MODEL-BOUND (DeepSeek empties)
+R6 fixed (WORKING gate INFRA_FAIL=0, R056 empty-retry deployed): OFFICIAL=0, edits=0, EMPTIES=18 (DeepSeek returned 18 empty
+responses even with R056 retrying ~5x each → ~90 empty API calls). So R6 fails because DeepSeek PERSISTENTLY returns empty on
+sympy-13877, INDEPENDENT of the gate (working) — a MODEL-BOUND base limit (R056 closed my representation gap; the locked model
+still can't produce output for this instance). R6 = atomic 0 / native 1 = the LOSS, model-bound. Two sympy failure mechanisms
+now confirmed with WORKING gates: R3 sympy-20438 = behavioral (over-explore/under-commit, R058-targetable); R6 sympy-13877 =
+model-bound (DeepSeek empties, NOT representation-fixable, locked model). RE-VALIDATED scoreboard (working gates): R1 WIN(1/0),
+R3 tie(0/0), R5 tie(1/1), R6 LOSS(0/1 model-bound), R7 tie(1/1); R4 pending. atomic 1 win/3 ties/1 loss + R4. Verdict holds:
+atomic = native on pylint/sklearn + rare verification WIN + genuine sympy weakness (part behavioral R058-targetable, part
+DeepSeek-base-bound R6). NOTE: a CONCURRENT agent is editing local_atomic_agent.py (added normalize_gate_command call) — my
+demolitions R052-R058 intact + committed; left their uncommitted change alone (no conflict, different lines).
