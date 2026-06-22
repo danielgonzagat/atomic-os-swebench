@@ -316,7 +316,7 @@ def main():
     metrics = {"arm": "atomic-cli-deepseek-v4-pro", "task": args.task, "workdir": workdir,
                "steps": 0, "tool_calls": {}, "edits_applied": 0, "invalid_states_prevented": 0,
                "reads": 0, "body_context_reads": 0, "run_tests_calls": 0, "tokens": 0, "gate_pass": False,
-               "diff_lines": 0, "wall_s": 0.0, "transcript": []}
+               "diff_lines": 0, "wall_s": 0.0, "transcript": [], "reasoning_trace": []}
     t0 = time.time()
 
     survey = ("Be efficient with calls: to understand the code, FIRST call atomic_survey(glob) once to "
@@ -403,6 +403,12 @@ def main():
             metrics["transcript"].append(f"s{step} DEEPSEEK-ERROR {str(e)[:200]}")
             break
         metrics["tokens"] += int(usage.get("total_tokens", 0) or 0)
+        # FULL-REASONING CAPTURE (wall-hunting obligation): record the model's verbatim chain-of-thought
+        # (reasoning_content) + its spoken content per step. I cannot demolish invisible walls in the model's
+        # reasoning if I never see what it actually thought. Additive only — never sent back to the model.
+        metrics["reasoning_trace"].append({"step": step,
+            "reasoning": (msg.get("reasoning_content") or "")[:24000],
+            "say": (msg.get("content") or "")[:8000]})
         calls = msg.get("tool_calls") or []
         clean = {"role": "assistant", "content": msg.get("content") or ""}
         if calls:
@@ -560,7 +566,11 @@ def main():
         metrics["gate_pass"] = final_pass
     d = git_diff(workdir)
     metrics["diff_lines"] = diff_lines(d)
+    metrics["final_diff"] = d
     metrics["wall_s"] = round(time.time() - t0, 1)
+    # FULL ACTION+RESULT RECORD: the complete message stream (every tool-call arg + every tool result
+    # verbatim, as the model saw it). Skip the giant initial file-tree user turn to keep it auditable.
+    metrics["messages"] = [m for i, m in enumerate(messages) if not (i == 1 and m.get("role") == "user")]
     Path(args.out).write_text(json.dumps(metrics, indent=2))
     print(f"ATOMIC DONE gate_pass={metrics['gate_pass']} steps={metrics['steps']} edits={metrics['edits_applied']} "
           f"reads={metrics['reads']} body_reads={metrics['body_context_reads']} invalid_prevented={metrics['invalid_states_prevented']} "
