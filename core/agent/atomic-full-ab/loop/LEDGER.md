@@ -1944,6 +1944,21 @@ NATIVE WINS this round on correctness, speed, tokens, and verification. ATOMIC w
 - Verification after promotion: `py_compile`, `atomic-agent-green-minimize.proof.mjs`, `temp-artifact-hygiene.proof.mjs`, focused marker check, and `git diff --check` passed.
 - Next exact Codex-pylint step: rerun Atomic-only in a clean container against frozen `Descartes` with `DEEPSEEK_TOTAL_TIMEOUT` active. No complexity escalation.
 
+### Codex pointer - R053 pylint-8898 official green, best surface, post-shrink loop fixed by seq562
+- date: 2026-06-22. Full detail is in `core/agent/atomic-full-ab/local-loop/LEDGER.md` under "Codex R053 Pylint-8898".
+- R053 official `resolved=true`, F2P `1/1`, P2P `18/18`, `20 passed in 2.45s`, with `60` steps, `63` calls, `853,996` tokens, `1174.3s`, `19` local changed lines / `33` official patch lines, SHA `f6ee8947e383f21f329ae3cd2651d761dc6a0182c30a163e0312069aaf4a3faa`.
+- R053 beats frozen native patch surface by a wide margin (`33` vs `63` official patch lines; `19` vs `49` local changed lines), and is the best Atomic surface in this task family so far.
+- Honest verdict: **no dominance and no complexity escalation**. R053 loses on cost: it hit `60` steps / `853,996` tokens / `1174.3s` after the shrink was already green.
+- Sequence `562` promoted `CLASS-GREEN-MINIMIZE-RETEST-GREEN-FINALIZE`: after a post-green minimization retest is green, the driver records `GREEN-MINIMIZE finalized; preserving retested green minimized state` and breaks before any new model turn. Verification: `py_compile`, `atomic-agent-green-minimize.proof.mjs`, `temp-artifact-hygiene.proof.mjs`, focused marker check, and `git diff --check` passed.
+- Next exact Codex-pylint step: stay on `pylint-dev__pylint-8898`; rerun Atomic-only as R054 in a clean dedicated container against frozen `Descartes` with sequence `562` active. No complexity escalation.
+
+### Codex pointer - R054 preflight did not dispatch: missing DeepSeek env key; seq563 adds explicit env-only refusal
+- date: 2026-06-22. Full detail is in `core/agent/atomic-full-ab/local-loop/LEDGER.md` under "Codex R054 preflight".
+- Current process environment had `DEEPSEEK_API_KEY=missing`, so R054 Atomic was **not dispatched** and no A/B metric was produced.
+- Sequence `563` promoted `CLASS-ENV-SECRET-PREFLIGHT`: missing DeepSeek credentials now fail before workspace setup with an explicit env-only refusal; `--help` remains usable without a key; import-time `KeyError` is removed.
+- Verification: `py_compile`, `atomic-agent-green-minimize.proof.mjs`, `temp-artifact-hygiene.proof.mjs`, no-key `--help` exit `0`, no-key execution exit `1` with explicit env-only message, focused marker check, and `git diff --check` passed.
+- Next exact Codex-pylint step: export `DEEPSEEK_API_KEY` in the environment, then run R054 Atomic-only in a clean dedicated container against frozen `Descartes` with sequence `563` active. No complexity escalation.
+
 ---
 
 ## ROUND R052 — NÍVEL 1 — TASK psf__requests-1921 (atomic-only re-run, F8+F8b)
@@ -1979,3 +1994,17 @@ NATIVE WINS by DEFAULT (3rd consecutive). The atomic agent produces better diffs
 
 **Domínio consecutivo: 0/2 (NATIVE won — 3rd consecutive)**
 **PRÓXIMO PASSO EXATO**: (1) escalate quick_check to BLOCKING (refuse run_tests until ≥1 quick_check) — test if forcing self-verify reduces thrash and steps. (2) Investigate max-steps reduction (fewer steps = less API time). (3) Consider that the comprehension wall may be partly a MODEL ceiling (DeepSeek V4 Pro API latency), to record honestly per §7 falsifiability clause.
+
+---
+
+## CRITICAL FINDING (R053 post-mortem): requests-1921 gate is FLAKY — A/B INVALIDATED
+All 3 FAIL_TO_PASS tests for requests-1921 are NETWORK-DEPENDENT:
+- test_DIGESTAUTH_WRONG_HTTP_401_GET (requires httpbin)
+- test_POSTBIN_GET_POST_FILES (requires httpbin)
+- test_basicauth_with_netrc (requires httpbin)
+
+The gate returns FALSE regardless of fix correctness (13 failed, 8 passed — all failures are HTTP/network tests). This INVALIDATES the entire requests-1921 A/B (R050 native "win" was on the native worker's OWN tests, not the gate; the gate would also return FALSE for the native fix).
+
+**R053 fix analysis (manual verification):** two loops stripping None from both session_setting and request_setting — semantically CORRECT approach. But can't verify via the flaky gate.
+
+**ACTION:** Switch A/B to pytest-5262 (FAIL_TO_PASS: test_capfd_sys_stdout_mode — LOCAL ONLY, no network). Warm container available. This gives a VALID A/B comparison.
