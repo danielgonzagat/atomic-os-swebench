@@ -36,12 +36,12 @@ two walls: largefile-read-fragment (sets.py 2516 lines ≫ read cap) + deadlock-
 commits a refinable edit instead of surrendering — validated 0→1 edit). Local gate-ON blocked by the pytest-only
 gate boundary (sympy uses its own runner) — recorded honestly; official scoring unaffected.
 
-## 16 representation walls demolished this session (all generalist, all committed, every gap = mine not the model)
+## 17 representation walls demolished this session (all generalist, all committed, every gap = mine not the model)
 Agent/perception: (1) full-reasoning instrumentation; (2) arg-name rigidity; (3) topology-withhold DSML leak;
 (4) edit-receipt blindness; (5) batch-read-blind (results vs items); (6) batch-summary-blind; (7) whole-file
 read threshold; (8) nonsource-nav-wander; (9) guard-not-root steer; (10) guard-calls-existing unavoidable
 auto-injection; (11) force-edit-too-rigid (redundant vs total reads); (12) hidden-test-hunt; (15) green-then-broke
-(preserve/restore last-green diff); (16) deadlock-at-zero-edits (never surrender at 0 edits — commit a refinable edit).
+(preserve/restore last-green diff); (16) deadlock-at-zero-edits (never surrender at 0 edits — commit a refinable edit); (17) selector-not-found-deadend (grep-fallback for overloaded/ambiguous method selectors — the validated root of the sympy read-fragmentation).
 Engine: (13a) prose-import-false-RED (byte-floor supply-chain regex matched a docstring word); (13b)
 callgraph-blind-nonjs (perception node-set + lens SOURCE_RE + workspace-root keystone). Harness: (14)
 gate-paramtest-ids (parametrized node ids w/ commas/brackets + malformed dataset fragment); (+) gate-bare-test-names
