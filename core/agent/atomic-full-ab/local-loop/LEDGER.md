@@ -1047,3 +1047,874 @@ atomic-Claude's lead: (1) CLASS-GREP-TIMEOUT (faster/scoped grep on large repos 
 lines (engine returns none → 3 failed reads pre-fix); (3) score resolved-rate (proof-carrying correctness
 differential). Cross-model stays the equalization track (DeepSeek), recorded at its model ceiling — do NOT
 fake a cross-model "huge superiority" the same-model control proves is the model, not the representation.
+
+## Round 022 — Codex-native vs DeepSeek-atomic — `psf__requests-1921` — NATIVE WIN + semantic gap found
+- date: 2026-06-21. Protocol followed: Atomic Agent CLI first, then Codex-native worker from this TUI on the
+  same SWE-Bench-Verified task/prompt/base snapshot. No solver saw test feedback; the orchestrator scored both
+  after completion with the same warm Docker gate.
+- task: `tasks/SWE-psf__requests-1921/PROBLEM.md`; base snapshot in both arms:
+  `3c88e520da24ae6f736929a750876e7654accc3d`.
+- workspaces: `/tmp/swe/round/R022/psf__requests-1921/{atomic,native}`.
+- evidence: `evidence/R022/psf__requests-1921__atomic.json` and
+  `evidence/R022/psf__requests-1921__native.json`.
+
+| metric | DeepSeek-atomic | Codex-native worker | winner |
+|---|---:|---:|---|
+| orchestrator gate | 21/21 PASS | 21/21 PASS | TIE |
+| changed files | 1 (`requests/sessions.py`) | 1 (`requests/sessions.py`) | TIE |
+| diff surface | +6/-4 = 10 | +3/-3 = 6 | NATIVE |
+| edits | 1 atomic edit | 1 native edit | TIE |
+| visible actions | 8 steps / 7 reads / 1 edit | ~15 actions / 9 reads / 2 search-list / 1 edit / 3 git checks | ATOMIC on count, but model/API metrics not commensurable |
+| tokens | 47,809 | not exposed | instrumentation gap |
+| wall | 53.2s | not measured | instrumentation gap |
+| trace/proof | atomic result + trace | subagent report + evidence JSON | ATOMIC |
+| semantic canonicity | loops over request and session `None` sources | removes keys whose final merged value is `None` | NATIVE |
+
+Verdict: NATIVE WIN. Both passed the sampled official gate, but the native patch is smaller and semantically
+more canonical: it removes a key only if the final merged setting is `None`. The Atomic patch removes a key
+if either input dict has `None`, which can wrongly delete a request-level non-None override when the session
+setting was `None`. This is a material semantic/topology loss even though the sampled gate passed. No
+dominance, no escalation.
+
+New loss class: **CLASS-MERGE-FINAL-VALUE-CANONICALITY** — for merge/update helpers, the atomic agent must
+prefer predicates over the final merged representation when the behavior being fixed is about the final output,
+rather than independently iterating source inputs. This is generalist (headers, options, config maps, env maps,
+query params, kwargs) and not requests-specific. It should be closed in the agent topology/semantic planning
+layer or with a merge-helper canonicity critique before final submission.
+
+Next exact step (R023): close the merge-final-value canonicity class, preferably without weakening proof or
+hardcoding this task, then rerun the same `psf__requests-1921` no-feedback A/B or a same-model control to
+verify the Atomic arm produces the final-merged-value patch. Also continue the R021 engine-side grep context
+and timeout work; do not edit the engine while another atomic round is in flight.
+
+### Round 023 — SWE-Bench `psf__requests-1921` — cross-model, gate-ON demolition ATTEMPT — ATOMIC DIFF/CANONICITY WIN, NO DOMINANCE (self-verify wall + concurrent interference)
+- date: 2026-06-21. arms: ATOMIC = DeepSeek V4 Pro + atomic (launched `--gate <swe_docker_gate.sh>`, topology-guidance driver); NATIVE = oh-my-pi `task` worker (native tools only). Concurrent, isolated workspaces, snapshot `3c88e520` BOTH (pristine, parity verified). Gate ground-truth RE-SCORED by orchestrator on both workdirs (no self-report trust).
+- DEMOLITION ATTEMPTED: R022 ran `--gate NONE` (blind one-shot) → 10-line duplicated fix, gate_pass=None. R023 launched atomic with `--gate <swe_docker_gate.sh>` (gate-ON) to remove the blind-submission wall. BUT the atomic arm did NOT call run_tests (`run_tests_calls=0`), declared DONE after 1 edit. Forensics inconclusive: argparse `NO_GATE = args.gate=="NONE"` so my non-NONE gate should keep run_tests active, yet a no-tool-call DONE path accepted submission without proof; AND concurrent agents were actively editing `local_atomic_agent.py` mid-run (driver is a moving target — lines 426-441 show a NEWER non-blocking topology than R022's transcript).
+
+| metric | ATOMIC (DeepSeek+atomic) | NATIVE (oh-my-pi worker) | winner |
+|---|---|---|---|
+| gate (ground-truth re-score) | 21/21 PASS | 21/21 PASS | TIE |
+| diff surface | **4 lines (2+/2-)** | 11 lines (7+/4-) | **ATOMIC (2.75× smaller)** |
+| canonicity | `list(merged_setting.items())` — iterate the already-merged dict (canonical minimal; == R009 same-model winner) | `chain(request_setting, session_setting)` + `from itertools import chain` — scan both sources (duplicated logic + import) | **ATOMIC (canonical, no import)** |
+| edits applied | 1 | 2 | ATOMIC |
+| wall | 62.1s | ~180s (3 min) | ATOMIC |
+| self-verified (ran gate) | NO (`run_tests_calls=0`; submitted blind) | YES (1 gate run) | NATIVE |
+| tool calls | 11 (survey1, read_many1, read7, grep1, replace1) | ~6 | NATIVE |
+
+Verdict: ATOMIC WON diff (2.75×), canonicity, edits, wall — the BEST cross-model diff datapoint so far (R020 DeepSeek struggled at 14 calls/4 edits; R023 DeepSeek → canonical 1-edit fix in 62s). But NO dominance: atomic did NOT self-verify (submitted blind — the NO_GATE/no-self-verify wall is LIVE and prevadescent: concurrent agents ALL run `--gate NONE`), lost tool-call economy (11 vs 6), and the round ran under concurrent-agent interference (≥2 other atomic processes active — PID 47063 `--gate NONE` L01, PID 48164 `--gate NONE` R022post — driver edited mid-run, evidence attribution noisy). Dominance count Level-1 UNCHANGED (1/2). Do NOT escalate.
+
+TWO WALLS PINPOINTED (both REPRESENTATION per owner doctrine — fault is never the model/principle):
+- **WALL-B (capability): NO_GATE / no-self-verify.** The prevailing practice strips `run_tests` and forces blind one-shot submission. An agent declaring DONE without a green gate violates "toda ação carrega prova", cannot self-correct a wrong first attempt (hurts the weak model MOST — DeepSeek needs feedback more than Claude), and never triggers the post-green minimize (L01-D/E). Demolition: the atomic arm MUST run with the gate AND MUST call run_tests before DONE is accepted (no-green-no-DONE). Generalist, any task.
+- **WALL-META (integrity): multi-agent shared-tree clobber.** ≥2 concurrent atomic processes edit `local_atomic_agent.py` and write `evidence/` dirs simultaneously. Makes every round's driver-version uncertain, every `atomic_expand_self` landing clobberable, every ≥2-consecutive-round dominance claim INVALID (R011 already invalidated by this; R023 attribution noisy). This is the PREREQUISITE wall: until the loop has a stable, isolated, single-writer driver, no clean dominance is provable. Demolition: worktree isolation for the loop's atomic arm, OR single-writer serialization on the canonical driver.
+
+NEXT EXACT STEP: (1) Close WALL-META FIRST — run the loop's atomic arm in an ISOLATED worktree of the atomic repo (clean checkout + complete env, the tension noted in the oh-my-pi session note: main-checkout=complete-env+contention vs worktree=isolation+degraded-env MUST be resolved) OR serialize writers on `local_atomic_agent.py`. (2) On the isolated driver, close WALL-B: make `run_tests` MANDATORY before DONE is accepted (no-green-no-DONE), land via `atomic_expand_self` (generalist). (3) Re-run R024 cross-model on `psf__requests-1921` with gate-ON + enforced self-verify, IN ISOLATION, and measure whether DeepSeek self-corrects/minimizes toward canonical. Do NOT escalate until atomic wins diff AND self-verify AND tool-economy with wide margin for ≥2 consecutive ISOLATED rounds.
+
+### Round 024b — SWE-Bench `psf__requests-1921` — ISOLATED gate-ON driver — WALL-B DEMOLITION PROVEN (self-verify closed), mixed result, WALL-A persists
+- date: 2026-06-21. ISOLATION: ran the atomic arm from a PRIVATE driver copy (`/private/tmp/swe/iso-driver/local_atomic_agent_iso.py`) with `NO_GATE=False` HARDCODED (WALL-B demolition: gate-ON enforced, run_tests always active, no-green-no-DONE) + `ATOMIC_CALL` pointed explicitly at `core/atomic-edit/atomic-call.mjs` + a DEDICATED container `psf__requests_1921_iso` + a PRIVATE evidence out. This removes WALL-META (concurrent-clobber) interference entirely for the atomic arm — the driver version is frozen, the evidence is mine alone.
+- R024 (first isolated attempt) FAILED with `edits=0` because the relative `ATOMIC_CALL` path resolved wrong from the iso location (all atomic tools returned `node:internal/modules/cjs/loader` errors). Forensic: NOT a demolition side-effect — my isolation infra fault. Fixed by setting `ATOMIC_CALL` env explicit. R024b is the valid run.
+- arms: ATOMIC = DeepSeek V4 Pro + atomic (isolated, gate-ON); NATIVE = oh-my-pi `task` worker (R024, native tools). Both snapshot `3c88e520`, same task, isolated workspaces, ground-truth gate re-scored.
+
+| metric | ATOMIC (DeepSeek+atomic, gate-ON iso) | NATIVE (oh-my-pi worker) | winner |
+|---|---|---|---|
+| gate (ground-truth re-score) | 21/21 PASS | 21/21 PASS | TIE |
+| **self-verified (ran gate)** | **YES — `run_tests_calls=1`, gate_pass=True** | YES (1 gate run) | **TIE — WALL-B CLOSED** |
+| diff surface (numstat) | 6 lines (5+/1-) in `models.py:prepare_headers` | 3 lines (2+/1-) in `sessions.py:merge_setting` | NATIVE |
+| edits applied | 1 | 2 (logic + `chain` import) | ATOMIC |
+| wall | **70.6s** | ~180s (3 min) | **ATOMIC (2.5× faster)** |
+| tool calls | 9 (survey1, read_many1, read5, replace1, run_tests1) | ~6 native | NATIVE |
+| tokens | 43,650 | not exposed (task API gap) | — |
+| green-minimize fired | YES (offered at s7, unlocked BY gate-ON) | n/a | ATOMIC (capability unlocked) |
+| invalid_states_prevented | 0 | n/a | TIE |
+
+**WALL-B DEMOLITION — PROVEN BY NUMBER:** with the isolated gate-ON driver, DeepSeek+atomic (a) CALLED run_tests (`run_tests_calls=1`), (b) achieved `gate_pass=True` (21/21), (c) triggered the post-green GREEN-MINIMIZE pass (s7) — all of which were IMPOSSIBLE under the prevailing `--gate NONE` blind-submission practice. The self-verify gap that made atomic submit blind (and lose the "proof-carrying" core) is CLOSED. This is the wall I diagnosed in R022/R023, demolished by forcing gate-ON, and proved empirically in isolation (no concurrent interference). Generalist (any task); the fix direction is to land `run_tests`-mandatory-before-DONE canonically.
+
+Verdict: NOT dominance. Atomic WON edits (1 vs 2) and wall (2.5× faster) decisively, and TIED correctness + self-verify (the demolition's goal). But atomic LOST diff surface (6 vs 3) and tool-call economy (9 vs ~6). Dominance count Level-1 UNCHANGED. Do NOT escalate.
+
+NEW/PERSISTENT WALL — **WALL-A (canonicity/minimal-perception):** DeepSeek chose `prepare_headers` (the final header funnel — a legitimate single-guard canonical location) but EXPRESSED it as a 6-line reformat (multi-line `CaseInsensitiveDict(... if value is not None)`), vs native's compact 3-line `merge_setting` `chain()` fix. The GREEN-MINIMIZE pass was OFFERED (s7) but DeepSeek judged "no strictly smaller equivalent" and did not shrink — yet a 3-line inline filter or a merge_setting location existed. Two facets: (1) topology choice not steered toward the most COMPACT valid location; (2) the minimize pass is too conservative (accepts the model's "no smaller" self-judgment without pushing). Generalist (any task where compactness matters).
+
+NEXT EXACT STEP: (1) LAND WALL-B canonically via `atomic_expand_self`: make `run_tests`-before-DONE mandatory in `local_atomic_agent.py` (the isolated proof is done; the canonical landing is the legal path) — BUT this requires resolving WALL-META (the concurrent agents clobber `local_atomic_agent.py`; land on a stable single-writer tree or accept the isolated driver as the canonical reference). (2) Mine WALL-A: strengthen the GREEN-MINIMIZE pass to actually push compactness (e.g., after green, explicitly offer the compact-location alternative the model may have missed), generalist. (3) Re-run R025 isolated gate-ON on `psf__requests-1921`; if atomic wins diff+edits+wall+self-verify with wide margin for ≥2 consecutive ISOLATED rounds → Level-1 dominated → ESCALATE complexity (next SWE-Bench task, fire native once for new baseline). Do NOT escalate before that.
+
+### Codex maintenance note - CLASS-MERGE-FINAL-VALUE-CANONICALITY prompt/proof closure (verified, not cleanly self-expanded)
+- date: 2026-06-22. Context: resumed from R022's native win on semantic canonicity (`source-input None deletion` vs `final merged value None deletion`). This note does not claim a new A/B round.
+- Added `core/atomic-edit/gates/atomic-agent-final-merge-canonicity.proof.mjs` plus README inventory update (`265 proof entrypoints`, `331 total gate files`). Red-first evidence: before prompt closure, `node gates/atomic-agent-final-merge-canonicity.proof.mjs --json` failed only on the missing prompt contract while its R022 bad-patch classifier and canonical final-value classifier both behaved correctly.
+- Prompt constraint now present in `local_atomic_agent.py` lean guidance: for merge/default-composition/update helpers, reason over the final merged representation unless source identity is explicitly part of the contract; preserve override precedence and filter by final value, not by independently scanning input sources.
+- Focused verification green: `node gates/atomic-agent-final-merge-canonicity.proof.mjs --json`; `node gates/atomic-agent-lean-surface.proof.mjs --json`; `python3 -m py_compile core/agent/atomic-full-ab/local-loop/local_atomic_agent.py`; `node gates/doc-honesty.proof.mjs --json`; `node gates/temp-artifact-hygiene.proof.mjs --json`; `node gates/atomic-exec-readonly-usability.proof.mjs --json`; R022 atomic/native evidence JSON parses.
+- Honest landability caveat: the proof file + README update landed through a fresh serialized MCP self-expansion client (`ATOMIC_SELF_EXPANSION_PROOF_CONCURRENCY=1`, host mode disabled). The driver prompt bytes did **not** receive a clean `atomic_expand_self` success receipt: failed self-expansion attempts reported rollback but left partial `local_atomic_agent.py` effects on disk, then the source was repaired forward and verified. Treat this as an OPEN product wall, **CLASS-SELF-EXPANSION-ROLLBACK-CANDIDATE-CONTEXT**: failed candidates must not leave partial workspace bytes, and candidate-context validator false reds (`temp-artifact-hygiene`/`doc-honesty` vs standalone green) must be eliminated before calling driver changes proof-carrying.
+- Current blocker for launching the next DeepSeek round from this shell: `DEEPSEEK_API_KEY`, `GITHUB_TOKEN`, and `HF_TOKEN` are not set in the process environment. Do not paste or persist secrets in ledger; set them via env in the launching shell. Next exact executable step after env is available: rerun isolated gate-ON `psf__requests-1921` with this prompt constraint, then compare against the native worker under the user-corrected A/B protocol.
+
+### Round 023 sample 3 - Codex-native vs DeepSeek-atomic - `psf__requests-1921` - NATIVE WIN, NO DOMINANCE
+- date: 2026-06-22. Protocol slice followed in ordering: Atomic Agent CLI DeepSeek sample completed first, then a Codex-native worker from this TUI was dispatched on the same SWE task/base snapshot. The native worker used native tools only and did not run tests per no-feedback instruction. The orchestrator scored both workdirs afterward with the same SWE Docker gate.
+- task: `tasks/SWE-psf__requests-1921/PROBLEM.md`; base snapshot in both arms: `3c88e520da24ae6f736929a750876e7654accc3d`.
+- workspaces: `/tmp/swe/round/R023/psf__requests-1921_s3/{atomic,native}`.
+- evidence: `evidence/R023/psf__requests-1921__atomic_s3.json` and `evidence/R023/psf__requests-1921__native_s3.json`.
+- scoring evidence: Atomic re-score used `SWE_CONTAINER=psf__requests_1921_iso SWE_P2P_SAMPLE=15 ...swe_docker_gate.sh .../atomic ...` -> `21 passed, 10 warnings`, `# tests 21`, `# pass 21`, `# fail 0`, exit 0. Native re-score used `SWE_CONTAINER=psf__requests_1921_native SWE_P2P_SAMPLE=15 ...swe_docker_gate.sh .../native ...` -> `21 passed, 10 warnings`, `# tests 21`, `# pass 21`, `# fail 0`, exit 0.
+
+| metric | DeepSeek-atomic sample 3 | Codex-native worker | winner |
+|---|---:|---:|---|
+| orchestrator gate | 21/21 PASS | 21/21 PASS | TIE |
+| changed files | 1 (`requests/sessions.py`) | 1 (`requests/sessions.py`) | TIE |
+| self-verify inside worker | NO (`run_tests_calls=0`, `gate_pass=null`, launched blind/`--gate NONE`) | NO (tests prohibited by prompt) | TIE on no-feedback, but Atomic fails proof-carrying ideal |
+| diff surface | +12/-2 = 14 | +1/-1 = 2 | NATIVE (7x smaller) |
+| semantic canonicity | filters session values at construction plus request-level deletion loop | filters the final merged mapping via `list(merged_setting.items())` | NATIVE |
+| atomic/native actions | 12 steps, 11 reads, 1 edit, 138,277 tokens, 76.0s | worker reported ~25 actions, 2 native patch edits; tokens/wall not exposed | mixed / instrumentation gap |
+| trace/proof | atomic edit trace present, external gate only after completion | native diff evidence + external gate after completion | mixed |
+
+Verdict: **NATIVE WIN.** Both patches pass the sampled SWE gate, but native produced the canonical minimal final-merged-value patch: change the existing deletion loop to iterate `list(merged_setting.items())`. Atomic remained correct on the sampled gate but used a broader 14-line construction-site filter, did not self-verify, and lost the key product metric for this level: minimal canonical proof-carrying output. Dominance count remains 0/2; do not escalate complexity.
+
+Class update: this confirms **CLASS-CANONICAL-MINIMALITY-COMPRESSION** and the non-isolated **NO_GATE / blind-submit wall** are still live for this runner path. The final-merge prompt/proof closure improves the stated contract but did not force this blind sample into the smallest canonical final-value form. Next exact step: run the next `psf__requests-1921` comparison only with an isolated, single-writer, gate-ON driver that refuses DONE before `run_tests`, then mine the post-green minimizer until it actively searches for and proves a strictly smaller equivalent patch before submission.
+
+### R023 sample 3 follow-up preflight - minimizer present, next launch env-blocked
+- date: 2026-06-22. Live checkout preflight after the sample-3 comparison: `local_atomic_agent.py` already contains the bounded CLASS-GREEN-MINIMIZE-DECLINE demolition (`green_minimize_refusals`, refusal of the first post-green stop, and the assertive `A strictly smaller equivalent patch EXISTS` re-prompt). Therefore the next truthful action is a clean isolated measurement run, not another ad-hoc driver edit.
+- Focused verification green: `node gates/atomic-agent-green-minimize.proof.mjs --json`; `python3 -m py_compile core/agent/atomic-full-ab/local-loop/local_atomic_agent.py`; `node gates/atomic-agent-final-merge-canonicity.proof.mjs --json`.
+- Current local launch blocker remains environment-only credentials: this shell reports `DEEPSEEK_API_KEY`, `GITHUB_TOKEN`, and `HF_TOKEN` missing. Do not use or persist pasted chat secrets. Next exact executable step after env is available: launch the isolated, single-writer, gate-ON `psf__requests-1921` Atomic run with this current driver, then compare against the frozen/native baseline before any complexity escalation.
+
+### Round 024 sample 1 - Codex-native vs DeepSeek-atomic - `pytest-dev__pytest-5262` - NATIVE MINIMALITY WIN, NO DOMINANCE
+- date: 2026-06-22. Protocol slice: an external Atomic DeepSeek sample completed first on the same SWE task/base snapshot; then a Codex-native worker from this TUI was dispatched on the matching clean workspace. Both solver arms were blind/no-feedback (`--gate NONE` for Atomic; native worker instructed not to run tests). The orchestrator scored both afterward with the same Docker gate.
+- task: `tasks/SWE-pytest-dev__pytest-5262/PROBLEM.md`; base snapshot in both arms: `58e6a09db49f34886ff13f3b7520dd0bcd7063cd`.
+- workspaces: `/tmp/swe/round/R024/pytest-5262_s1/{atomic,native}`.
+- evidence: `evidence/R024/pytest-dev__pytest-5262__atomic_s1.json` and `evidence/R024/pytest-dev__pytest-5262__native_s1.json`.
+- scoring evidence: Atomic re-score used `SWE_CONTAINER=pytest_dev__pytest_5262_atomic SWE_P2P_SAMPLE=15 ...swe_docker_gate.sh .../atomic ...` -> `15 passed`, `# tests 15`, `# pass 15`, `# fail 0`, exit 0. Native re-score used `SWE_CONTAINER=pytest_dev__pytest_5262_native SWE_P2P_SAMPLE=15 ...swe_docker_gate.sh .../native ...` -> `15 passed`, `# tests 15`, `# pass 15`, `# fail 0`, exit 0.
+
+| metric | DeepSeek-atomic sample 1 | Codex-native worker | winner |
+|---|---:|---:|---|
+| orchestrator gate | 15/15 PASS | 15/15 PASS | TIE |
+| changed files | 1 (`src/_pytest/capture.py`) | 1 (`src/_pytest/capture.py`) | TIE |
+| self-verify inside worker | NO (`run_tests_calls=0`, `gate_pass=null`, launched blind/`--gate NONE`) | NO (tests prohibited by prompt) | TIE on no-feedback, but Atomic fails proof-carrying ideal |
+| diff surface | +5/-0 = 5 | +4/-0 = 4 | NATIVE |
+| semantic canonicity | adds `EncodedFile.mode` property stripping `b`, with docstring | adds same property stripping `b`, no docstring | TIE behavior; NATIVE minimality |
+| action/cost | 4 steps, 3 reads, 1 edit, 37,371 tokens, 26.4s | worker reported ~9 actions; tokens/wall not exposed | mixed / instrumentation gap |
+| trace/proof | atomic edit trace present, external gate only after completion | native diff evidence + external gate after completion | mixed |
+
+Verdict: **NATIVE MINIMALITY WIN, NO DOMINANCE.** Both arms found the correct semantic location and both pass the sampled SWE gate. Atomic is fast and tool-cheap, but it remained blind and lost diff surface by adding a docstring line. Dominance count remains 0/2; do not escalate complexity from this datapoint.
+
+Class update: for this task the stable gap is not location/canonicity, but **CLASS-DOCSTRING-SURFACE-MINIMALITY** under blind no-feedback mode: Atomic adds explanatory text that is harmless but benchmark-negative when the native minimal patch is behavior-only. Generalist next direction should be folded into the existing strict surface-reduction/minimizer wall: documentation/comment additions during benchmark fix attempts must be justified by required behavior or removed if they increase surface without changing behavior.
+
+### Round 025 — ISOLATED gate-ON — confirms WALL-B stable + WALL-A SYSTEMATIC (root cause pinpointed)
+- date: 2026-06-21. Same isolated gate-ON driver as R024b. ATOMIC vs frozen native (R025 native fired fresh).
+- ATOMIC: 21/21 ✓, `run_tests_calls=1` gate_pass=True (WALL-B demolition STABLE: 2/2 rounds self-verify), 1 edit, diff **6 lines** (4+/2- in sessions.py merge_setting), 12 steps, 91k tokens, 119.9s wall, FORCE-EDIT engaged s10 (over-reading persists).
+- NATIVE: 21/21 ✓, diff **2 lines** (1+/1-) — `for (k,v) in to_key_val_list(merged_setting)`, 2 edits, ~180s.
+- **WALL-A SYSTEMATIC** (R024b 6, R025 6 vs native 3, 2). ROOT CAUSE (precise): atomic and native make the SAME essential 1-token code change (iterate merged dict), but atomic (a) ADDED a 3-line explanatory comment that re-explains intent the existing comment already conveys, and (b) used generic `list(merged_setting.items())` while native reused `to_key_val_list` — a helper already used 2 lines above in the SAME function. Neither is model-bound; both are REPRESENTATION (lean-comment policy + nearby-helper perception).
+- Verdict: not dominance. ATOMIC won edits+wall; native won diff+tool-economy. WALL-B closed stable. Next: demolish WALL-A (comment-bloat + idiom).
+
+### Round 024full sample 1 - Codex-native vs DeepSeek-atomic - `pylint-dev__pylint-7080` - NATIVE DECISIVE WIN / ATOMIC DEADLOCK
+- date: 2026-06-22. Protocol slice: an external Atomic DeepSeek sample completed first on the same SWE task/base snapshot; then a Codex-native worker from this TUI was dispatched on the matching clean workspace. Both solver arms were blind/no-feedback (`--gate NONE` for Atomic; native worker instructed not to run tests). The orchestrator scored both afterward with the same Docker gate.
+- task: `tasks/SWE-pylint-dev__pylint-7080/PROBLEM.md`; base snapshot in both arms: `3c5eca2ded3dd2b59ebaf23eb289453b5d2930f0`.
+- workspaces: `/tmp/swe/round/R024full/pylint-dev__pylint-7080_s1/{atomic,native}`.
+- evidence: `evidence/R024full/pylint-dev__pylint-7080__atomic_s1.json` and `evidence/R024full/pylint-dev__pylint-7080__native_s1.json`.
+- scoring evidence: Atomic re-score used `SWE_CONTAINER=pylint7080_warm SWE_P2P_SAMPLE=15 ...swe_docker_gate.sh .../atomic ...` -> empty diff failure, `# tests 0`, `# pass 0`, `# fail 1`, exit 1. Native re-score used `SWE_CONTAINER=pylint7080_warm_native SWE_P2P_SAMPLE=15 ...swe_docker_gate.sh .../native ...` -> `16 passed, 1 warning`, `# tests 16`, `# pass 16`, `# fail 0`, exit 0.
+
+| metric | DeepSeek-atomic sample 1 | Codex-native worker | winner |
+|---|---:|---:|---|
+| orchestrator gate | FAIL empty diff (`0/0`, fail marker 1) | 16/16 PASS | NATIVE |
+| changed files | 0 | 1 (`pylint/lint/expand_modules.py`) | NATIVE |
+| self-verify inside worker | NO (`run_tests_calls=0`, `gate_pass=null`, launched blind/`--gate NONE`) | NO (tests prohibited by prompt) | TIE on no-feedback; Atomic fails proof-carrying ideal |
+| diff surface | 0 because no edit | +10/-1 = 11 | NATIVE on delivered behavior; Atomic cannot claim minimality because it delivered nothing |
+| semantic result | no committed fix; force-edit deadlocked after refusing reads | `_is_ignored_file` checks original, cwd-relative, and directory trailing-separator forms against `ignore-paths` | NATIVE |
+| action/cost | 8 steps, 12 reads, 0 edits, 498,038 tokens, 100.2s | worker reported ~24 actions; tokens/wall not exposed | NATIVE on result, Atomic cost pathological |
+| trace/proof | transcript shows read-loop to force-edit deadlock, external gate failure after completion | native diff evidence + external gate after completion | NATIVE |
+
+Verdict: **NATIVE DECISIVE WIN, NO DOMINANCE.** Atomic produced no patch, never self-verified, and failed the orchestrator's empty-diff guard. Native produced a real one-file fix and passed the sampled SWE gate. Dominance count remains 0/2; do not escalate complexity.
+
+Class update: **CLASS-FORCE-EDIT-DEADLOCK-NO-COMMIT** is still live. The current force-edit policy can withhold reads after a read budget but still fail to elicit any edit, then stop with no committed bytes. Generalist next direction: before a hard stop, synthesize a concrete edit candidate from the last-read loci or run one constrained edit-proposal turn with explicit file/function/old-new anchors; do not accept a terminal no-edit state as a valid solver outcome. This is a representation/control gap, not a Pylint-specific fix.
+
+### Round 026 — ISOLATED gate-ON + WALL-A demolition patch — WALL-A CLOSED, NEAR-DOMINANCE
+- date: 2026-06-21. Isolated driver with BOTH demolitions active: WALL-B (gate-ON, NO_GATE=False) + WALL-A (GREEN-MINIMIZE prompt strengthened to attack comment-bloat + generic-builtin-vs-existing-helper).
+- ATOMIC: 21/21 ✓, `run_tests_calls=2` (self-verify + re-verify after minimize), 2 edits, **diff 2 lines (1+/1-)**, 9 steps, 67.8k tokens, 106.9s wall, invalid_prevented=0.
+- **WALL-A DEMOLITION PROVEN BY NUMBER (transcript):** s5 initial edit diff_lines=5 (with comment bloat) → s6 run_tests green → s7 GREEN-MINIMIZE (patched) fired → atomic_replace REMOVED the comment bloat → **s8 "GREEN-MINIMIZE result diff_lines=2 start=5"** → run_tests re-verified green. The strengthened minimize prompt made DeepSeek SHRINK its own diff 5→2 and re-verify. Diff dropped from R024b/R025's 6 lines to 2 — TYING native's canonical 2-line fix.
+
+| metric | ATOMIC R026 (gate-ON + WALL-A) | NATIVE (frozen R025) | winner |
+|---|---|---|---|
+| gate (ground-truth) | 21/21 | 21/21 | TIE |
+| self-verified | YES (run_tests_calls=2) | YES | TIE |
+| diff surface | **2 lines (1+/1-)** | 2 lines (1+/1-) | **TIE (WALL-A closed; was 6 vs 2)** |
+| edits | 2 (fix + minimize) | 2 | TIE |
+| wall | 106.9s | ~180s | ATOMIC |
+| tool calls | 11 | ~6 | NATIVE |
+| tokens | 67,802 | not exposed | — |
+
+Verdict: NEAR-DOMINANCE, not yet dominance. Atomic TIED correctness+self-verify+diff+edits and WON wall; lost only TOOL ECONOMY (11 vs ~6 calls). This is the closest cross-model round yet. Two walls demolished this session (WALL-B self-verify, WALL-A diff-surface), both PROVEN by number on the isolated gate-ON driver.
+
+TRAJECTORY (same task psf__requests-1921, isolated gate-ON unless noted):
+- R022 (NO_GATE blind): 10-line duplicated fix, NO self-verify, gate=None
+- R023 (gate-ON attempted, concurrent noise): 4-line canonical, NO self-verify
+- R024b (isolated gate-ON, WALL-B): 6-line, self-verify ✓
+- R025 (isolated gate-ON): 6-line, self-verify ✓ (WALL-A confirmed systematic)
+- R026 (isolated gate-ON + WALL-A patch): **2-line canonical, self-verify ✓ + green-minimize shrank 5→2**
+
+REMAINING WALL — **WALL-C (tool economy / over-reading):** atomic uses ~11 tool calls / 7-12 reads vs native's ~6 / 1-2. DeepSeek over-reads (re-reads same files, reads broadly) and the green-minimize adds 2 calls. Demolition candidates (generalist): (1) stronger first-pass perception — atomic_survey/atomic_read_many should deliver enough context that re-reads aren't needed; (2) a read-budget that refuses redundant re-reads of already-read symbols; (3) make green-minimize cheaper (it currently costs a full edit+test cycle; could be a no-op text confirmation when no bloat).
+
+NEXT EXACT STEP: demolish WALL-C (tool economy). On the isolated driver, add a read-deduplication guard (refuse re-read of a symbol/file already read verbatim this session, return cached) and/or a read-budget. Re-run R027; if atomic then ties/beats native on tool calls while holding diff+self-verify+wall → assess for ≥2-consecutive dominance → ESCALATE complexity. Canonical landing of WALL-B + WALL-A via atomic_expand_self remains pending (blocked by WALL-META concurrent-clobber on the shared tree).
+
+### Round 027 — ISOLATED gate-ON + WALL-A + WALL-C(read-dedup) — WALL-C-dedup FALSIFIED (over-read is breadth, not redundancy)
+- date: 2026-06-21. Isolated driver with WALL-B (gate-ON) + WALL-A (green-minimize comment/idiom) + WALL-C (read-dedup cache, invalidated on edit).
+- ATOMIC: 21/21 ✓, run_tests_calls=2, 2 edits, diff 2 lines (1+/1-), 12 steps, reads=11, 98.6k tokens, 105.9s. WALL-A held (green-minimize shrank 5→2 again). WALL-B held (self-verify).
+- **WALL-C-dedup FALSIFIED:** reads/tokens did NOT drop (R026: 7 reads/68k; R027: 11 reads/98k — if anything worse, within variance). Transcript forensics: DeepSeek's reads are all DISTINCT (structures.py, models.py prepare_headers, sessions.py merge_setting+prepare_request, adapters.py send+add_headers+line-ranges) — BREADTH exploration across many files/symbols, NOT redundant re-reads of the same query. The dedup cache (catches same-query repeats) therefore didn't fire. The over-reading wall's real driver is EXPLORATION BREADTH, not redundancy.
+- Honest anti-fachada note: this was a wrong hypothesis, tested and falsified by the data. The demolition direction for tool-economy must target breadth (read-budget / stronger first-pass perception / lower FORCE_EDIT_AFTER), not dedup.
+
+## SESSION CONSOLIDATION (2026-06-21, oh-my-pi arm, 6 isolated rounds R022→R027)
+Trajectory on psf__requests-1921, isolated gate-ON driver:
+| round | config | gate | self-verify | diff | edits | wall | tokens |
+|---|---|---|---|---|---|---|---|
+| R022 | NO_GATE blind | None | NO | 10 | 1 | — | — |
+| R023 | gate-ON attempted (concurrent noise) | 21/21 | NO | 4 | 1 | 62s | 72k |
+| R024b | isolated gate-ON (WALL-B) | 21/21 | YES | 6 | 1 | 71s | 44k |
+| R025 | isolated gate-ON | 21/21 | YES | 6 | 1 | 120s | 91k |
+| R026 | + WALL-A (minimize comment/idiom) | 21/21 | YES | **2** | 2 | 107s | 68k |
+| R027 | + WALL-C dedup (falsified) | 21/21 | YES | **2** | 2 | 106s | 99k |
+| NATIVE (frozen) | — | 21/21 | YES | 2 | 2 | ~180s | n/a |
+
+- **2 WALLS DEMOLISHED + PROVEN BY NUMBER:** WALL-B (no-self-verify → run_tests-mandatory via gate-ON: run_tests_calls 0→2, gate_pass None→True); WALL-A (diff-surface 6→2 via strengthened green-minimize that strips agent-added comment bloat, re-verified green). Both generalist, both measured.
+- **1 HYPOTHESIS FALSIFIED:** WALL-C-dedup (over-read is breadth not redundancy).
+- **REMAINING GAP to dominance:** TOOL ECONOMY (atomic 9-14 calls vs native ~6). Real driver = exploration breadth. Demolition direction: read-budget / stronger first-pass perception (atomic_read_many/survey should deliver enough that breadth re-reads aren't needed) / lower FORCE_EDIT_AFTER. NOT yet attempted.
+- **CANONICAL LANDING DEBT:** WALL-B + WALL-A proven on isolated driver but NOT canonicallandable yet (WALL-META: concurrent agents clobber `local_atomic_agent.py`; a concurrent arm PID 7055 was independently landing WALL-A as a DETERMINISTIC comment-strip `CLASS-DOCSTRING-SURFACE-MINIMALITY (F1b)` via atomic_expand_self — independent corroboration of the wall + direction).
+- **DOMINANCE STATUS:** Level-1 psf__requests-1921 NOT yet dominated. Atomic now TIES native on correctness+self-verify+diff+edits and WINS wall; loses only tool-economy. One gap left (breadth over-reading).
+
+NEXT EXACT STEP: (1) Demolish tool-economy at the BREADTH driver: add a read-budget (e.g. after 5 distinct reads with 0 edits, FORCE-EDIT engages steering to commit) OR strengthen atomic_read_many/survey so one call delivers all needed context. (2) Re-run R028; if atomic ties/beats native on tool-calls while holding diff+self-verify+wall → ≥2 consecutive → Level-1 DOMINATED → ESCALATE to a harder SWE-Bench task (multi-file), fire native once for new baseline. (3) Canonical-land WALL-B+WALL-A via atomic_expand_self once the tree is quiet (admit `run_atomic_round.sh`; change `--gate NONE`→gate-ON; the deterministic comment-strip from the concurrent arm covers WALL-A canonically).
+
+### Round 024full sample 3 - Codex-native vs DeepSeek-atomic - `pylint-dev__pylint-7080` - NATIVE DECISIVE WIN / ATOMIC WRONG-TOPOLOGY PATCH
+- date: 2026-06-22. Protocol slice: external Atomic DeepSeek sample completed first on the same SWE task/base snapshot; then a Codex-native worker from this TUI ran the matching clean workspace. Both solver arms were blind/no-feedback (`--gate NONE` for Atomic; native worker instructed not to run project tests). The orchestrator scored both afterward with the same sampled SWE Docker gate.
+- task: `tasks/SWE-pylint-dev__pylint-7080/PROBLEM.md`; base snapshot in both arms: `3c5eca2ded3dd2b59ebaf23eb289453b5d2930f0`.
+- workspaces: `/tmp/swe/round/R024full/pylint-dev__pylint-7080_s3/{atomic,native}`.
+- evidence: `evidence/R024full/pylint-dev__pylint-7080__atomic_s3.json` and `evidence/R024full/pylint-dev__pylint-7080__native_s3.json`.
+- scoring evidence: Atomic re-score used `SWE_CONTAINER=pylint7080_warm SWE_P2P_SAMPLE=15 ...swe_docker_gate.sh .../atomic ...` -> `1 failed, 15 passed`, failing `tests/test_self.py::TestRunTC::test_ignore_path_recursive_current_dir`, `# tests 16`, `# pass 15`, `# fail 1`, exit 1. Native re-score used `SWE_CONTAINER=pylint7080_warm_native SWE_P2P_SAMPLE=15 ...swe_docker_gate.sh .../native ...` -> `16 passed, 1 warning`, `# tests 16`, `# pass 16`, `# fail 0`, exit 0.
+
+| metric | DeepSeek-atomic sample 3 | Codex-native worker | winner |
+|---|---:|---:|---|
+| orchestrator gate | 15/16 FAIL | 16/16 PASS | NATIVE |
+| changed files | 1 (`pylint/lint/pylinter.py`) | 1 (`pylint/lint/expand_modules.py`) | NATIVE on canonical location |
+| self-verify inside worker | NO (`run_tests_calls=0`, `gate_pass=null`, launched blind/`--gate NONE`) | NO (tests prohibited by prompt) | TIE on no-feedback; Atomic fails proof-carrying ideal |
+| diff surface | +6/-0 = 6 | +1/-0 = 1 | NATIVE (6x smaller) |
+| semantic result | caller-side `_discover_files` filter only; misses current-dir anchored path case | shared `_is_ignored_file` normalizes candidate path before all ignore checks | NATIVE |
+| action/cost | 14 steps, 14 reads, 1 edit, 903,312 tokens, 163.2s | worker reported ~44 actions; tokens/wall not exposed | NATIVE on result; Atomic cost pathological |
+| trace/proof | atomic edit trace present, external gate failure after completion | native diff evidence + external gate pass after completion | NATIVE |
+
+Verdict: **NATIVE DECISIVE WIN, NO DOMINANCE.** Atomic escaped the s1 no-commit deadlock but produced a wrong-topology caller-side patch that fails the sampled SWE gate. Native found the canonical one-line shared-predicate normalization and passed all sampled tests. Dominance count remains 0/2; do not escalate complexity.
+
+Class update: **CLASS-CALLSITE-FIX-VS-CANONICAL-PREDICATE**. When multiple exported/caller paths delegate to a shared predicate, the agent must prefer the canonical predicate if the bug is about predicate semantics (`ignore-paths` path matching), not patch one caller's loop. This is generalist across filters, validators, normalizers, routing predicates, and access checks. Related live class: **CLASS-BREADTH-OVERREAD-COST** — 903k tokens and 14 reads to reach a failing 6-line patch reinforces that tool economy must target exploration breadth, not only repeated reads.
+
+### Round 025full sample 2 - Codex-native vs DeepSeek-atomic - `pytest-dev__pytest-5262` - NATIVE MINIMALITY WIN, NO DOMINANCE
+- date: 2026-06-22. Protocol slice: external Atomic DeepSeek sample completed first on the same SWE task/base snapshot; then a Codex-native worker from this TUI ran the matching clean workspace. Both solver arms were blind/no-feedback (`--gate NONE` for Atomic; native worker instructed not to run project tests). The orchestrator scored both afterward with the same sampled SWE Docker gate.
+- task: `tasks/SWE-pytest-dev__pytest-5262/PROBLEM.md`; base snapshot in both arms: `58e6a09db49f34886ff13f3b7520dd0bcd7063cd`.
+- workspaces: `/tmp/swe/round/R025full/pytest-dev__pytest-5262_s2/{atomic,native}`.
+- evidence: `evidence/R025full/pytest-dev__pytest-5262__atomic_s2.json` and `evidence/R025full/pytest-dev__pytest-5262__native_s2.json`.
+- scoring evidence: Atomic re-score used `SWE_CONTAINER=pytest_dev__pytest_5262_atomic SWE_P2P_SAMPLE=15 ...swe_docker_gate.sh .../atomic ...` -> `15 passed`, `# tests 15`, `# pass 15`, `# fail 0`, exit 0. Native re-score used `SWE_CONTAINER=pytest_dev__pytest_5262_native SWE_P2P_SAMPLE=15 ...swe_docker_gate.sh .../native ...` -> `15 passed`, `# tests 15`, `# pass 15`, `# fail 0`, exit 0.
+
+| metric | DeepSeek-atomic sample 2 | Codex-native worker | winner |
+|---|---:|---:|---|
+| orchestrator gate | 15/15 PASS | 15/15 PASS | TIE |
+| changed files | 1 (`src/_pytest/capture.py`) | 1 (`src/_pytest/capture.py`) | TIE |
+| self-verify inside worker | NO (`run_tests_calls=0`, `gate_pass=null`, launched blind/`--gate NONE`) | NO (tests prohibited by prompt) | TIE on no-feedback; Atomic fails proof-carrying ideal |
+| diff surface | +6/-0 = 6 | +5/-0 = 5 | NATIVE |
+| semantic canonicity | adds `EncodedFile.mode` stripping `b`, with two-line docstring | same behavior, one-line docstring | TIE behavior; NATIVE minimality |
+| action/cost | 5 steps, 3 reads, 1 edit, 47,172 tokens, 28.1s | worker reported 8 top-level tool invocations / ~16 command-edit actions; tokens/wall not exposed | mixed / instrumentation gap |
+| trace/proof | atomic edit trace present, external gate pass after completion | native diff evidence + external gate pass after completion | mixed |
+
+Verdict: **NATIVE MINIMALITY WIN, NO DOMINANCE.** Both arms pass the sampled gate and implement the same behavior. Atomic remains fast and low-read but blind, and loses diff surface by adding a longer explanatory docstring. Dominance count remains 0/2; do not escalate complexity from this datapoint.
+
+Class update: this independently reconfirms **CLASS-DOCSTRING-SURFACE-MINIMALITY** for `EncodedFile.mode`: benchmark fixes should not add explanatory comments/docstrings unless required by behavior or proven no-cost by the minimizer. The deterministic comment-strip/minimize work in the parallel loop is relevant here, but this blind runner path did not apply it before submission.
+
+### Round 025full sample 3 - Codex-native vs DeepSeek-atomic - `pylint-dev__pylint-7080` - BOTH FAIL; NATIVE MATERIAL PROGRESS WIN
+- date: 2026-06-22. Protocol slice: external Atomic DeepSeek sample completed first on the same SWE task/base snapshot; then a Codex-native worker from this TUI ran the matching clean workspace. Both solver arms were blind/no-feedback (`--gate NONE` for Atomic; native worker instructed not to run project tests). The orchestrator scored both afterward with the same sampled SWE Docker gate.
+- task: `tasks/SWE-pylint-dev__pylint-7080/PROBLEM.md`; base snapshot in both arms: `3c5eca2ded3dd2b59ebaf23eb289453b5d2930f0`.
+- workspaces: `/tmp/swe/round/R025full/pylint-dev__pylint-7080_s3/{atomic,native}`.
+- evidence: `evidence/R025full/pylint-dev__pylint-7080__atomic_s3.json` and `evidence/R025full/pylint-dev__pylint-7080__native_s3.json`.
+- scoring evidence: Atomic re-score used `SWE_CONTAINER=pylint7080_warm SWE_P2P_SAMPLE=15 ...swe_docker_gate.sh .../atomic ...` -> empty diff failure, `# tests 0`, `# pass 0`, `# fail 1`, exit 1. Native re-score used `SWE_CONTAINER=pylint7080_warm_native SWE_P2P_SAMPLE=15 ...swe_docker_gate.sh .../native ...` -> `1 failed, 15 passed`, failing `tests/test_self.py::TestRunTC::test_ignore_path_recursive_current_dir`, `# tests 16`, `# pass 15`, `# fail 1`, exit 1.
+
+| metric | DeepSeek-atomic sample 3 | Codex-native worker | winner |
+|---|---:|---:|---|
+| orchestrator gate | FAIL empty diff (`0/0`, fail marker 1) | 15/16 FAIL | NATIVE on material progress, neither correct |
+| changed files | 0 | 1 (`pylint/lint/expand_modules.py`) | NATIVE |
+| self-verify inside worker | NO (`run_tests_calls=0`, `gate_pass=null`, launched blind/`--gate NONE`) | NO (tests prohibited by prompt) | TIE on no-feedback; Atomic fails proof-carrying ideal |
+| diff surface | 0 because no edit | +4/-0 = 4 | NATIVE on attempted behavior; Atomic cannot claim minimality because it delivered nothing |
+| semantic result | no committed fix; force-edit deadlocked after refusing reads | shared predicate adds trailing-separator directory check, but misses current-dir anchored path case | NATIVE partial |
+| action/cost | 9 steps, 12 reads, 0 edits, 565,771 tokens, 144.8s | worker reported 11 assistant tool invocations; tokens/wall not exposed | NATIVE |
+| trace/proof | transcript shows read-loop to force-edit deadlock, external empty-diff failure | native diff evidence + external gate failure after completion | NATIVE |
+
+Verdict: **BOTH FAIL; NATIVE MATERIAL PROGRESS WIN, NO DOMINANCE.** Atomic again produced no patch and failed the empty-diff guard. Native produced a plausible shared-predicate patch but still failed the current-dir anchored-path regression. This round does not count as native correctness dominance, but it reinforces that Atomic's force-edit no-commit wall is still severe. Do not escalate complexity.
+
+Class update: **CLASS-FORCE-EDIT-DEADLOCK-NO-COMMIT** reconfirmed on Pylint with high cost (565,771 tokens, 12 reads, 0 edits). The native failure also clarifies the predicate class: the canonical fix must handle both directory trailing-separator matching and cwd-relative/current-dir normalization, not just one caller or one path spelling.
+
+### Rounds 028-031 — WALL-C-breadth DEMOLISHED + WALL-A high-variance characterized + perception-steer BACKFIRED (reverted)
+- date: 2026-06-21/22. Isolated gate-ON driver. Frozen native baseline: 21/21, diff 2 (canonical `to_key_val_list(merged_setting)`), ~6 calls, ~180s.
+- R028 (WALL-C-breadth: targeted-read-first steer + FORCE_EDIT_AFTER 12→8): 21/21 ✓, self-verify ✓, **diff 4 (duplicated session_setting loop)**, **30,268 tokens / 6 steps / 8 calls / 75.6s** — BEST tool-economy (approaching native); targeted-read made DeepSeek grep merge_setting directly, no flow-tracing. WALL-C-breadth DEMOLISHED for economy.
+- R029 (same config, reproducibility): 21/21 ✓, diff 3 (duplicated), 41k tokens / 8 steps / 87.5s — confirms WALL-C-breadth economy is STABLE; confirms DeepSeek RELIABLY picks duplicated-logic initial fix under targeted-read.
+- R030 (added WALL-A-consolidation: green-minimize check (3) DUPLICATED CONSTRUCTS → consolidate onto existing combined var): 21/21 ✓, **diff 2 (canonical `list(merged_setting.items())` — consolidation PROVEN: minimize shrank 7→2)**, BUT 93k tokens / 14 steps / 154s — a transient gate flake (s4: 20/21 test_basicauth_with_netrc, then green) + the minimize cycle inflated cost. Consolidation WORKS but is an expensive post-hoc repair.
+- R031 (added perception-steer in topology-guidance: "look for existing combined variable"): 21/21 ✓, **diff 7 (REGRESSION — over-engineering)**. The steer + low FORCE_EDIT pushed DeepSeek to add None-stripping to the EARLY-RETURN path too (2 fix sites). Perception-steer BACKFIRED → REVERTED to R030 config.
+
+**HONEST CHARACTERIZATION of WALL-A (diff/canonicity):** HIGH VARIANCE across 10 rounds — diff results: 6,6,2,2,4,3,2,7. The MINIMUM (2, matching native) is ACHIEVABLE (R026/R027/R030) but NOT RELIABLE, because DeepSeek's INITIAL fix topology varies (canonical-merged vs duplicated-parallel-loop vs over-engineered-multi-site). Prompt-nudges are UNRELIABLE for this wall (consolidation-minimize helps R030; perception-steer backfired R031). The wall is closest to model-reasoning (which fix topology DeepSeek picks), BUT per owner doctrine it is STILL representation — the reliable demolition is DETERMINISTIC (not prompt): extend the concurrent arm's `CLASS-DOCSTRING-SURFACE-MINIMALITY` deterministic comment-strip to a deterministic duplicated-construct-consolidation, OR deliver the derivation graph (merged_setting = union of sources) as perception so the INITIAL fix is canonical.
+
+**FULL SESSION TRAJECTORY (psf__requests-1921, isolated gate-ON, frozen native = diff 2 / ~6 calls / ~180s):**
+| round | config | gate | self-verify | diff | tokens | steps | wall |
+|---|---|---|---|---|---|---|---|
+| R022 | NO_GATE blind | None | ❌ | 10 | — | — | — |
+| R024b | +WALL-B | 21/21 | ✅ | 6 | 44k | 8 | 71s |
+| R026 | +WALL-A minimize | 21/21 | ✅ | 2 | 68k | 9 | 107s |
+| R028 | +WALL-C-breadth | 21/21 | ✅ | 4 | **30k** | **6** | **76s** |
+| R030 | +WALL-A-consolidation | 21/21 | ✅ | **2** | 93k | 14 | 154s |
+| R031 | +perception-steer (backfired) | 21/21 | ✅ | 7 | 121k | 12 | 169s |
+
+**WALLS DEMOLISHED + PROVEN (reliable, stable):**
+- **WALL-B (self-verify):** run_tests_calls 0→1-3, gate_pass None→True, stable across 8 rounds. The `--gate NONE` blind-submission was the wall; gate-ON + run_tests-mandatory closed it.
+- **WALL-C-breadth (exploration economy):** R028 30k tokens/6 steps (vs R024b 44k/R025 91k). Targeted-read-first steer made DeepSeek grep the symbol directly instead of tracing the whole flow.
+
+**WALL still OPEN (high-variance):**
+- **WALL-A (diff/canonicity):** min achievable 2 (matches native) but variance 2-7; needs DETERMINISTIC demolition (duplicated-construct consolidation) not prompt-nudge.
+
+**DOMINANCE STATUS (honest):** NOT yet. atomic TIES native on correctness+self-verify; WINS wall (best 76s vs ~180s); CAN match diff (2) but not reliably+cheaply simultaneously (R028 cheap but diff 4; R030 diff 2 but expensive). Tool-economy best 30k/6steps (R028) but trades against diff.
+
+NEXT EXACT STEP: (1) The diff-wall needs a DETERMINISTIC demolition — build a harness-side duplicated-construct detector/consolidator (generalist: detect two adjacent loops with same body over different iterables → suggest/apply consolidation onto a combined iterable, re-verify gate, rollback if not green). More reliable than prompt-nudges. (2) Canonical-land WALL-B (gate-ON launcher) + WALL-A-consolidation via atomic_expand_self once tree is quiet (admit run_atomic_round.sh; the concurrent arm's deterministic comment-strip covers the comment facet of WALL-A canonically). (3) When diff-wall is deterministically closed → atomic wins correctness+self-verify+diff+wall+economy → ≥2 consecutive → Level-1 DOMINATED → ESCALATE to a harder SWE-Bench task (multi-file), fire native once for new baseline.
+
+### Round 025full d3 - Codex-native vs DeepSeek-atomic - `psf__requests-1921` - MIXED: ATOMIC SURFACE/WALL WIN, NATIVE CANONICITY WIN, NO DOMINANCE
+- date: 2026-06-22. Protocol slice: external Atomic DeepSeek gate-ON sample completed first, then a Codex-native worker from this TUI ran the same SWE task/base snapshot. Both workdirs were externally re-scored with the same sampled SWE Docker gate.
+- task: `tasks/SWE-psf__requests-1921/PROBLEM.md`; base snapshot in both arms: `3c88e520da24ae6f736929a750876e7654accc3d`.
+- workspaces: `/tmp/atomic-loop-r017-20260621210723/{atomic_d3,native_d3}`.
+- evidence: `evidence/R025full/psf__requests-1921__atomic_d3.json` and `evidence/R025full/psf__requests-1921__native_d3.json`.
+- scoring evidence: Atomic re-score -> `21 passed, 10 warnings`, `# tests 21`, `# pass 21`, `# fail 0`, exit 0. Native re-score -> `21 passed, 10 warnings`, `# tests 21`, `# pass 21`, `# fail 0`, exit 0.
+
+| metric | DeepSeek-atomic d3 | Codex-native worker | winner |
+|---|---:|---:|---|
+| orchestrator gate | 21/21 PASS | 21/21 PASS | TIE |
+| self-verify inside worker | YES (`run_tests_calls=1`, `gate_pass=true`) | NO (tests prohibited by prompt) | ATOMIC |
+| changed files | 1 (`requests/sessions.py`) | 1 (`requests/sessions.py`) | TIE |
+| diff surface | +4/-1 = 5 | +5/-4 = 9 | ATOMIC |
+| semantic canonicity | source-input session loop after request loop; green on sample but deletes by source, not final merged value | filters final merged mapping via staged `none_keys` | NATIVE |
+| action/cost | 8 steps, 6 reads, 1 edit, 1 test, 62,180 tokens, 145.3s | worker reported ~16 actions; tokens/wall not exposed | mixed |
+| trace/proof | atomic self-verified + external re-score | native external gate pass after completion | ATOMIC on proof |
+
+Verdict: **NO DOMINANCE.** Atomic wins surface, wall/proof, and self-verification on this d3 sample, but native wins semantic canonicity by filtering the final merged mapping instead of scanning source inputs. This is not enough to escalate complexity.
+
+Class update: `CLASS-MERGE-FINAL-VALUE-CANONICALITY` remains live on gate-green Atomic samples despite prompt/proof work; deterministic consolidation/minimization must preserve final-value semantics, not merely shrink duplicated loops. Landability wall also observed: a focused `atomic-agent-force-edit-deadlock.proof.mjs` red proof creation via `atomic_expand_self` was refused/rolled back by broader self-expansion lattice/proof-coverage gates even though the cited focused gates (`temp-artifact-hygiene`, `doc-honesty`, `converge-symbol-mutation`) were green when run directly. Treat this as `CLASS-SELF-EXPANSION-LATTICE-DRIFT-BLOCKS-FOCUSED-PROOF` before claiming canonical closure of force-edit no-commit.
+
+### Round 032 — R026-config (no targeted-read, FORCE_EDIT=12) — STUCK (liveness hang) + self-verify caught a REAL bug
+- date: 2026-06-22. Reverted to R026-config (WALL-B + WALL-A-consolidation, NO targeted-read, FORCE_EDIT_AFTER=12) to test the economy↔canonicity tension hypothesis.
+- DeepSeek produced a canonical-LOOKING fix: `for (k,v) in merged_setting.items()` (2 lines) — BUT missing `list()` wrapper → **dict-changed-during-iteration RuntimeError** when a None key is deleted → gate **20/21 (1 FAIL)**. The self-verify (WALL-B) CAUGHT this real bug — proving WALL-B does genuine error-catching work (this bug would NOT have been caught by R028/R029's duplicated session_setting loop, which iterates a source dict, not merged).
+- Then the agent STUCK: >5min running, 0 log lines, diff unchanged — a MODEL-CALL-LIVENESS hang (DeepSeek API call or retry loop hung) instead of correcting to `list(merged_setting.items())`. Killed.
+- Verdict: INCONCLUSIVE (liveness hang). But it (a) re-confirms WALL-B catches real bugs, (b) surfaces the MODEL-CALL-LIVENESS wall (doctrine §9 names it: "hard rounds need first-class timeout/heartbeat and must emit structured result JSON even on timeout"), (c) shows the canonical-fix path has a subtle correctness trap (iterate-merged REQUIRES list()) that the duplicated fix avoids — explaining some of DeepSeek's variance.
+
+## SESSION 2 CONSOLIDATION (R028-R032) — added to session 1 (R022-R027)
+- **2 more walls characterized this session segment:** WALL-C-breadth DEMOLISHED (R028: 30k tokens/6 steps via targeted-read-first); MODEL-CALL-LIVENESS surfaced (R032 stuck).
+- **WALL-A (diff/canonicity) definitively characterized as HIGH-VARIANCE + correctness-trap-laden:** DeepSeek's canonical-looking fixes sometimes miss `list()` (R032: 20/21); its duplicated fixes pass (R028/R029) but are larger. The reliable path to diff-2 is the WALL-A-consolidation minimize (R030: got 2), but it's an expensive post-hoc repair, and the variance means ≥2-consecutive diff-2 is hard to guarantee.
+- **NET DOMINANCE STATUS (honest, 11 rounds):** atomic TIES native on correctness (when not hitting the list()-trap) + self-verify (WALL-B, stable, catches real bugs); WINS wall (best 76s vs ~180s); CAN match diff (2) but high-variance + a correctness trap the self-verify must catch; tool-economy best 30k (R028) but trades against diff. NOT yet dominant on EVERY metric with huge margin simultaneously.
+
+NEXT EXACT STEP (heavier builds, the realistic path to dominance):
+1. **MODEL-CALL-LIVENESS** (doctrine §9): add a hard heartbeat/timeout to the DeepSeek call + structured result JSON on timeout (so a hang emits an honest outcome, not a silent stuck). Generalist, unblocks reliable measurement.
+2. **WALL-A deterministic**: a harness-side duplicated-construct consolidator OR a canonical-correctness post-check (e.g. after green, if the fix iterates a dict it mutates, auto-suggest `list(...)`; detect "iterate-then-del-same-dict" → mandatory list()). Deterministic > prompt for this high-variance wall.
+3. Then re-run; when atomic wins correctness+self-verify+diff+wall+economy with huge margin ≥2 consecutive → Level-1 DOMINATED → ESCALATE.
+
+### Round R027gate Pylint - Codex-native vs DeepSeek-atomic gate-ON - BOTH FAIL; ATOMIC SMALLER/SELF-VERIFIED FAILURE, NATIVE LOCAL-TDD FALSE GREEN
+- date: 2026-06-22. Protocol slice: an already-running Atomic DeepSeek gate-ON Pylint arm finished first; this TUI then launched Codex-native worker `Schrodinger` on the same SWE task/base snapshot in `/tmp/swe/round/R027gate/pylint/native`. Native used only native tools, did not inspect `.gold`, and did not run the SWE Docker grader; project-local tests were allowed. Both workdirs were externally scored afterward with the same sampled SWE Docker gate.
+- task: `tasks/SWE-pylint-dev__pylint-7080/PROBLEM.md`; base snapshot in both arms: `3c5eca2ded3dd2b59ebaf23eb289453b5d2930f0`.
+- workspaces: `/tmp/swe/round/R027gate/pylint/{atomic,native}`.
+- evidence: `evidence/R027gate/pylint__atomic_gateON.json` and `evidence/R027gate/pylint__native_gateON.json`.
+- scoring evidence: Atomic re-score used `SWE_CONTAINER=pylint7080_claude SWE_P2P_SAMPLE=15 ...swe_docker_gate.sh .../atomic ...` -> `1 failed, 15 passed`, failing `tests/test_self.py::TestRunTC::test_ignore_path_recursive_current_dir`, `# tests 16`, `# pass 15`, `# fail 1`, exit 1. Native re-score used `SWE_CONTAINER=pylint7080_warm_native SWE_P2P_SAMPLE=15 ...swe_docker_gate.sh .../native ...` -> `1 failed, 15 passed`, same failing test, `# tests 16`, `# pass 15`, `# fail 1`, exit 1.
+
+| metric | DeepSeek-atomic R027gate | Codex-native worker | winner |
+|---|---:|---:|---|
+| orchestrator gate | 15/16 FAIL | 15/16 FAIL | neither correct |
+| changed files | 1 (`pylint/lint/pylinter.py`) | 2 (`pylint/lint/pylinter.py`, `tests/lint/unittest_lint.py`) | ATOMIC on scope |
+| self/local verification | YES, 4 gate calls, all still red (`gate_pass=false`) | YES local TDD, `64 passed`, but hidden gate failed | ATOMIC on truthful hidden-gate signal; native on local TDD only |
+| diff surface | 6 runtime lines | 45 total lines / 25 runtime lines / 20 test lines | ATOMIC smaller, but failed |
+| semantic result | caller-side recursive `.py` filter; misses current-dir anchored path normalization | broader caller-side package/file filters + local test; still misses current-dir anchored path normalization | neither; both wrong topology |
+| action/cost | 40 steps, 34 reads, 4 tests, 2,977,035 tokens, 583.8s | worker reported ~40 tool invocations / ~55 shell-edit actions | mixed; Atomic cost pathological |
+| trace/proof | Atomic trace + repeated failing gate, no false green | native diff + local test evidence, external false green caught afterward | ATOMIC on proof honesty |
+
+Verdict: **BOTH FAIL; NO DOMINANCE; no complexity escalation.** Atomic did not fake success and its patch was smaller, but it exhausted 40 steps and 2.98M tokens on the same caller-side topology that fails the hidden current-dir regression. Native built a local regression and passed `64` local tests, but its broader caller-side patch also failed the hidden current-dir gate. This is a representation failure in the available perception/action space, not a model excuse.
+
+Class update: `CLASS-CALLSITE-FIX-VS-CANONICAL-PREDICATE` is now reproduced under gate-ON feedback and native TDD. For predicate/normalizer bugs, the first-edit layer must make the shared predicate/normalizer the salient location before callers add filters. General form: if multiple caller paths invoke a shared predicate/normalizer and the failing behavior is matching/canonicalization, surface the predicate's input normalization contract and prefer a one-site predicate fix over caller-side filtering. Related class: `CLASS-HIDDEN-GATE-SCOPE-MISMATCH-LOCAL-TDD-FALSE-GREEN` — a local regression that does not encode cwd-relative/current-dir semantics can pass while the SWE hidden F2P still fails, so benchmark loop evidence must keep the external scorer authoritative.
+
+Next exact step for this Pylint class: do not re-run blind Pylint until the Atomic first-edit/perception layer can deterministically surface the canonical predicate/normalizer candidate (`_is_ignored_file`-style shared matching functions) from failing tests and call graph evidence. This folds into the broader F2 first-edit work already identified for Requests: make the minimal canonical site structural and pre-write, not a prompt hint or post-hoc minimizer.
+
+### Rounds 034-036 — DETERMINISTIC-MINIMIZE (delta-debug) landed + LIVENESS bound + SYNTHESIS config — economy↔diff tension CONFIRMED
+- date: 2026-06-22. Iso driver now carries: WALL-B (gate-ON self-verify) + LIVENESS (deepseek timeout 300→90s, retries 5→2; bounds a hang to ~3min vs ~25min) + WALL-A-consolidation prompt + DETERMINISTIC-MINIMIZE (delta-debug: after green, revert each hunk, keep reverted iff gate stays green — reliable shrink regardless of model topology) + targeted-read (WALL-C-breadth).
+- **LIVENESS DEMOLISHED:** the deepseek() 300s×5-retry bound was the root of R032's >5min hang; now 90s×2. Generalist (doctrine §9 named it).
+- **DETERMINISTIC-MINIMIZE landed:** generalist, safe (gate re-verified per hunk). It's the reliable safety-net for over-engineering (multi-hunk). Caveat (honest): cannot split a SINGLE hunk — when DeepSeek's fix is one contiguous non-minimal block (e.g. a parallel-loop), hunk-reversion can't help; needs the prompt-minimize or a rewriter.
+- R034 (R026-config + deterministic): 21/21, diff **2** (prompt-minimize shrank 4→2; deterministic didn't fire — no over-engineering), 10 steps/70k/109s, 8 calls.
+- R035 (SYNTHESIS: targeted-read + deterministic + WALL-B + liveness): 21/21, diff **2** (minimize shrank 9→2), **7 steps/44.8k/91.9s**, 8 calls. Targeted-read gave economy AND diff-2 (minimize compensated the duplicated initial fix).
+- R036 (SYNTHESIS, 2nd datapoint): 21/21, diff **5** (single-hunk parallel session_setting loop; DeepSeek judged "minimal", minimize+ deterministic couldn't shrink a single hunk), **5 steps/26.3k/73.6s, 6 calls** — BEST economy (TIES native on calls!).
+
+**ECONOMY↔DIFF TENSION — definitively confirmed (honest):** atomic matches native on EITHER diff (R035: 2 lines, 8 calls) OR economy (R036: 6 calls, diff 5) in a given run, NOT both simultaneously. Root = DeepSeek's perception variance (whether it perceives `merged_setting` is the union → canonical 1-line fix vs duplicated/parallel loop). The minimize that GUARANTEES diff-2 costs ~2 extra calls; without it, diff varies 2-11. Prompt-steers for perception BACKFIRED (R031). Deterministic hunk-reversion can't split single hunks.
+
+## SESSION 3 CONSOLIDATION — 15 rounds (R022-R036), psf__requests-1921, isolated gate-ON
+**RELIABLY DEMOLISHED + STABLE (the proof-carrying core, the doctrine's differentiator):**
+- WALL-B (self-verify): run_tests_calls 0→1-2, gate_pass None→True, stable 10+ rounds; catches REAL bugs (R032 list()-trap → 20/21 caught).
+- LIVENESS: deepseek timeout bounded (no more 25min hangs).
+- WALL-C-breadth (targeted-read): R036 6 calls/26k tokens/74s — TIES native on tool-economy.
+- DETERMINISTIC-MINIMIZE: reliable multi-hunk over-engineering shrink (delta-debug, gate-reverified).
+
+**BEST RUNS vs frozen native (21/21, diff 2, ~6 calls, ~180s):**
+| run | diff | calls | tokens | wall | result |
+|---|---|---|---|---|---|
+| R035 | 2 | 8 | 45k | 92s | ties diff+self-verify+correctness, WINS wall 2×, loses calls narrow |
+| R036 | 5 | 6 | 26k | 74s | ties calls, WINS wall 2.4×, loses diff |
+| native | 2 | ~6 | n/a | ~180s | — |
+
+**DOMINANCE STATUS (honest, owner's "huge margin in everything" bar): NOT YET.** atomic TIES native on correctness+self-verify (stable), WINS wall hugely (2-2.4×), but the diff+economy SIMULTANEOUS achievement is bounded by DeepSeek's perception variance (the minimize that guarantees diff-2 costs ~2 calls; without it diff varies 2-11). Atomic matches native on diff OR economy per-run, not both at once.
+
+**REMAINING ROOT WALL (perception, hardest):** DeepSeek doesn't reliably perceive that `merged_setting` is the union of session+request → its initial fix is duplicated/parallel, needing the minimize. The faithful demolition = deliver the DERIVATION graph as perception (this var = union/composition of those), so the initial fix is canonical → diff-2 + low calls in one shot. This is the doctrine's "perception sólida-e-completa" — a bigger build (parse function, extract data-flow), not a prompt nudge. Prompt-steers for it backfired (R031).
+
+NEXT EXACT STEP: (1) The perception demolition (deliver var-derivation/containment in atomic_read output) is the path to simultaneous diff-2 + low-calls → genuine dominance. It's the high-value build. (2) Alternatively, a deterministic duplicated-adjacent-loop CONSOLIDATOR (detect new loop + existing loop with same body → merge onto union iterable, gate-reverify) — riskier (rewrites), generalist, would catch R036's parallel-loop. (3) Canonical-land the stable wins (WALL-B gate-ON, LIVENESS, DETERMINISTIC-MINIMIZE) via atomic_expand_self once tree quiet. (4) When diff-2 + low-calls is reliable ≥2 consecutive → Level-1 DOMINATED → ESCALATE complexity.
+
+### Codex maintenance note - MODEL-CALL-LIVENESS self-expansion attempted, rolled back by broader lattice
+- date: 2026-06-22. This note records the canonical agent-CLI lane inspected by this Codex cycle; concurrent local-loop notes may describe an isolated driver/config lane, but this slice did not direct-edit `local_atomic_agent.py`.
+- red precheck before expansion: canonical `core/agent/atomic-full-ab/local-loop/local_atomic_agent.py` still lacked structured liveness controls: no `DEEPSEEK_CALL_TIMEOUT_S`, no `DEEPSEEK_TOTAL_TIMEOUT_S`, no `DeepSeekModelCallTimeout`, no `model_call_liveness_timeout`, no `capability_gap` metric for model-call timeout. `python3 -m py_compile` was green.
+- proposed general class: `MODEL-CALL-LIVENESS` for configurable per-call + total DeepSeek timeout and structured timeout outcome (`capability_gap=model_call_liveness_timeout`) so A/B rounds cannot silently hang or disappear.
+- attempted only through `atomic_expand_self`: candidate driver update plus new proof `core/atomic-edit/gates/atomic-agent-model-call-liveness.proof.mjs`. First attempt was refused before write by preflight disproof briefing digest mismatch. Second attempt ran and rolled back 6 candidate effects.
+- rollback evidence: no liveness proof file landed; the liveness symbols above remained absent afterward; `core/atomic-edit/self-evolution-archive.jsonl` recorded the rejection. The rejection cited broader lattice/proof-coverage failures, while the focused gates named in the top error (`temp-artifact-hygiene`, `converge-symbol-mutation`, `doc-honesty`) were green when run directly outside self-expansion.
+- concurrent-state note: an unrelated/concurrent F2 over-fix signal is present in `local_atomic_agent.py` and was preserved. This cycle did not revert or rewrite it.
+- verdict: `MODEL-CALL-LIVENESS` remains OPEN in the canonical self-expansion lane. Do not claim this liveness closure from this attempt, and do not direct-edit the driver around `atomic_expand_self`.
+- class update: `CLASS-SELF-EXPANSION-LATTICE-DRIFT-BLOCKS-FOCUSED-PROOF` reconfirmed. A focused, general capability cannot land while the broader self-evolution lattice rejects/rolls back unrelated or context-sensitive gates.
+- next exact step: repair the self-expansion lattice/context or create an honest focused agent-CLI proof lane that can land general liveness controls without weakening proof coverage; then retry `MODEL-CALL-LIVENESS` via `atomic_expand_self` only.
+
+### Round R028gate Pylint - Codex-native vs DeepSeek-atomic gate-ON - BOTH FAIL AGAIN; class reproduced after F2-era driver
+- date: 2026-06-22. Protocol slice: an externally running Atomic DeepSeek gate-ON Pylint arm completed for `/private/tmp/swe/round/R028gate/pylint/atomic`; this TUI created `/private/tmp/swe/round/R028gate/pylint/native` from the same base commit and launched Codex-native worker `Sartre` on the same SWE task. Native used only native tools, did not inspect `.gold`, and did not run the SWE Docker grader. External scoring was run afterward by this TUI.
+- task: `tasks/SWE-pylint-dev__pylint-7080/PROBLEM.md`; base snapshot in both arms: `3c5eca2ded3dd2b59ebaf23eb289453b5d2930f0`.
+- evidence: `evidence/R028gate/pylint__atomic_gateON.json` and `evidence/R028gate/pylint__native_gateON.json`.
+- scoring evidence: Atomic in-worker gate ended red (`gate_pass=false`) with `2` `run_tests` calls; its patch is the same caller-side per-file ignore filter topology and the final diff is 6 runtime lines. Native local TDD reported a red/green regression and local suites green, then external SWE gate was run with `SWE_CONTAINER=pylint7080_warm_native SWE_P2P_SAMPLE=15 ...swe_docker_gate.sh .../native ...` -> `1 failed, 15 passed`, failing `tests/test_self.py::TestRunTC::test_ignore_path_recursive_current_dir`, `# tests 16`, `# pass 15`, `# fail 1`, exit 1.
+
+| metric | DeepSeek-atomic R028gate | Codex-native worker R028gate | winner |
+|---|---:|---:|---|
+| orchestrator gate | 15/16 FAIL (`gate_pass=false`) | 15/16 FAIL | neither correct |
+| changed files | 1 (`pylint/lint/pylinter.py`) | 2 (`pylint/lint/pylinter.py`, `tests/lint/unittest_lint.py`) | ATOMIC on scope |
+| diff surface | 6 runtime lines | 41 total lines / 19 runtime lines / 22 test lines | ATOMIC smaller, but failed |
+| verification honesty | 2 gate calls, still red | local TDD green, external hidden gate red | ATOMIC on hidden-gate honesty; native on local test effort only |
+| action/cost | 40 steps, 36 reads, 2 tests, 2,825,429 tokens, 561.7s | worker action count not exposed; local tests multiple | mixed; Atomic cost pathological |
+| semantic result | caller-side `.py` file filter only; misses current-dir anchored path normalization | caller-side directory+file filters plus local pyproject regression; still misses current-dir anchored path normalization | neither; both wrong topology |
+
+Verdict: **BOTH FAIL AGAIN; NO DOMINANCE; no complexity escalation.** This reproduces the R027gate failure after the F2-era driver changes: Atomic remains smaller and trace-honest but still spends pathological tokens/steps on the wrong caller-site topology; native again creates a plausible local regression and passes local tests, but the external hidden gate falsifies it.
+
+Class update: `CLASS-CALLSITE-FIX-VS-CANONICAL-PREDICATE` is stronger, not weaker. The faithful representation for Pylint is not another caller-side file filter or local-only regression; the first-edit perception must surface the shared predicate/normalizer contract that maps cwd-relative/current-dir `ignore-paths` patterns before recursive discovery yields files. `CLASS-HIDDEN-GATE-SCOPE-MISMATCH-LOCAL-TDD-FALSE-GREEN` is also reproduced: local pyproject tests can miss the current-dir scorer semantics.
+
+Next exact step for Pylint: do not count additional blind Pylint Atomic reruns as progress unless they are paired and scored; no escalation from this class. The general capability to build is still deterministic canonical-site surfacing for shared path predicates/normalizers, via `atomic_expand_self` only, after resolving the self-expansion lattice/focused-proof lane.
+
+### Codex maintenance note - F2 deterministic hunk-minimization self-expansion attempted, rolled back
+- date: 2026-06-22. Red-check before expansion failed as expected: canonical `local_atomic_agent.py` had no `CLASS-F2-DETERMINISTIC-HUNK-MINIMIZE` marker, no `_deterministic_hunk_minimize(...)`, no `hunk_minimize_attempts` metric, and no `atomic-agent-hunk-minimize.proof.mjs`.
+- proposed general class: deterministic post-green hunk minimization. After a green multi-hunk diff, isolate each hunk, restore the full green snapshot between candidates, run the declared gate per single-hunk candidate, and keep the smallest green single-hunk patch. This is the deterministic enforcement counterpart to the already-measured advisory F2 signal that DeepSeek ignored in most runs.
+- attempted only through `atomic_expand_self`: candidate driver helpers/metrics plus new proof `core/atomic-edit/gates/atomic-agent-hunk-minimize.proof.mjs`. First attempt was refused before write because the proof command used a non-allowlisted long path. Second attempt used allowlisted `node gates/*.proof.mjs --json` commands and rolled back 6 candidate effects.
+- rollback evidence: no hunk-minimize proof file landed; the driver still lacks the hunk marker/function/metrics; `python3 -m py_compile local_atomic_agent.py` remained green. `core/atomic-edit/self-evolution-archive.jsonl` recorded the rejection. The top error again cited `temp-artifact-hygiene`, `converge-symbol-mutation`, and `doc-honesty`, but all three passed when run directly outside self-expansion.
+- verdict: `CLASS-F2-DETERMINISTIC-HUNK-MINIMIZE` remains OPEN and unlanded. Do not claim deterministic hunk minimization exists in the canonical driver from this attempt, and do not direct-edit the driver around `atomic_expand_self`.
+- class update: `CLASS-SELF-EXPANSION-LATTICE-DRIFT-BLOCKS-FOCUSED-PROOF` is now reproduced for both liveness and hunk-minimization. The next product capability is blocked by self-expansion admission/lattice context, not by lack of a target class.
+- next exact step: repair the self-expansion lattice/context or create an honest focused agent-CLI proof lane that can admit a scoped general driver capability without weakening proof coverage; then retry deterministic hunk-minimization via `atomic_expand_self` only.
+
+### Round R029gate Pylint - Codex-native vs DeepSeek-atomic gate-ON - BOTH FAIL AGAIN; third reproduced hidden-gate false-green pattern
+- date: 2026-06-22. Protocol slice: Atomic DeepSeek gate-ON arm completed for `/private/tmp/swe/round/R029gate/pylint/atomic`; this TUI created `/private/tmp/swe/round/R029gate/pylint/native` from the same base commit and launched Codex-native worker `Gauss` on the same SWE task. Native used only native tools, did not inspect `.gold` or prior diffs, and did not run the SWE Docker grader. External scoring was run afterward by this TUI.
+- task: `tasks/SWE-pylint-dev__pylint-7080/PROBLEM.md`; base snapshot in both arms: `3c5eca2ded3dd2b59ebaf23eb289453b5d2930f0`.
+- evidence: `evidence/R029gate/pylint__atomic_gateON.json` and `evidence/R029gate/pylint__native_gateON.json`.
+- scoring evidence: Atomic in-worker gate ended red (`gate_pass=false`) with `1` `run_tests` call; final diff is again 6 runtime lines. Native local TDD reported a red/green regression and local suites green, then external SWE gate was run with `SWE_CONTAINER=pylint7080_warm_native SWE_P2P_SAMPLE=15 ...swe_docker_gate.sh .../native ...` -> `1 failed, 15 passed`, failing `tests/test_self.py::TestRunTC::test_ignore_path_recursive_current_dir`, `# tests 16`, `# pass 15`, `# fail 1`, exit 1.
+
+| metric | DeepSeek-atomic R029gate | Codex-native worker R029gate | winner |
+|---|---:|---:|---|
+| orchestrator gate | 15/16 FAIL (`gate_pass=false`) | 15/16 FAIL | neither correct |
+| changed files | 1 (`pylint/lint/pylinter.py`) | 2 (`pylint/lint/pylinter.py`, `tests/lint/unittest_lint.py`) | ATOMIC on scope |
+| diff surface | 6 runtime lines | 41 total lines / 14 runtime lines / 27 test lines | ATOMIC smaller, but failed |
+| verification honesty | 1 gate call, still red | local TDD green, external hidden gate red | ATOMIC on hidden-gate honesty; native on local test effort only |
+| action/cost | 40 steps, 36 reads, 1 test, 2,871,757 tokens, 566.7s | worker action count not exposed; local tests multiple | mixed; Atomic cost pathological |
+| semantic result | caller-side `.py` file filter only; misses current-dir anchored path normalization | caller-side `.py` file filter plus local pyproject regression; still misses current-dir anchored path normalization | neither; same wrong topology |
+
+Verdict: **BOTH FAIL AGAIN; NO DOMINANCE; no complexity escalation.** This is the third Pylint A/B reproduction (`R027gate`, `R028gate`, `R029gate`) of the same class: both agents converge on caller-side recursive file filtering and miss the hidden current-dir path-normalization semantics. Atomic is smaller and trace-honest, but the cost remains pathological and the answer is still wrong.
+
+Class update: `CLASS-CALLSITE-FIX-VS-CANONICAL-PREDICATE` is now a repeated, measured wall, not a one-off. Re-running blind Pylint rounds without a canonical predicate/normalizer surfacing capability is measurement churn. `CLASS-HIDDEN-GATE-SCOPE-MISMATCH-LOCAL-TDD-FALSE-GREEN` is reproduced by two independent native workers with local red/green tests.
+
+Next exact step: stop spending Pylint rounds until the self-expansion lattice/focused-proof lane is repaired enough to land a general first-edit/canonical-site operator. R030gate already produced a separate Atomic-only no-edit red sample; do not count it as A/B evidence until paired and externally scored.
+
+### Codex correction note - F2b current state rechecked after concurrent promotions
+- date: 2026-06-22. The earlier Codex note that F2 deterministic hunk-minimization remained open is now historical, not the current driver state.
+- current evidence: `core/agent/atomic-full-ab/local-loop/local_atomic_agent.py` contains `trial_minimal_hunk(workdir, gate)` and the `CLASS-OVERFIX-MULTIPATH-DETERMINISTIC (F2b)` marker. From `core/atomic-edit`, `node gates/atomic-agent-green-minimize.proof.mjs --json` passed and explicitly proved F2b: trial each diff hunk alone, keep the smallest green one, bounded by `cands[:4]`.
+- honest caveat: this F2b mechanism cannot split a single non-minimal hunk. Requests `atomic_g3` hit exactly that ceiling: final diff was one hunk, F2b reported `<2 hunks (1)`, and comment-strip reduced only the added comment line.
+- verdict: F2b is PRESENT in the canonical driver as of this check, but single-hunk canonical rewrite/perception remains open.
+
+### Requests rescore - `atomic_g3` vs frozen `native_n2` - correct but not absolute dominance
+- date: 2026-06-22. Evidence: `evidence/resolved/requests_g3_vs_native_n2_external_rescore.json` plus source artifacts under `/tmp/atomic-loop-r017-20260621210723/`.
+- task: `tasks/SWE-psf__requests-1921/PROBLEM.md`; base snapshot in both arms: `3c88e520da24ae6f736929a750876e7654accc3d`.
+- external rescore: both arms passed `SWE_CONTAINER=psf__requests_1921_iso SWE_P2P_SAMPLE=15 ...swe_docker_gate.sh` with `21 passed`, `# tests 21`, `# pass 21`, `# fail 0`.
+
+| metric | DeepSeek-atomic `atomic_g3` | Codex-native `native_n2` | winner |
+|---|---:|---:|---|
+| external gate | 21/21 PASS | 21/21 PASS | tie |
+| source diff | 3 changed lines in `requests/sessions.py` | 2 changed lines in `requests/sessions.py` | native |
+| tool calls | 6 total | native internals not fully exposed; prior estimate about 6 | tie/uncertain |
+| Atomic cost | 5 steps, 31,188 tokens, 88.0s, 1 test call | not comparable from artifact | Atomic has measured low cost, but not a full native telemetry win |
+| deterministic minimization | comment-strip shrank 1 line; F2b could not fire (`<2 hunks`) | n/a | still open for single-hunk rewrite |
+
+Verdict: **NO ABSOLUTE DOMINANCE; no complexity escalation from Requests.** Atomic is correct and fast here, but the native arm still has the smaller patch surface by one changed line. The remaining class is `CLASS-SINGLE-HUNK-CANONICAL-REWRITE`: when the whole over-fix is one hunk, hunk-reversion cannot shrink it; the agent needs either better derivation perception before the first edit or a deterministic single-hunk rewrite/consolidator.
+
+### Round R031gate Pylint - Codex-native vs DeepSeek-atomic gate-ON - BOTH FAIL; native exposes canonical-site advantage
+- date: 2026-06-22. Protocol slice: Atomic DeepSeek gate-ON arm completed for `/private/tmp/swe/round/R031gate/pylint/atomic`; this TUI created `/private/tmp/swe/round/R031gate/pylint/native` from the same base commit and launched Codex-native worker `Locke` on the same SWE task. Native used only native tools, did not inspect `.gold` or prior diffs, and did not run the SWE Docker grader. External scoring was run afterward by this TUI.
+- task: `tasks/SWE-pylint-dev__pylint-7080/PROBLEM.md`; base snapshot in both arms: `3c5eca2ded3dd2b59ebaf23eb289453b5d2930f0`.
+- evidence: `evidence/R031gate/pylint__atomic_gateON.json` and `evidence/R031gate/pylint__native_gateON.json`.
+- scoring evidence: Atomic ended red (`gate_pass=false`) after 50 steps with `2` `run_tests` calls; final diff is 6 runtime lines in `pylint/lint/pylinter.py`. Native local repro passed after a 4-line source edit in `pylint/lint/expand_modules.py`, but external SWE gate with `SWE_CONTAINER=pylint7080_warm_native SWE_P2P_SAMPLE=15 ...swe_docker_gate.sh .../native ...` failed `1 failed, 15 passed`, failing `tests/test_self.py::TestRunTC::test_ignore_path_recursive_current_dir`, `# tests 16`, `# pass 15`, `# fail 1`, exit 1.
+
+| metric | DeepSeek-atomic R031gate | Codex-native worker R031gate | winner |
+|---|---:|---:|---|
+| external/orchestrator gate | 15/16 FAIL (`gate_pass=false`) | 15/16 FAIL | neither correct |
+| changed files | 1 (`pylint/lint/pylinter.py`) | 1 (`pylint/lint/expand_modules.py`) | tie on file count |
+| diff surface | 6 runtime lines | 4 runtime lines | native, but failed |
+| topology | caller-side `.py` file filtering | canonical predicate `_is_ignored_file` path handling | native topology advantage |
+| verification honesty | hidden gate red in transcript | local repro green, hidden gate red after external scoring | Atomic on in-loop hidden-gate honesty |
+| action/cost | 50 steps, 50 reads, 2 tests, 3,601,386 tokens, 615.5s | worker internal token/tool count not exposed | Atomic cost pathological |
+
+Verdict: **BOTH FAIL; NO DOMINANCE; no complexity escalation.** R031 is different from R028/R029 because native found the correct family of site (`expand_modules.py::_is_ignored_file`) while Atomic read it early and still edited the caller. Native still missed the current-dir anchored path-normalization edge, so it is not a correct solution, but it exposes the representation gap more cleanly.
+
+Class update: `CLASS-CALLSITE-FIX-VS-CANONICAL-PREDICATE` now has a stronger operational target: first-edit perception must rank shared predicates/path normalizers above caller loops when the symptom is recursive traversal with ignore rules. `CLASS-CANONICAL-PREDICATE-INCOMPLETE-NORMALIZATION` is the next sub-wall: even editing the predicate is insufficient unless the current-dir/trailing-separator semantics are represented and tested. R032gate was already started by another orchestrator; do not spawn extra blind Pylint natives unless pairing a completed Atomic artifact exactly once.
+
+Next exact step: if R032gate completes, pair and score it once for protocol honesty, then stop Pylint churn and land a general canonical-site surfacing/perception operator via `atomic_expand_self` only. No escalation until Pylint or an equivalent higher wall is actually dominated.
+
+### Codex maintenance note - pre-edit callgraph tool self-expansion attempted, rolled back
+- date: 2026-06-22. Root wall from R031/R032 inspection: the driver prompt says `atomic_callers(F)`, but `atomic_callers` is not exposed as an active tool schema nor dispatched in `DISPATCH`; it exists only as prompt text and post-edit ROOT-CHECK machinery. This is a real representation gap: an instructed action was unavailable before the first edit.
+- red-check: from `core/atomic-edit`, `node gates/atomic-agent-pre-edit-topology.proof.mjs --json` was already red in the current tree. It failed the topology prompt checks (`Before the first edit...`, canonical location/public exports/minimizing bytes) while `node gates/atomic-agent-lean-surface.proof.mjs --json` was green.
+- attempted only through `atomic_expand_self`: add `atomic_callers` aliases, active tool schema, and dispatch to `atomic_grep_calls`; strengthen the pre-edit topology prompt; extend the pre-edit topology proof to require the real callgraph tool.
+- first attempt was refused before write because `replace_text` lacked `proofOfIncorrectness`. Second attempt included negative-byte proofs and rolled back candidate effects. `core/atomic-edit/self-evolution-archive.jsonl` sequence 533 records the rejection.
+- rollback evidence: current `local_atomic_agent.py` still lacks active `atomic_callers` tool/dispatch and still lacks the `Before the first edit...` strengthened prompt; `node gates/atomic-agent-pre-edit-topology.proof.mjs --json` remains red. No driver capability landed.
+- top rejection summary: `temp-artifact-hygiene`, `converge-symbol-mutation`, and `atomic-agent-pre-edit-topology` failed inside admission. The candidate also did not satisfy its own focused topology proof, so this was not merely broad-lattice noise.
+- verdict: `CLASS-PRE-EDIT-CALLGRAPH-TOOL-GAP` remains OPEN. Do not claim callgraph surfacing is present. The next self-expansion attempt must first make the focused proof green in candidate shape, then handle admission hygiene/converge context.
+
+### Round R032gate Pylint - DeepSeek-atomic gate-ON beats Codex-native on correctness, but not cost dominance
+- date: 2026-06-22. Protocol slice: Atomic DeepSeek gate-ON arm completed for `/private/tmp/swe/round/R032gate/pylint/atomic`; this TUI created `/private/tmp/swe/round/R032gate/pylint/native` from the same base commit and launched Codex-native worker `Jason` on the same SWE task. Native used only native tools, did not inspect `.gold` or prior diffs, and did not run the SWE Docker grader. External scoring was run afterward by this TUI.
+- task: `tasks/SWE-pylint-dev__pylint-7080/PROBLEM.md`; base snapshot in both arms: `3c5eca2ded3dd2b59ebaf23eb289453b5d2930f0`.
+- evidence: `evidence/R032gate/pylint__atomic_gateON.json` and `evidence/R032gate/pylint__native_gateON.json`.
+- scoring evidence: Atomic in-worker gate ended green (`gate_pass=true`) with `16/16`, `2` `run_tests` calls, final diff 4 runtime lines in `pylint/lint/expand_modules.py`. External rescore on `SWE_CONTAINER=pylint7080_warm` also passed `16 passed`, `# tests 16`, `# pass 16`, `# fail 0`. Native local repro/focused tests passed, but external SWE gate with `SWE_CONTAINER=pylint7080_warm_native SWE_P2P_SAMPLE=15 ...swe_docker_gate.sh .../native ...` failed `1 failed, 15 passed`, failing `tests/test_self.py::TestRunTC::test_ignore_path_recursive_current_dir`, `# tests 16`, `# pass 15`, `# fail 1`, exit 1.
+
+| metric | DeepSeek-atomic R032gate | Codex-native worker R032gate | winner |
+|---|---:|---:|---|
+| external/orchestrator gate | 16/16 PASS (`gate_pass=true`) | 15/16 FAIL | ATOMIC |
+| changed files | 1 (`pylint/lint/expand_modules.py`) | 1 (`pylint/lint/pylinter.py`) | tie on file count |
+| diff surface | 4 runtime lines | 6 runtime lines | ATOMIC |
+| topology | canonical `expand_modules.py` post-normalize filter | caller-side `.py` file filtering | ATOMIC |
+| verification honesty | hidden gate green in-loop and external rescore green | local repro green, hidden gate red after external scoring | ATOMIC |
+| action/cost | 50 steps, 45 reads, 25 body reads, 2 tests, 3,746,656 tokens, 642.9s | worker internal token/tool count not exposed; local validation ran | native likely cheaper; Atomic cost pathological |
+| deterministic minimization | F2b reduced multi-hunk green patch from 10 changed lines to 4 | n/a | ATOMIC capability worked |
+
+Verdict: **ATOMIC WINS CORRECTION/SURFACE/TOPOLOGY/HONESTY, BUT NOT ABSOLUTE DOMINANCE.** This is the first R027-R032 Pylint round where Atomic beats the native worker on the acceptance gate. It does not satisfy the user's escalation bar because cost is still pathological (50 steps, 3.7M tokens, 642.9s) and the needed pre-edit callgraph tool gap remains unlanded.
+
+Class update: `CLASS-CALLSITE-FIX-VS-CANONICAL-PREDICATE` is partially demolished by measured behavior, not by the failed self-expansion: the existing driver eventually found the canonical `expand_modules.py` site, and F2b removed the redundant caller-side hunk. `CLASS-PRE-EDIT-CALLGRAPH-TOOL-GAP` remains the main path to make this fast and first-edit rather than a 50-step salvage. No complexity escalation until Atomic repeats this kind of win with large cost reduction for at least two consecutive rounds.
+
+Next exact step: pair any already-started Pylint Atomic artifacts once for protocol honesty, but stop blind churn. Land `atomic_callers`/pre-edit canonical-site surfacing via `atomic_expand_self` with a focused proof that is green in candidate form, then re-run Pylint to verify the same correctness with much lower steps/tokens.
+
+## ★★★ R032 (Claude-Code session) — pylint-7080 RESOLVED by DeepSeek-atomic — OFFICIAL harness, cross-model 4/5→5/5
+- date 2026-06-22. R032gate completed: gate_pass=True. SCORED on the OFFICIAL SWE-bench-Verified harness (run_id
+  pylint_R032_official): **Instances resolved: 1, ✓=1 ✖=0, full P2P.** Detail: evidence/R022-R023-CLAUDE-FINDINGS.md.
+- The "model ceiling" verdict on pylint (R027) was RETRACTED then DISPROVEN BY NUMBER. It was 4 of MY representation
+  walls, each diagnosed from the prior round's trace, each generalist + committed:
+  (1) CLASS-CALLGRAPH-BLIND-NONJS [perception.calls JS-node-only → +call/+method_invocation; lens SOURCE_RE JS-only
+  → widened; atomic-call blanks WORKSPACE_ROOT → ATOMIC_EDIT_REPO_ROOT=workdir; +expose atomic_callers] (84f86fa,6a99b2f)
+  (2) CLASS-GUARD-CALLS-EXISTING [UNAVOIDABLE auto-inject of existing fn call-sites+BODY into edit receipt; body-read
+  fixed to engine tool code_readcode so the model finally SEES _is_ignored_file's un-normalized body] (5e5f023,2fc2268)
+  (3) CLASS-FORCE-EDIT-TOO-RIGID [re-gate force-edit lockout on REDUNDANT reads not TOTAL — breadth no longer killed] (8525f14)
+  (4) CLASS-HIDDEN-TEST-HUNT [tell model the grader test is hidden; it had burned ~20 steps hunting it]
+- With all 4 down, DeepSeek added `_is_ignored_file(filepath,...)` after the existing `os.path.normpath(filepath)` in
+  expand_modules — a valid root-fix the body-injection led it to. **FINAL cross-model resolved-rate = DeepSeek-atomic
+  5/5** (all of {flask-5014, requests-1921, pytest-5262, pytest-7982, pylint-7080}) vs native one-shot 4/5. Honest scope:
+  pylint needed the gate-ON iterate loop (atomic's proof-carrying core), not one-shot; this is a CORRECTNESS win +
+  equalization on tool-count, not a strict all-metrics-dominance round. Run from clobber-immune iso driver
+  /private/tmp/swe/iso-driver-claude/laa_iso.py (WALL-META: omp co-edits canonical). pylint was never the model.
+- NEXT EXACT STEP (Claude): re-score the full 5-suite one-shot with the complete chain for a clean 5/5 by-number
+  headline; then ESCALATE complexity (e.g. the astropy-12907 task already staged) firing a fresh native baseline once.
+
+## ★★ R034–R036 (Claude session) — regression guard + ESCALATION to astropy-12907 — correctness + near tool-economy parity
+- R034 (regression guard, official harness, complete-chain driver): the 4 one-shot winners = **4/4 RESOLVED** —
+  the 11 demolitions (incl. ATOMIC_EDIT_REPO_ROOT rooting keystone) did NOT regress one-shot. Headline holds:
+  4/4 one-shot + pylint via gate-ON = **5/5 cross-model, complete chain, officially confirmed**.
+- R035 ESCALATION (loop step 7 — astropy-12907, harder: separability_matrix nested-CompoundModel bug, fix in
+  modeling/separable.py `_cstack`). BOTH arms ONE-SHOT, official harness: **DeepSeek-atomic RESOLVED**
+  (astropy_R035_atomic ✓, 7 calls/226k tok) = **native-Claude RESOLVED** (astropy_R035_native ✓, 3 calls/35k tok),
+  IDENTICAL gold fix `cright[...] = right` (was `= 1`). Correctness PARITY at the escalated level.
+- R036 (12th demolition, CLASS-WHOLEFILE-READ-THRESHOLD): native Read returns a whole file in 1 call; atomic_read
+  on separable.py (~12k chars) returned a summary + 6000-cap → 5 escalating reads. FIX: no-selector atomic_read
+  defaults maxFullChars=24000 + code-read result cap 6000→24000. Re-ran astropy atomic: **7→4 calls** (reads 6→2),
+  tokens 226k→183k, same gold fix. Atomic (4) ≈ native (3) — correctness + NEAR tool-economy parity on the harder
+  instance, by number. Commits 4b8373b, 0ac5326, 01eb9d3. Detail: evidence/R022-R023-CLAUDE-FINDINGS.md.
+- NEXT EXACT STEP (Claude): widen astropy A/B with N=3 multi-sample for a clean tool-economy median (atomic vs
+  native), and/or escalate to a 3rd harder instance (cross-file refactor) firing a fresh native baseline once.
+  Model stays DeepSeek V4 Pro. The wall is always my representation, never the model.
+
+### Codex R035 Astropy - Codex-native `Parfit` paired against DeepSeek-atomic; correctness tie, no dominance
+- date: 2026-06-22. This note adds the Codex-native worker required by the user's current A/B protocol, separate from the concurrent `native-Claude` evidence above.
+- task/snapshot: `tasks/SWE-astropy__astropy-12907/PROBLEM.md`, base `d16bfe05a744909de4b27f5875fe0d4ed41ce607`.
+- Atomic arm: `evidence/R035/astropy__atomic_oneshot.json`; one-shot/no local gate, `8` steps, `7` tool calls (`atomic_survey=1`, `atomic_read=4`, `atomic_read_many=1`, `atomic_replace=1`), `225,691` tokens, `68.5s`, `2` diff lines, patch `_cstack: cright[...] = right`.
+- Codex-native arm: worker `Parfit` (`019eed70-b3ac-7201-a7b7-8fc97e299271`) in `/private/tmp/swe/round/R035/astropy/native_codex_20260622004712`; native tools only, no Atomic, no hidden grader inside worker. Changed only `astropy/modeling/separable.py`, `1` insertion/`1` deletion, same `_cstack` patch. Evidence: `evidence/R035/astropy__codex_native_parfit.json`.
+- Official scoring: existing SWE-bench official reports for the identical patch show `resolved=true` with F2P `2/2` and P2P `13/13`. Patch identity was verified byte-for-byte: official atomic patch SHA = official native patch SHA = Codex-native worker patch SHA = `d024df6c8d482695a1be15dc75343b38db476fcfd8b8c2c3a004b9dcf77ccfba`; official report path: `logs/run_evaluation/astropy_R035_atomic/astropy-R035-atomic/astropy__astropy-12907/report.json`.
+
+| metric | DeepSeek-atomic R035 | Codex-native `Parfit` R035 | winner |
+|---|---:|---:|---|
+| official correctness | RESOLVED, F2P 2/2, P2P 13/13 | RESOLVED by patch identity, F2P 2/2, P2P 13/13 | tie |
+| changed files | 1 source file | 1 source file | tie |
+| diff surface | 2 changed lines | 2 changed lines | tie |
+| topology | canonical `_cstack` matrix-copy fix | canonical `_cstack` matrix-copy fix | tie |
+| Atomic telemetry | 7 tool calls, 225,691 tokens, 68.5s | worker token/tool telemetry not exposed; local validation reported | no Atomic cost win proven |
+| proof/governance | Atomic transcript/evidence, governed edit | native diff + worker validation | Atomic on proof surface |
+
+Verdict: **CORRECTNESS/SURFACE TIE; NO ATOMIC ABSOLUTE DOMINANCE; no complexity escalation from this Codex-native R035 pair.** The concurrent R036 whole-file-read improvement is real product progress for Atomic cost, but it must be paired/median-scored against native before becoming a dominance claim.
+
+### Codex maintenance note - `atomic_callers` active-tool self-expansion retried, still rolled back
+- date: 2026-06-22. Current driver still contains the representation gap: the prompt says `FIRST call atomic_callers(F)` and `READ_FNS` counts `atomic_callers`, but `TOOLS`, `_ARG_ALIASES`, and `DISPATCH` still lack an executable `atomic_callers -> atomic_grep_calls` route.
+- red-check/current proof: `node gates/atomic-agent-pre-edit-topology.proof.mjs --json` remains red in current bytes because the proof still tracks the older topology contract and the prompt-only callgraph tool is not landed.
+- attempted via `atomic_expand_self` only: add `atomic_callers` aliases/schema/dispatch and update the focused proof to check current non-blocking topology guidance plus executable callgraph routing. First retry failed the candidate focused proof due a brittle phrase check; corrected retry removed `atomic-agent-pre-edit-topology` from the rejection set, but still rolled back on admission gates `temp-artifact-hygiene` and `converge-symbol-mutation` inside self-expansion.
+- direct gate sanity: `node gates/temp-artifact-hygiene.proof.mjs --json` and `node gates/converge-symbol-mutation.proof.mjs --json` passed outside self-expansion before the corrected retry, so this is still `CLASS-SELF-EXPANSION-LATTICE-DRIFT-BLOCKS-FOCUSED-PROOF`, not a landed capability.
+- archive evidence: `core/atomic-edit/self-evolution-archive.jsonl` sequences 534/535 record the negative candidates. Do not claim active pre-edit callgraph surfacing exists until a candidate lands and the focused proof is green in the real tree.
+
+### Codex R038 Pytest-8399 - Codex-native `Dirac` paired against DeepSeek-atomic; byte-identical tie
+- date: 2026-06-22. This note adds the Codex-native worker required by the user's current A/B protocol for `pytest-dev__pytest-8399`, separate from the concurrent ohmpi/native artifact that used a wider patch.
+- task/snapshot: `tasks/SWE-pytest-dev__pytest-8399/PROBLEM.md`, base `6e7dc8bac831cd8cf7a53b08efa366bd84f0c0fe`.
+- Atomic arm: `evidence/R038/pytest8399__atomic.json`; one-shot/no local gate, `8` steps, `9` tool calls (`atomic_survey=1`, `atomic_read=6`, `atomic_replace=1`, `atomic_grep=1`), `84,342` tokens, `40.0s`, `2` diff lines, `0` run-tests calls. Patch prepends `_` to `name=f"unittest_{setup_name}_fixture_{obj.__qualname__}"` in `src/_pytest/unittest.py`.
+- Codex-native arm: worker `Dirac` (`019eed83-e532-7c83-8257-92c61750930b`) in `/private/tmp/swe/round/R038/pytest8399/native_codex_20260622010811`; native tools only, no Atomic, no hidden grader inside worker. Changed only `src/_pytest/unittest.py`, `1` insertion/`1` deletion, same one-character patch. Evidence: `evidence/R038/pytest8399__codex_native_dirac.json`.
+- Official scoring: the Codex-native patch is byte-identical to the existing official Atomic patch (`36f6ec3d7cc5e546bf272d551f476e42b4e26d15c37b880ccfea5bdb249c542a`). The official Atomic SWE-bench report is `resolved=true`, F2P `1/1`, P2P `59/59`, with `60 passed, 30 skipped in 3.39s`; report path: `logs/run_evaluation/pytest8399_atomic/pytest8399-atomic/pytest-dev__pytest-8399/report.json`.
+- Independent local checks from this TUI: `python3 -m py_compile .../src/_pytest/unittest.py` passed; `git diff --check` passed. A focused `pytest --fixtures` reproduction was attempted but is not counted green because the host Python first lacked `attr`, then the old checkout required generated `_pytest._version` after temp deps were installed.
+- Important commensurability note: `logs/run_evaluation/pytest8399_native/.../patch.diff` is a different, wider historical/native artifact (`src/_pytest/python.py` + `src/_pytest/unittest.py`, 5 insertions/5 deletions). It may support the concurrent ohmpi L3 edit-quality claim in its own protocol, but it is not this Codex-native worker pair.
+
+| metric | DeepSeek-atomic R038 | Codex-native `Dirac` R038 | winner |
+|---|---:|---:|---|
+| official correctness | RESOLVED by official Atomic report, F2P 1/1, P2P 59/59 | RESOLVED by byte-identical patch identity | tie |
+| changed files | 1 source file | 1 source file | tie |
+| diff surface | 2 changed lines | 2 changed lines | tie |
+| topology | canonical `_make_xunit_fixture` generated-name fix | same canonical fix | tie |
+| in-loop behavior validation | no run-tests tool calls; code-path reasoning + official score after | worker reported focused reproduction and subset pytest; local full reproduction in this TUI blocked by host env | native on reported in-loop validation, with local caveat |
+| Atomic telemetry | 9 tool calls, 84,342 tokens, 40.0s | worker token/tool/wall telemetry not exposed | no Atomic cost dominance proven |
+| proof/governance | Atomic trace + syntax/governance pre-disk proof | native diff + worker/local validation | Atomic on proof surface |
+
+Verdict: **CORRECTNESS/SURFACE BYTE-IDENTICAL TIE; NO ATOMIC ABSOLUTE DOMINANCE; no complexity escalation from this Codex-native R038 pair.** The wall is not correctness on this task; it is proving a measurable Atomic advantage over this native worker when the native worker can also find the minimal one-character patch.
+
+Next exact step: do not use the wider historical pytest8399-native patch as the Codex-native baseline for this protocol. Continue with either a fresh paired higher-complexity task only after true dominance is established, or develop the Atomic product gaps that remain measurable here: native telemetry capture, in-loop behavioral validation for Atomic one-shots, and the still-open `CLASS-PRE-EDIT-CALLGRAPH-TOOL-GAP` via `atomic_expand_self`.
+
+### Codex product update - self-expansion lattice unblocked and `atomic_callers` active tool landed
+- date: 2026-06-22. This is an append-only correction to the earlier rollback notes. The rollback notes remain true for archive sequences 533-535, but the same class is no longer open in the current tree.
+- lattice blocker fixed via `atomic_expand_self`: `CLASS-SELF-EXPANSION-LATTICE-DRIFT-BLOCKS-FOCUSED-PROOF` now declares known proof scratch in `temp-artifact-hygiene.proof.mjs`, keeps unknown-artifact canary coverage, adds `dist-lkg.tmp-*` hygiene, and makes `converge-symbol-mutation.proof.mjs` allocate scratch outside the source/repo root when the process TMPDIR is repo-scoped.
+- archive evidence: `core/atomic-edit/self-evolution-archive.jsonl` sequences `536` and `537` promoted the lattice fix after sequences `534`/`535` had rejected the earlier callgraph attempts.
+- driver capability landed via `atomic_expand_self`: `CLASS-PRE-EDIT-CALLGRAPH-TOOL-GAP` now exposes `atomic_callers` as a real model tool in `local_atomic_agent.py`, aliases natural argument names to `name`/`scope`, dispatches to engine `atomic_grep_calls`, and keeps it inside `READ_FNS` for perception budgets.
+- proof update: `atomic-agent-pre-edit-topology.proof.mjs` now checks the current non-blocking topology contract plus the executable `atomic_callers -> atomic_grep_calls` route. Archive sequence `538` promoted the candidate with `proofCoverage +2` and `semanticOperators +4`.
+- verification run from this TUI after promotion: `node gates/atomic-agent-pre-edit-topology.proof.mjs --json`, `node gates/temp-artifact-hygiene.proof.mjs --json`, `node gates/converge-symbol-mutation.proof.mjs --json`, `python3 -m py_compile core/agent/atomic-full-ab/local-loop/local_atomic_agent.py`, and `node build.mjs` passed. Final verification should be re-run after this ledger write before claiming the turn closed.
+- updated next exact step: run the final verification set, then re-run a properly paired A/B round that can measure whether active pre-edit callgraph surfacing reduces reads/steps/tokens or improves first-edit locality. R038 remains a Codex-pair byte-identical tie; this product update is not retroactive A/B dominance.
+
+### Codex R042 Pylint-8898 - Codex-native `Descartes` beats current DeepSeek-atomic samples; Atomic self-expands Python warning validation
+- date: 2026-06-22. Same-task/same-snapshot Codex protocol pair for `pylint-dev__pylint-8898`, separate from concurrent ohmpi notes that use different native/atomic artifacts.
+- task/snapshot: `tasks/SWE-pylint-dev__pylint-8898/PROBLEM.md`, base `1f8c4d9eb185c16a2c1d881c054f015e1c2eb334`.
+- Atomic R042 samples measured before this Codex-native comparison: s1 = 14 steps, 15 calls, 915,999 tokens, 197.3s, 27 diff lines, official `resolved=false`, F2P `0/1`, P2P `18/18`, patch SHA `ccb7812fcc4541830861e200126b0a1a44220fee380352ab2f910f8062e09d3a`; s2 = 11 steps, 19 calls, 726,872 tokens, 171.3s, 33 diff lines, official `resolved=false`, F2P `0/1`, P2P `0/18`, patch SHA `43fc40489eb31f45870452ddae98ac3c13a02214e7a18b83022690230cb82ec0`; s3 = 28 steps, 24 calls, 1,805,988 tokens, 400.6s, 0 edits, empty patch SHA `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+- Codex-native arm: worker `Descartes` (`019eed98-d242-7821-976c-4be56b9b1f44`) in `/private/tmp/swe/round/R042/pylint8898/native_codex_20260622013103`; native tools only, no Atomic/MCP, no hidden grader inside worker. Changed only `pylint/config/argument.py`, `48` insertions/`1` deletion, patch SHA `7578937377cca51c2584c7383ce93482385295a3c8a7390eb78f8fd3c4c0529d`.
+- Codex-native validation: worker-local `python3 -m py_compile pylint/config/argument.py`, splitter AST cases, and `git diff --check` passed. Official SWE-bench report `logs/run_evaluation/pylint8898_R042_codex_native_descartes/codex-native-descartes-R042/pylint-dev__pylint-8898/report.json` is `resolved=true`, F2P `1/1`, P2P `18/18`; official output tail reported `20 passed in 2.12s`.
+- Evidence: `evidence/R042/pylint8898__codex_native_descartes.json` and prediction JSONL `evidence/R042/pylint8898__codex_native_descartes.pred.jsonl`.
+
+| metric | DeepSeek-atomic R042 current samples | Codex-native `Descartes` R042 | winner |
+|---|---:|---:|---|
+| official correctness | s1 false, s2 false, s3 empty patch | resolved=true, F2P 1/1, P2P 18/18 | Codex-native |
+| source files changed | s1/s2 source patches; s3 none | 1 source file | Codex-native on accepted behavior |
+| diff surface | 27/33/0 changed lines | 49 changed lines | no Atomic correctness-qualified win |
+| in-loop behavior validation | official rejected all current samples | local checks + official 20 passed | Codex-native |
+| proof/governance | Atomic traces exist; s1/s2 still false-green behaviorally | native diff plus official harness | Atomic on trace surface only |
+
+Verdict: **CODEX-NATIVE WINS R042 ON OFFICIAL CORRECTNESS; NO ATOMIC DOMINANCE; NO COMPLEXITY ESCALATION.** This does not erase concurrent ohmpi R-F4/R041 claims; it constrains them: they are not commensurable with this specific Codex-native `Descartes` pair unless the same prompt/snapshot/worker protocol is re-run and wins.
+
+Representation gaps mined from the loss:
+- `CLASS-DELIMITER-SPLITTER-SCOPE-OVERGENERALIZATION`: atomic_s1 protected commas inside all parentheses, so an invalid comma-separated regex pair stopped raising where the official test expected it to raise.
+- `CLASS-PYTHON-SYNTAX-WARNING-FALSE-GREEN`: atomic_s2 emitted an invalid escape in a Python docstring; the harness import rejected it.
+- `CLASS-NO-EDIT-PARALYSIS`: atomic_s3 spent 28 steps/1.8M tokens and produced no patch.
+
+Self-expansion landed after the loss: archive sequence `541` promoted `CLASS-PYTHON-SYNTAX-WARNING-FALSE-GREEN` plus a stale focused-proof fix. `validatePython` in `core/atomic-edit/lang-bridge.ts` now escalates Python `SyntaxWarning` and `DeprecationWarning` to errors before accepting `ast.parse`; `gates/validate-language-honesty.proof.mjs` no longer imports stale `prewarmGrammars` and now proves invalid Python escapes are rejected while raw strings remain valid. This closes one false-green class only; it does not retroactively fix R042, and it does not close delimiter semantics or no-edit paralysis.
+
+Next exact step: keep `pylint-dev__pylint-8898` at this complexity. Re-run DeepSeek-atomic on the same snapshot after the Python warning validation fix and/or land a general delimiter-splitter/corpus operator that distinguishes regex quantifier commas from CSV separators under official behavior. Compare against the frozen Codex-native `Descartes` official baseline above. Do not escalate until Atomic wins this Codex-paired task with wide measured margin for at least 2 consecutive rounds.
+
+### Codex R043/R044 Pylint-8898 - Atomic recovers official correctness, but not absolute dominance
+- date: 2026-06-22. Same Codex-paired task/snapshot remains `pylint-dev__pylint-8898`, base `1f8c4d9eb185c16a2c1d881c054f015e1c2eb334`; frozen native baseline remains worker `Descartes`.
+- R043 post-warning-fix Atomic evidence: `evidence/R043/pylint8898__atomic_gateON.json`; official report `logs/run_evaluation/pylint8898_R043_atomic_gateON/atomic-gateon-R043/pylint-dev__pylint-8898/report.json` is `resolved=false`, F2P `0/1`, P2P `18/18`. Root cause: patch over-preserved commas inside `()` and made `tests/config/test_config.py::test_csv_regex_error` fail with `Failed: DID NOT RAISE`.
+- R043 local gate wall found and fixed: `swe_docker_gate.sh` had two false-feedback defects for parametrized pytest ids: malformed/truncated P2P id with unbalanced `[` and Bash runtime failure from heredoc inside process substitution. Current gate uses `shlex.quote`, filters bracket-unbalanced node ids, and materializes the rendered target list via `mktemp`.
+- Gate proof/evidence after fix: `bash -n core/agent/atomic-full-ab/local-loop/swe_docker_gate.sh` passed; `node gates/swe-docker-gate-paramtest-ids.proof.mjs --json` passed; real Docker gate on R043 now reports the true failure: `1 failed, 17 passed`, `# tests 18`, `# pass 17`, `# fail 1`, with `Failed: DID NOT RAISE` instead of fake not-found noise.
+- Self-expansion/product update: sequence `546` promoted `CLASS-DOC-HONESTY-INVENTORY-DRIFT` (`README.md` now says 266 proof entrypoints / 332 gate files); sequence `547` promoted `CLASS-DID-NOT-RAISE-RED-FEEDBACK`, marking `local_atomic_agent.py` and extending `atomic-agent-pre-edit-topology.proof.mjs` so red-test diagnostics preserve the DID-NOT-RAISE error-path signal. Focused proofs `doc-honesty` and `atomic-agent-pre-edit-topology` are green.
+- R044 Atomic evidence already exists from the concurrent loop: `evidence/R044/pylint8898__atomic_gateON.json`; prediction `evidence/resolved/preds_pylint8898_R044.jsonl`; official report `logs/run_evaluation/pylint8898_R044_official/pylint8898-R044-gateON/pylint-dev__pylint-8898/report.json` is `resolved=true`, F2P `1/1`, P2P `18/18`.
+- R044 metrics: `45` steps, `43` tool calls (`atomic_survey=1`, `atomic_read_many=1`, `atomic_grep=8`, `atomic_read=19`, `atomic_replace=9`, `run_tests=5`), `3,409,062` tokens, `535.9s`, `8` edits, final diff `12` changed lines / official patch file `24` lines, SHA `55f007d32c7278c0616ecc9cb79144bb2a11126210e992e2b10fb4875630896b`.
+- Frozen Codex-native `Descartes`: official `resolved=true`, F2P `1/1`, P2P `18/18`, patch `49` changed lines / official patch file `63` lines, SHA `7578937377cca51c2584c7383ce93482385295a3c8a7390eb78f8fd3c4c0529d`.
+
+| metric | DeepSeek-atomic R044 gate-ON | Codex-native `Descartes` frozen baseline | winner |
+|---|---:|---:|---|
+| official correctness | resolved=true, F2P 1/1, P2P 18/18 | resolved=true, F2P 1/1, P2P 18/18 | tie |
+| source files changed | 1 | 1 | tie |
+| diff surface | 12 changed lines / 24-line patch | 49 changed lines / 63-line patch | Atomic |
+| iterations/tests | 5 run_tests cycles | worker-local checks + official | native on cost/autonomy |
+| tool/cost telemetry | 43 tool calls, 3.4M tokens, 535.9s | native token/tool telemetry not exposed; patch produced in one worker run | no Atomic absolute win |
+| proof/governance | Atomic trace + gate iteration + self-expansion proofs | native diff + official harness | Atomic on proof surface |
+
+Verdict: **ATOMIC RECOVERS CORRECTNESS AND WINS PATCH SURFACE, BUT DOES NOT BEAT THE NATIVE BASELINE IN EVERYTHING THAT MATTERS. NO COMPLEXITY ESCALATION.** R044 proves the gate-ON/proof-carrying loop can repair the R042/R043 correctness loss, but the cost wall is still large: 45 steps, 43 calls, and 3.4M tokens for a one-file fix.
+
+Open classes:
+- `CLASS-GATE-PARAMTEST-IDS-RUNTIME-SHELL-ESCAPE`: keep `swe_docker_gate.sh` target rendering out of heredoc process substitution and quote pytest node ids with `shlex.quote`.
+- `CLASS-DID-NOT-RAISE-RED-FEEDBACK`: preserve invalid-input rejection when a red test says `DID NOT RAISE`; parser/splitter fixes must keep valid cases green without swallowing separators that should still error.
+- `CLASS-HARD-ALGORITHM-COST-WALL`: correctness is now recovered, but R044's read/edit/test loop is far too expensive versus native. Need a general delimiter/parser perception or macro-operator/corpus retrieval that gets to the brace-only split topology earlier.
+
+Next exact step: stay on `pylint-dev__pylint-8898` and run another Atomic-only round against frozen `Descartes`, after the newly promoted DID-NOT-RAISE feedback and fixed gate are in place. Target dominance criteria for this level: official resolved, patch surface <= R044, and a large reduction in steps/tool-calls/tokens for at least 2 consecutive rounds. Do not escalate.
+
+### Codex R045-R047 Pylint-8898 - token cost improves, correctness holds, but no dominance; new liveness/minimize/container walls
+- date: 2026-06-22. Same task/snapshot remains `pylint-dev__pylint-8898`, base `1f8c4d9eb185c16a2c1d881c054f015e1c2eb334`; frozen native baseline remains Codex-native worker `Descartes`.
+- R045 Atomic gate-ON evidence: `evidence/R045/pylint8898__atomic_gateON.json`; official report `logs/run_evaluation/pylint8898_R045_atomic_gateON/atomic-gateon-R045/pylint-dev__pylint-8898/report.json` is `resolved=true`, F2P `1/1`, P2P `18/18`.
+- R045 metrics: `32` steps, `33` tool calls (`atomic_survey=1`, `atomic_read_many=1`, `atomic_grep=11`, `atomic_read=16`, `atomic_replace=2`, `run_tests=2`), `2,072,254` tokens, `349.6s`, `2` edits, final diff `24` changed lines / official patch file `38` lines, SHA `c23e73daafedb4be1e8113c04afd5fecacfd6f389fd17b44f1c275b50a5b8cd8`. R045 improved cost vs R044 but regressed patch surface vs R044 (`38` official lines vs `24`).
+- Product update after R045: archive sequence `549` promoted `CLASS-FILETREE-RESEND-BLOAT (F6)`, compacting the initial repository tree after step 1 so it is not resent every model call. Archive sequence `550` promoted `CLASS-GREEN-MINIMIZE-STRUCTURAL-SHRINK-REPROMPT`, so only comment-only deterministic reducers may skip the bounded DECLINE re-prompt; F2b/F4 structural reducers no longer suppress it.
+- R046 is **invalid as an A/B metric**: this TUI accidentally used `SWE_CONTAINER=pylint8898_r046_atomic`, a container that did not exist. The driver received repeated `INFRA_FAIL: container 'pylint8898_r046_atomic' does not exist`, hit `60` steps, and wrote `evidence/R046/pylint8898__atomic_gateON.json`. A manual rescore of the produced patch with the real `pylint8898_claude` container failed honestly with `1 failed, 17 passed`, root `Failed: DID NOT RAISE`. Do not use R046 for dominance or regression scoring except as `CLASS-GATE-CONTAINER-NAME-NONEXISTENT-FALSE-INFRA` evidence.
+- R047 Atomic gate-ON used the correct local gate (`pylint8898_claude`) and ended local `gate_pass=true`; official report `logs/run_evaluation/pylint8898_R047_atomic_gateON/atomic-gateon-R047/pylint-dev__pylint-8898/report.json` is `resolved=true`, F2P `1/1`, P2P `18/18`.
+- R047 metrics: `60` steps (maxed), `66` tool calls (`atomic_survey=1`, `atomic_read_many=1`, `atomic_read=38`, `atomic_grep=16`, `atomic_callers=2`, `atomic_replace=3`, `run_tests=5`), `869,362` tokens, `705.0s`, `2` accepted edits, `1` invalid state prevented, final diff `36` changed lines / official patch file `57` lines, SHA `15cd08d01f3ec817336fff54989b6a6c032712639997df882317cb103bb13293`.
+- R047 caveat: a concurrent external batch (`/private/tmp/swe/round/R046/pylint8898_s*`) was alive and sharing `pylint8898_claude`; the official SWE-bench harness result is clean enough for correctness, but local wall/container timing is contaminated. This exposes a product gap: the local gate needs per-container locking or per-round isolated containers.
+
+| metric | R044 Atomic | R045 Atomic | R047 Atomic | Codex-native `Descartes` frozen |
+|---|---:|---:|---:|---:|
+| official correctness | resolved=true | resolved=true | resolved=true | resolved=true |
+| F2P/P2P | 1/1, 18/18 | 1/1, 18/18 | 1/1, 18/18 | 1/1, 18/18 |
+| changed files | 1 | 1 | 1 | 1 |
+| local changed lines | 12 | 24 | 36 | 49 |
+| official patch lines | 24 | 38 | 57 | 63 |
+| steps | 45 | 32 | 60 | one native worker run |
+| tool calls | 43 | 33 | 66 | not exposed |
+| tokens | 3,409,062 | 2,072,254 | 869,362 | not exposed |
+| wall | 535.9s | 349.6s | 705.0s | not exposed |
+| run_tests | 5 | 2 | 5 | worker-local + official |
+
+Verdict: **NO DOMINANCE; NO COMPLEXITY ESCALATION.** R047 proves F6 materially reduced token cost, and the driver still resolves officially, but it maxed out steps, increased tool calls, worsened wall-time, and produced a much larger patch than R044/R045. R047 is correctness-positive but surface/cost-negative versus the best Atomic run and not an absolute win over the frozen native baseline.
+
+Open classes:
+- `CLASS-GREEN-AT-MAXSTEP-NO-MINIMIZE`: R047 first turned green at step 60, so the normal post-green `GREEN-MINIMIZE` offer never ran. A green final step at the max-step boundary must trigger at least deterministic post-loop minimization or reserve a bounded minimization step before final acceptance.
+- `CLASS-RED-TEST-LOCUS-DISAMBIGUATION`: after `Failed: DID NOT RAISE`, R047 spent many reads on unrelated/passing `clear-cache-post-run` context. Gate feedback should foreground the failing F2P test/function/diagnostic and suppress P2P tail noise that misroutes investigation.
+- `CLASS-GATE-CONTAINER-NAME-NONEXISTENT-FALSE-INFRA`: arbitrary/nonexistent `SWE_CONTAINER` names create false infra feedback inside the agent loop. The gate should preflight container existence or allocate a valid isolated container before the agent starts.
+- `CLASS-CONTAINER-LOCKLESS-SHARED-GATE`: concurrent agents can use the same persistent Docker container and contaminate local A/B timing/state. The local gate needs file/container locks or per-round container clones.
+
+Post-ledger product update:
+- Sequence `553` promoted `CLASS-GREEN-AT-MAXSTEP-NO-MINIMIZE` via `atomic_expand_self`: `local_atomic_agent.py` now reserves `GREEN_MINIMIZE_MAXSTEP_RESERVE = 3` extra loop steps only when a green-minimize pass is pending or active after `max_steps`; red/no-green runs still stop at `max_steps`. The proof records the reserve, the `step > args.max_steps` guard, the pending/active gate, and the `GREEN-AT-MAXSTEP reserve active` transcript trace.
+- Verification after promotion: `python3 -m py_compile core/agent/atomic-full-ab/local-loop/local_atomic_agent.py` passed; `node gates/atomic-agent-green-minimize.proof.mjs --json` passed; `node gates/temp-artifact-hygiene.proof.mjs --json` passed; the focused red-check for max-step reserve passed; `git diff --check` over touched files passed.
+
+Next exact step: stay on `pylint-dev__pylint-8898`. Rerun Atomic-only as R048 against frozen `Descartes` only in a clean container/lock context. Target remains official resolved, patch surface <= R044, and large reductions in steps/tool-calls/tokens for two consecutive clean rounds before any escalation. If `pylint8898_claude` is still shared by another batch, do not launch R048 on it; record `CLASS-CONTAINER-LOCKLESS-SHARED-GATE` as the blocker or allocate a truly isolated valid container first.
+
+### Codex R048 Pylint-8898 - isolated clean container, official green, major cost improvement, still no dominance
+- date: 2026-06-22. Same task/snapshot: `pylint-dev__pylint-8898`, base `1f8c4d9eb185c16a2c1d881c054f015e1c2eb334`; frozen native baseline remains Codex-native worker `Descartes`.
+- R048 container hygiene: created a dedicated container `pylint8898_r048_atomic` from local image `swebench/sweb.eval.x86_64.pylint-dev_1776_pylint-8898:latest`, then checked `/testbed` out to the exact base commit before launch. This avoids the R047/R046 shared or nonexistent container contamination.
+- R048 evidence: `evidence/R048/pylint8898__atomic_gateON.json`, patch `evidence/R048/pylint8898__atomic_gateON.patch`, prediction `evidence/R048/pylint8898__atomic_gateON.pred.jsonl`, global report `atomic-gateon-R048.pylint8898_R048_atomic_gateON.json`, official report `logs/run_evaluation/pylint8898_R048_atomic_gateON/atomic-gateon-R048/pylint-dev__pylint-8898/report.json`.
+- R048 official result: `resolved=true`, F2P `1/1`, P2P `18/18`, empty patches `0`, errors `0`.
+- R048 metrics: `28` steps, `30` tool calls (`atomic_survey=1`, `atomic_grep=8`, `atomic_read_many=1`, `atomic_read=15`, `atomic_replace=3`, `run_tests=2`), `316,263` tokens, `475.5s`, `2` accepted edits, `25` reads / `16` body reads, `1` invalid state prevented, local diff `21` changed lines / official patch file `46` lines, patch SHA `b28e2e2ced383e62a023bd1076fa626b89fee281f6376b1927cf576222057976`.
+- R048 minimization evidence: GREEN-MINIMIZE saw `diff_lines=35`, refused the first stop once, accepted a shrink to `diff_lines=21`, re-ran tests, and stayed green. This confirms the post-green minimizer is materially useful on this task, though it still did not reach R044's compact surface.
+
+| metric | R044 Atomic | R045 Atomic | R047 Atomic | R048 Atomic | Codex-native `Descartes` frozen |
+|---|---:|---:|---:|---:|---:|
+| official correctness | resolved=true | resolved=true | resolved=true | resolved=true | resolved=true |
+| F2P/P2P | 1/1, 18/18 | 1/1, 18/18 | 1/1, 18/18 | 1/1, 18/18 | 1/1, 18/18 |
+| local changed lines | 12 | 24 | 36 | 21 | 49 |
+| official patch lines | 24 | 38 | 57 | 46 | 63 |
+| steps | 45 | 32 | 60 | 28 | one native worker run |
+| tool calls | 43 | 33 | 66 | 30 | not exposed |
+| tokens | 3,409,062 | 2,072,254 | 869,362 | 316,263 | not exposed |
+| wall | 535.9s | 349.6s | 705.0s | 475.5s | not exposed |
+| run_tests | 5 | 2 | 5 | 2 | worker-local + official |
+
+Verdict: **NO DOMINANCE; NO COMPLEXITY ESCALATION.** R048 is the cleanest low-cost Atomic run on this task so far and beats the frozen native patch surface (46 official lines vs 63). But it is not a huge absolute win in every metric: native wall/tokens/tool calls are not exposed, R048 is slower than R045, and the patch surface is still worse than R044/R045. The loop stays on this task.
+
+Post-R048 product update:
+- Sequence `555` promoted `CLASS-GREEN-MINIMIZE-INTRA-HUNK-SIBLING-REVERT (F2c)` via `atomic_expand_self`: a deterministic minimizer that trial-reverts individual `-old/+new` line pairs inside a green hunk, keeps only smaller states that pass the same gate, and restores all red/non-shrinking candidates. Verification: `py_compile` passed, `atomic-agent-green-minimize.proof.mjs` passed, `temp-artifact-hygiene.proof.mjs` passed, focused F2c red-check passed, `git diff --check` passed.
+- Focused R048 probe for F2c returned `(False, 21, 'no intra-hunk line-pair revert stayed green+smaller')`; F2c is a general capability, but it did **not** reduce this patch. The remaining wall here is not simply an unnecessary sibling line-pair; it is compact expression of the splitter itself.
+- Sequence `556` promoted `CLASS-GREEN-MINIMIZE-HELPER-TO-EXPRESSION`: the post-green minimization prompt now explicitly tells the agent that if its green patch added a small helper/state-machine loop, it should first try deleting that helper and rewriting the single failing call site with an existing language/library expression or already-local helper, then re-run the same gate. Verification: `py_compile`, `atomic-agent-green-minimize.proof.mjs`, `temp-artifact-hygiene.proof.mjs`, focused helper-to-expression check, and `git diff --check` passed.
+
+Open next class:
+- `CLASS-GREEN-MINIMIZE-HELPER-TO-EXPRESSION`: R048 still carries a 17-line helper loop. R044 proved a much smaller green topology exists for this task: express the regex CSV split directly with a compact standard-library expression at the failing transformer instead of adding a new helper plus multiple call-site rewires. Generalize as a post-green minimizer that detects newly added small helper/state-machine loops and asks/proves whether an existing language/library expression or single-call-site rewrite preserves the gate with lower surface.
+
+Next exact step: stay on `pylint-dev__pylint-8898`. Rerun Atomic-only R049 in a clean dedicated container against frozen `Descartes`, now with F2c and `CLASS-GREEN-MINIMIZE-HELPER-TO-EXPRESSION` active. Escalation remains forbidden until Atomic wins with large margin and stability across two clean rounds.
+
+### Codex R049 Pylint-8898 - invalid round: DeepSeek model-call liveness wall, not an A/B loss
+- date: 2026-06-22. Same Codex-paired task/snapshot remains `pylint-dev__pylint-8898`, base `1f8c4d9eb185c16a2c1d881c054f015e1c2eb334`; frozen native baseline remains Codex-native worker `Descartes`.
+- R049 setup: created dedicated container `pylint8898_r049_atomic` from the local SWE-bench image, checked `/testbed` out to the base commit, and launched Atomic in `/private/tmp/swe/round/R049/pylint8898/atomic`.
+- R049 status: **invalid as an A/B metric**. The run produced no patch, no JSON metrics file, and no official score. It blocked before any diff or local gate result.
+- Observed failure: the process was interrupted after more than 11 minutes while blocked inside `deepseek()` at `json.loads(r.read())` / HTTPS chunked socket read. This is a product liveness and observability wall, not an Atomic correctness loss and not native dominance evidence.
+- Class recorded: `CLASS-MODEL-CALL-LIVENESS-OBSERVABILITY`.
+- Product update after R049: archive sequence `559` promoted `CLASS-MODEL-CALL-LIVENESS-OBSERVABILITY` via `atomic_expand_self`. `local_atomic_agent.py` now uses `DEEPSEEK_TIMEOUT` (default `120s`) for the DeepSeek HTTP call instead of hard-coded `300s`, and emits an optional stderr heartbeat before each model call when `ATOMIC_PROGRESS_STDERR=1` (default on): `ATOMIC s<step> model_call tools=<n> timeout=<n>s`.
+- Proof update: `atomic-agent-green-minimize.proof.mjs` now records the liveness invariant: configurable timeout, `timeout=timeout_s`, `ATOMIC_PROGRESS_STDERR`, heartbeat text, and flushed stderr.
+- Verification after promotion: `python3 -m py_compile core/agent/atomic-full-ab/local-loop/local_atomic_agent.py` passed; `node gates/atomic-agent-green-minimize.proof.mjs --json` passed; `node gates/temp-artifact-hygiene.proof.mjs --json` passed; focused marker check for `DEEPSEEK_TIMEOUT` / `ATOMIC_PROGRESS_STDERR` / proof record passed; `git diff --check` over touched files passed.
+
+Verdict: **R049 IS INVALID; NO DOMINANCE; NO COMPLEXITY ESCALATION.** The only truthful result is that the product needed bounded model-call liveness and operator-visible progress before the next measured run.
+
+Next exact step for the Codex-paired pylint track: stay on `pylint-dev__pylint-8898`. Rerun Atomic-only as `R051-pylint8898` in a clean dedicated container against frozen `Descartes`, with `DEEPSEEK_TIMEOUT=120` and stderr heartbeat visible. Escalation remains forbidden until Atomic wins this frozen task with large margin and stability across two clean rounds.
+
+### Codex R051 Pylint-8898 - official green and best cost so far, but surface regresses; no dominance
+- date: 2026-06-22. Same task/snapshot: `pylint-dev__pylint-8898`, base `1f8c4d9eb185c16a2c1d881c054f015e1c2eb334`; frozen native baseline remains Codex-native worker `Descartes`.
+- R051 container/workspace: dedicated container `pylint8898_r051_atomic`, checked `/testbed` out to the base commit; host workspace `/private/tmp/swe/round/R051/pylint8898/atomic` copied from the clean R049 workspace and stayed at the base commit before the run.
+- R051 liveness evidence: `ATOMIC_PROGRESS_STDERR=1` produced heartbeats (`ATOMIC s<step> model_call tools=<n> timeout=120s`) throughout the run. The previous R049 silent-hang wall did not recur.
+- R051 evidence: `evidence/R051/pylint8898__atomic_gateON.json`, patch `evidence/R051/pylint8898__atomic_gateON.patch`, prediction `evidence/R051/pylint8898__atomic_gateON.pred.jsonl`, global report `atomic-gateon-R051.pylint8898_R051_atomic_gateON.json`, official report `logs/run_evaluation/pylint8898_R051_atomic_gateON/atomic-gateon-R051/pylint-dev__pylint-8898/report.json`.
+- R051 official result: `resolved=true`, F2P `1/1`, P2P `18/18`, empty patches `0`, errors `0`; official test output ended with `20 passed in 2.17s`.
+- R051 metrics: `22` steps, `21` tool calls (`atomic_survey=1`, `atomic_grep=7`, `atomic_read_many=1`, `atomic_read=9`, `atomic_callers=1`, `atomic_replace=1`, `run_tests=1`), `237,704` tokens, `374.8s`, `1` accepted edit, `19` reads / `10` body reads, `0` invalid states prevented, local diff `31` changed lines / official patch file `56` lines, patch SHA `7a6a14051a08f96e9a26f9c8e0381b8599c43dc6f172c62bae575006a89d7f74`.
+- R051 minimization trace: after the local green gate, F1d/F4/F2b/F2c found no deterministic shrink; `GREEN-MINIMIZE` was offered at `diff_lines=31`, the agent refused the first stop once, then stopped at the second prompt without shrinking. This proves the current helper-to-expression prompt is advisory only and insufficient for this class.
+
+| metric | R044 Atomic | R048 Atomic | R051 Atomic | Codex-native `Descartes` frozen |
+|---|---:|---:|---:|---:|
+| official correctness | resolved=true | resolved=true | resolved=true | resolved=true |
+| F2P/P2P | 1/1, 18/18 | 1/1, 18/18 | 1/1, 18/18 | 1/1, 18/18 |
+| local changed lines | 12 | 21 | 31 | 49 |
+| official patch lines | 24 | 46 | 56 | 63 |
+| steps | 45 | 28 | 22 | one native worker run |
+| tool calls | 43 | 30 | 21 | not exposed |
+| tokens | 3,409,062 | 316,263 | 237,704 | not exposed |
+| wall | 535.9s | 475.5s | 374.8s | not exposed |
+| run_tests | 5 | 2 | 1 | worker-local + official |
+
+Verdict: **NO DOMINANCE; NO COMPLEXITY ESCALATION.** R051 is the best Atomic cost run on this task so far and still beats frozen native patch surface (`56` vs `63` official lines), but it regresses surface versus R048/R044. The loop cannot escalate while a smaller verified Atomic topology already exists for the same task.
+
+Open class:
+- `CLASS-GREEN-MINIMIZE-HELPER-STATE-MACHINE-SURFACE`: when a green patch adds a new small helper/state-machine splitter, prompt-only helper-to-expression minimization is not enough. The product needs a general, proof-carrying way to make compact expression / existing-helper rewrites more likely or mechanically trial them, while preserving the same gate.
+
+Post-R051 product update:
+- Sequence `560` promoted `CLASS-GREEN-MINIMIZE-HELPER-STATE-MACHINE-SURFACE` via `atomic_expand_self`: the driver now detects green diffs that add a helper plus loop/state-machine structure, records `GREEN-MINIMIZE helper/state-machine surface detected`, and raises the bounded no-edit minimization refusal limit from `1` to `2` only for that class. The extra prompt specifically asks for one helper-collapse `atomic_replace` that deletes the new helper and rewrites a call site/wrapper with a compact existing language/library expression or already-local helper, then `run_tests`.
+- Verification after promotion: `python3 -m py_compile core/agent/atomic-full-ab/local-loop/local_atomic_agent.py` passed; `node gates/atomic-agent-green-minimize.proof.mjs --json` passed; `node gates/temp-artifact-hygiene.proof.mjs --json` passed; focused marker check for detector/state/call/trace/bounded prompt/proof passed; `git diff --check` passed.
+
+Next exact step: stay on `pylint-dev__pylint-8898`. Rerun Atomic-only in a clean dedicated container against frozen `Descartes` with sequence `560` active. No complexity escalation.
+
+### Codex R052 Pylint-8898 - invalid round: socket timeout was not a total model-call deadline
+- date: 2026-06-22. Same Codex-paired task/snapshot remains `pylint-dev__pylint-8898`, base `1f8c4d9eb185c16a2c1d881c054f015e1c2eb334`; frozen native baseline remains Codex-native worker `Descartes`.
+- R052 setup: dedicated container `pylint8898_r052_atomic`, checked `/testbed` out to the base commit; host workspace `/private/tmp/swe/round/R052/pylint8898/atomic` copied from the clean R049 workspace. The run used sequence `560`, `DEEPSEEK_TIMEOUT=120`, and stderr heartbeat.
+- R052 status: **invalid as an A/B metric**. The run produced no patch, no JSON metrics file, and no official score. A concurrently written `evidence/R052/sympy20438__atomic_gateON.json` exists but is not part of this Codex-pylint round and must not be used for R052 scoring.
+- Observed failure: the agent emitted heartbeats through `ATOMIC s24 model_call tools=9 timeout=120s`, then blocked for multiple minutes in `deepseek()` at `json.loads(r.read())`. Manual interrupt stack showed `http.client._readall_chunked()` / `ssl.py read`, proving urllib's socket timeout did not bound the total chunked read duration.
+- Class recorded: `CLASS-MODEL-CALL-TOTAL-DEADLINE`.
+- Product update after R052: archive sequence `561` promoted `CLASS-MODEL-CALL-TOTAL-DEADLINE` via `atomic_expand_self`. `local_atomic_agent.py` now imports `signal`, reads `DEEPSEEK_TOTAL_TIMEOUT` (defaulting to `DEEPSEEK_TIMEOUT`), installs `signal.setitimer(signal.ITIMER_REAL, total_timeout_s)` around the full `urlopen + r.read()` region, raises `TimeoutError` on total deadline expiry, and always clears/restores the alarm handler in `finally`.
+- Proof update: `atomic-agent-green-minimize.proof.mjs` now checks `DEEPSEEK_TOTAL_TIMEOUT`, the total deadline timer, total-timeout error text, existing socket timeout, heartbeat, and flushed stderr.
+- Verification after promotion: `python3 -m py_compile core/agent/atomic-full-ab/local-loop/local_atomic_agent.py` passed; `node gates/atomic-agent-green-minimize.proof.mjs --json` passed; `node gates/temp-artifact-hygiene.proof.mjs --json` passed; focused marker check for signal import / total timeout / timer set+clear / handler restore / proof passed; `git diff --check` passed.
+
+Verdict: **R052 IS INVALID; NO DOMINANCE; NO COMPLEXITY ESCALATION.** The liveness layer improved from R049 (visible heartbeat) but still needed a true total deadline. That is now sequence `561`.
+
+Next exact step: stay on `pylint-dev__pylint-8898`. Rerun Atomic-only in a clean dedicated container against frozen `Descartes` with `DEEPSEEK_TOTAL_TIMEOUT` active. No complexity escalation.
+
+### Codex R053 Pylint-8898 - official green, best surface so far, but cost explodes; no dominance
+- date: 2026-06-22. Same Codex-paired task/snapshot remains `pylint-dev__pylint-8898`, base `1f8c4d9eb185c16a2c1d881c054f015e1c2eb334`; frozen native baseline remains Codex-native worker `Descartes`.
+- R053 setup: dedicated container `pylint8898_r053_atomic`, checked `/testbed` out to the base commit; host workspace `/private/tmp/swe/round/R053/pylint8898/atomic`. The run used sequence `561`, `DEEPSEEK_TIMEOUT=120`, `DEEPSEEK_TOTAL_TIMEOUT=120`, and stderr heartbeat.
+- R053 liveness evidence: the total-deadline class closed the R052 silent chunked-read wall; the run completed locally instead of hanging.
+- R053 evidence: `evidence/R053/pylint8898__atomic_gateON.json`, patch `evidence/R053/pylint8898__atomic_gateON.patch`, prediction `evidence/R053/pylint8898__atomic_gateON.pred.jsonl`, global report `atomic-gateon-R053.pylint8898_R053_atomic_gateON.json`, copied summary `core/agent/atomic-full-ab/local-loop/atomic-gateon-R053.pylint8898_R053_atomic_gateON.json`, official report `logs/run_evaluation/pylint8898_R053_atomic_gateON/atomic-gateon-R053/pylint-dev__pylint-8898/report.json`.
+- R053 official result: `resolved=true`, F2P `1/1`, P2P `18/18`, empty patches `0`, errors `0`; official test output ended with `20 passed in 2.45s`.
+- R053 metrics: `60` steps, `63` tool calls (`atomic_survey=2`, `atomic_read=38`, `atomic_grep=15`, `atomic_replace=4`, `run_tests=4`), `853,996` tokens, `1174.3s`, `3` accepted edits, `55` reads / `38` body reads, `1` invalid state prevented, local diff `19` changed lines / official patch file `33` lines, patch SHA `f6ee8947e383f21f329ae3cd2651d761dc6a0182c30a163e0312069aaf4a3faa`.
+- R053 minimization trace: after the first green gate, deterministic minimizers reduced `27->25`; helper/state-machine surface was detected; the bounded helper-collapse prompt forced two no-stop refusals; the agent then shrank the green helper from `25` to `19` changed lines and `run_tests` stayed green. This is the best Atomic surface on the frozen task family so far.
+- R053 cost trace: after accepting the `19`-line green shrink, the driver re-entered full tools at s58 and let the model read/attempt another edit until the 60-step cap. The post-shrink read-loop consumed extra calls/tokens without improving the final patch.
+
+| metric | R044 Atomic | R048 Atomic | R051 Atomic | R053 Atomic | Codex-native `Descartes` frozen |
+|---|---:|---:|---:|---:|---:|
+| official correctness | resolved=true | resolved=true | resolved=true | resolved=true | resolved=true |
+| F2P/P2P | 1/1, 18/18 | 1/1, 18/18 | 1/1, 18/18 | 1/1, 18/18 | 1/1, 18/18 |
+| local changed lines | 12 | 21 | 31 | 19 | 49 |
+| official patch lines | 24 | 46 | 56 | 33 | 63 |
+| steps | 45 | 28 | 22 | 60 | one native worker run |
+| tool calls | 43 | 30 | 21 | 63 | not exposed |
+| tokens | 3,409,062 | 316,263 | 237,704 | 853,996 | not exposed |
+| wall | 535.9s | 475.5s | 374.8s | 1174.3s | not exposed |
+| run_tests | 5 | 2 | 1 | 4 | worker-local + official |
+
+Verdict: **NO DOMINANCE; NO COMPLEXITY ESCALATION.** R053 proves the helper/state-machine minimizer can beat the frozen native patch surface by a wide patch-size margin (`33` vs `63` official lines, `19` vs `49` local changed lines), but it loses badly on cost versus prior Atomic rounds and hits the max-step cap. Dominance requires correctness plus surface plus cost stability, not one metric.
+
+Open class:
+- `CLASS-GREEN-MINIMIZE-RETEST-GREEN-FINALIZE`: once a post-green minimization edit is retested green, the driver must preserve that proven minimized state and stop the round. Deactivating minimization is not enough; it reopens full tools and creates a read/edit loop after success.
+
+Post-R053 product update:
+- Sequence `562` promoted `CLASS-GREEN-MINIMIZE-RETEST-GREEN-FINALIZE` via `atomic_expand_self` (`candidateId=real-self-expansion-candidate:30d643829fbb27faef6769737c90b73dde972475de2136e0543eceb2980a50bd`, receipt SHA `af5b7eddf5e9274d43b1485735680242405877e575cb1fce0aa1c3606c3c9765`). `local_atomic_agent.py` now records `green_minimize_finalized` after a green post-minimize retest, updates `last_green_diff` when reverting a non-shrinking minimization edit to the pre-minimize green state, appends `GREEN-MINIMIZE finalized; preserving retested green minimized state`, and breaks the agent loop before another model turn.
+- Proof update: `atomic-agent-green-minimize.proof.mjs` now requires the finalized flag, trace marker, and loop break for `CLASS-GREEN-MINIMIZE-RETEST-GREEN-FINALIZE`.
+- Verification after promotion: `python3 -m py_compile core/agent/atomic-full-ab/local-loop/local_atomic_agent.py` passed; `node gates/atomic-agent-green-minimize.proof.mjs --json` passed; `node gates/temp-artifact-hygiene.proof.mjs --json` passed; focused marker check passed; `git diff --check` over touched loop/proof/ledger files passed.
+
+Next exact step: stay on `pylint-dev__pylint-8898`. Rerun Atomic-only as R054 in a clean dedicated container against frozen `Descartes` with sequence `562` active. Expected target is to preserve the R053 surface class while cutting post-shrink steps/calls/tokens. No complexity escalation.
+
+### Codex R054 preflight - blocked before agent dispatch by missing env credential; env-only refusal improved
+- date: 2026-06-22. Same task/snapshot remains `pylint-dev__pylint-8898`, base `1f8c4d9eb185c16a2c1d881c054f015e1c2eb334`; frozen native baseline remains Codex-native worker `Descartes`.
+- Preflight result: `DEEPSEEK_API_KEY=missing` in the current process environment. R054 Atomic was **not dispatched**. This is not an A/B metric and not a model/Atomic loss; it is an external credential precondition.
+- Product gap found while preparing R054: the driver previously read `os.environ["DEEPSEEK_API_KEY"]` at import time, producing a generic `KeyError` if the env var was absent. That is poor product behavior and can create confusing invalid rounds before the operator sees the env-only secret contract.
+- Sequence `563` promoted `CLASS-ENV-SECRET-PREFLIGHT` via `atomic_expand_self` (`candidateId=real-self-expansion-candidate:7c73e30e4a5b69474f8a0c7c3d9149df252558f7d1318d284d398d1ecbe04f6c`, receipt SHA `2d9eae90b12610cc9a4f53b469f565ae59af70adde81e2bf65cb6f6b9285d463`). `local_atomic_agent.py` now reads `DEEPSEEK_API_KEY` with `os.environ.get`, keeps `--help` usable without a key, and exits before workspace setup with: `DEEPSEEK_API_KEY is required in the environment. Do not pass secrets on the command line or store them in code.`
+- Proof update: `atomic-agent-green-minimize.proof.mjs` now requires the env-only preflight, clear missing-key message, no argv/code secret guidance, and absence of import-time `os.environ["DEEPSEEK_API_KEY"]`.
+- Verification after promotion: `python3 -m py_compile core/agent/atomic-full-ab/local-loop/local_atomic_agent.py` passed; `node gates/atomic-agent-green-minimize.proof.mjs --json` passed; `node gates/temp-artifact-hygiene.proof.mjs --json` passed; `--help` without `DEEPSEEK_API_KEY` exited `0`; execution without `DEEPSEEK_API_KEY` exited `1` with the explicit env-only refusal; focused marker check passed; `git diff --check` passed.
+
+Next exact step: set/export `DEEPSEEK_API_KEY` in the environment, then run R054 Atomic-only in a clean dedicated container against frozen `Descartes` with sequence `563` active. No complexity escalation.
+
+## ROUND WFB (2026-06-22, ultracode workflow) — multi-repo A/B batch
+Goal "ativado" + ultracode → orchestrate the A/B as a verified Workflow instead of one-at-a-time.
+INSTANCES (5 repos, new+hard, 1-file): astropy-14182, pytest-10356, sklearn-14496, pylint-4661, sympy-18199.
+Workflow wf_a44b3ede-5e2: Setup → RunArms (atomic DeepSeek one-shot ∥ native-Claude one-shot) → Walls (mine
+representation walls from atomic reasoning, even in wins) → Verify (adversarial: real+generalist) → Synthesize
+(edit-economy scoreboard + ranked next demolitions). Docker resolution scored SEPARATELY after (avoids the 600s
+agent-Bash cap on image builds). NEXT: on workflow完成 → score 10 diffs officially → final scoreboard + demolitions.
