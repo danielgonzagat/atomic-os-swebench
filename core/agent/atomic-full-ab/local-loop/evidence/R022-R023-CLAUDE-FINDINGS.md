@@ -555,3 +555,11 @@ scope-completeness signal one-shot lacks. This is why gate-ON resolved pylint-70
 REDIRECT: (1) the queued gate-ON pytest-10356 tests this directly; (2) the commit-fast nudges should be SCOPED to
 gate-ON OFF / easy cases, or counterbalanced by a scope-completeness check ("does this fix the WHOLE issue / other
 files?"); do NOT let conclusion-latch force premature commit on hard multi-file. Honest: I optimized process not Pass@1.
+
+## WFB one-shot resolution FINAL (official, Docker): atomic 1/5 on hard instances
+astropy-14182 a0/n0, pytest-10356 a0/n0, sklearn-14496 a1, pylint-4661 a0, sympy-18199 a0. Atomic one-shot = 1/5
+(sklearn only); native 0/2 comparable (both hard-for-both). HONEST: on deliberately-HARD instances, atomic one-shot
+resolves poorly (1/5) — consistent w/ the scope-completeness finding (one-shot can't catch partial/wrong-location/
+missed-file without test feedback). CONTRAST: earlier rounds L1 = atomic 5/5 on EASIER single-file instances. So
+atomic one-shot: strong on easy, weak on hard. The value on HARD instances = gate-ON iterate loop (catches
+incompleteness via test feedback). gate-ON pytest-10356 now running = the falsifiable test of this.
