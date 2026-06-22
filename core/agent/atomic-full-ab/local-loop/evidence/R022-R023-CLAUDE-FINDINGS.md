@@ -537,3 +537,21 @@ After the WFB+ batch (7 demolitions 24-30), ran the full agent end-to-end on sym
 prev-fixes 16/7 — now 5), 13 calls, 7 quick_check, 14 steps, 121k tok, no crash. All 30 demolitions compose
 MONOTONICALLY (nada regride) — the agent is leaner each round. Confirms the batch fixes (deadlock escape, convergence
 nudge, 0-edit force, selector-linerange, callers-inheritance) don't break the agent.
+
+## ★★★ CRITICAL HONEST FINDING (resolution data + loss analysis): commit-fast trades off against correctness
+WFB one-shot resolution (official, Docker): atomic 1/4 hard instances (sklearn-14496✓; astropy/pytest/pylint✗); the
+2 native comparisons (astropy/pytest) BOTH tie at fail = hard-for-both. Per §7 (esgote a hipótese de representação),
+analyzed the 3 atomic FAILURES vs gold:
+- astropy-14182: atomic PARTIAL (did __init__ + separator idx, MISSED gold's +29-line header_rows WRITE logic).
+- pytest-10356: atomic WRONG-LOCATION (fixed get_unpacked_marks per its early diagnosis; gold fixes store_mark/__call__).
+- pylint-4661: atomic MULTI-FILE MISS (did config/__init__.py, MISSED that gold also edits setup.cfg).
+PATTERN: all 3 = SCOPE/COMPLETENESS gaps (partial fix / wrong location / missed file), NOT random errors.
+★ THE UNCOMFORTABLE TRUTH: my process-economy demolitions (commit-fast: convergence nudge, conclusion-latch, read
+suppression) optimize the WRONG metric for hard instances — they push the model to COMMIT before discovering the full
+scope (which files, correct location, completeness). The conclusion-latch may even LOCK the model onto an early-but-
+WRONG diagnosis (pytest get_unpacked_marks). Process-economy (reads/tokens ↓) is REAL but can TRADE OFF against Pass@1.
+★ WHY GATE-ON IS THE VALUE (doubly confirmed): test feedback CATCHES incompleteness (red → keep fixing) — exactly the
+scope-completeness signal one-shot lacks. This is why gate-ON resolved pylint-7080/8898 where one-shot failed both.
+REDIRECT: (1) the queued gate-ON pytest-10356 tests this directly; (2) the commit-fast nudges should be SCOPED to
+gate-ON OFF / easy cases, or counterbalanced by a scope-completeness check ("does this fix the WHOLE issue / other
+files?"); do NOT let conclusion-latch force premature commit on hard multi-file. Honest: I optimized process not Pass@1.
