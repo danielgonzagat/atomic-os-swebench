@@ -366,3 +366,13 @@ test_patch + run `pytest <file> -k "name1 or name2"`. (Official SCORING harness 
 test commands — scoring is unaffected; only local gate-ON iterate is limited.) Killed R048 (don't iterate on garbage,
 the R043 lesson). Validating the 16th fix (deadlock-at-zero-edits) via sympy ONE-SHOT instead: does atomic now
 COMMIT an edit (vs R047's 0 edits)?
+
+## R048 boundary (honest): local feedback gate is PYTEST-based; sympy uses its own runner (no pytest in testbed)
+Implemented the bare-name gate fix (correct: builds `test_sets.py -k "test_Eq or ..."` from the test_patch) and
+verified node-id mode unregressed (pylint8898 gold = 11/0). BUT sympy's testbed has NO pytest (`No module named
+pytest`) — sympy uses its native runner (bin/test). So local gate-ON FEEDBACK covers pytest repos
+(pylint/pytest/flask/requests/astropy) but NOT sympy without re-implementing its repo-specific test command. The
+official SCORING harness handles sympy (repo-specific) → scoring/correctness numbers are unaffected; only the
+local iterate-loop feedback is pytest-bounded. Honest boundary recorded; not chasing sympy's native runner now
+(big repo-specific effort, uncertain payoff — sympy-20438 is hard for BOTH arms one-shot). The bare-name fix is
+kept (helps any bare-name PYTEST repo). 16th fix (deadlock-at-zero-edits) validated separately via R049 one-shot.
