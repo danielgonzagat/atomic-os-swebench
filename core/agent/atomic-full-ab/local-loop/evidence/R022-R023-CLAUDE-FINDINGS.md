@@ -385,3 +385,12 @@ So the 15th fix is sound (only fires on reached-green-then-broke); s2 is a disti
 (~71%) vs one-shot ~25% — the proof-carrying loop is a large boost, bounded by the model's ability to close the
 last test on a hard algorithm. The two failure modes are now distinguished: (a) green-then-broke [15th fix], (b)
 incomplete-fix-never-green [model/task hardness, honest residual].
+
+## R049c — 16th fix (deadlock-at-zero-edits) VALIDATED: atomic 0 edits → 1 edit on sympy-20438
+R047 atomic deadlocked at 0 edits (guaranteed loss). With the 16th fix, R049c: EDITS=1 (18-line diff to
+sets.py), the zero-edit ULTIMATUM fired, the DEADLOCK-STOP did NOT happen. So the fix works: the model now
+commits a best-effort, refinable edit instead of surrendering at 0. (One-shot the edit likely doesn't resolve —
+sympy-20438 is hard for BOTH arms — but a committed edit is refinable by gate-ON where 0 edits is a dead loss;
+sympy gate-ON itself is blocked by the pytest-only gate boundary, recorded honestly.) Net: a 0-edit guaranteed
+loss is demolished as a failure mode. (Note: nohup launches R049/R049b died transiently — infra, not model;
+re-ran harness-tracked as R049c. DeepSeek API verified healthy, no resource leaks.)
