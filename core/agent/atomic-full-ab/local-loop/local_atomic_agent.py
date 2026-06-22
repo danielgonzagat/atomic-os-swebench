@@ -781,8 +781,11 @@ def main():
     metrics = {"arm": "atomic-cli-deepseek-v4-pro", "task": args.task, "workdir": workdir,
                "steps": 0, "tool_calls": {}, "edits_applied": 0, "invalid_states_prevented": 0,
                "reads": 0, "body_context_reads": 0, "run_tests_calls": 0, "quick_check_calls": 0, "tokens": 0, "gate_pass": False,
+               "round_invalid": False, "invalid_reason": "", "model_call_error": "", "model_call_error_kind": "",
                "diff_lines": 0, "wall_s": 0.0, "transcript": [], "reasoning_trace": []}
     t0 = time.time()
+    model_call_error = None
+    model_call_error_kind = ""
 
     survey = ("Be efficient with calls: to understand the code, FIRST call atomic_survey(glob) once to "
               "outline the region, then atomic_read_many(items) to read the relevant files in ONE call — "
@@ -841,13 +844,17 @@ def main():
     # the class essence). Retrieving + injecting the class-matched weight gives THIS model the capability a stronger
     # config already proved on the class. ATOMIC_WEIGHTS_FILE = jsonl of {class, trigger, strategy, proof_n}; inject
     # every weight whose `trigger` (a substring/regex of the task) matches — recoverable, composable, byte-cheap.
+    matched_weight_classes = []
+    matched_weight_hints = []  # CLASS-WEIGHT-LOCKOUT-REFUSAL-ULTIMATUM: lockout must carry the concrete proven strategy, not only the class name.
     try:
         _wf = os.environ.get("ATOMIC_WEIGHTS_FILE")
         if _wf and os.path.exists(_wf):
             _weights = [json.loads(l) for l in open(_wf) if l.strip()]
             _matched = [w for w in _weights if not w.get("trigger") or re.search(w["trigger"], task, re.I)]
             if _matched:
-                _wtxt = "\n".join(f"- [{w['class']}] (proven on {w.get('proof_n',1)} resolution(s)): {w['strategy']}" for w in _matched[:5])
+                matched_weight_classes = [w["class"] for w in _matched[:5]]
+                matched_weight_hints = [f"- [{w['class']}] (proven on {w.get('proof_n',1)} resolution(s)): {w['strategy']}" for w in _matched[:5]]
+                _wtxt = "\n".join(matched_weight_hints)
                 system += ("\n\nLEARNED RESOLUTION STRATEGIES (atomic weights — generalized operators captured from "
                            "PROVEN resolutions of this class; apply the matching one):\n" + _wtxt)
     except Exception:
@@ -871,6 +878,8 @@ def main():
     distinct_since_edit = set()
     empties = 0
     forced = False
+    weight_force_prompted = False  # CLASS-WEIGHT-RETRIEVAL-EARLY-COMMIT: a matched proof-carrying strategy buys only bounded pre-edit investigation.
+    weight_force_refused = 0  # CLASS-WEIGHT-LOCKOUT-REFUSAL-ULTIMATUM: repeated stale reads under a matched-weight lockout are dead turn-burn, not exploration.
     force_refused = 0  # CLASS-FORCE-EDIT-DEADLOCK: consecutive refused reads under force-edit (deadlock-spin detector)
     no_edit_stop_refusals = 0  # CLASS-NO-EDIT-STOP-FORBIDDEN: a gated task that has made zero edits
     # cannot convert repeated no-tool STOP responses into an empty patch. R054 proved that accepts byte-negative
@@ -908,7 +917,10 @@ def main():
     # with no edit, offer ONLY edit+test tools + a firm steer. Not blind (ample context already gathered);
     # feedback (run_tests) lets it refine. Generalist (any over-reading model, any task).
     FORCE_EDIT_AFTER = 12          # absolute backstop: this many REDUNDANT (repeat-target) reads since last edit
+    WEIGHT_FORCE_EDIT_AFTER = 12   # CLASS-WEIGHT-RETRIEVAL-EARLY-COMMIT: matched weights convert advice into an early edit/test lockout.
+    WEIGHT_FORCE_REFUSAL_ULTIMATUM = 3  # CLASS-WEIGHT-LOCKOUT-REFUSAL-ULTIMATUM: after repeated refused stale reads, expose only edit tools.
     READ_HARD_CAP = 40             # absolute breadth cap (even pure new-target reads stop here — runaway guard)
+    EDIT_ONLY_NAMES = {"atomic_replace", "atomic_create"}
     EDIT_TEST_NAMES = {"atomic_replace", "atomic_create", "run_tests"}
     RED_FIX_NAMES = {"atomic_replace", "atomic_create", "quick_check", "run_tests"}
     MINIMIZE_NAMES = {"atomic_replace", "run_tests"}
@@ -1084,6 +1096,20 @@ def main():
         elif force_no_edit_commit:
             step_tools = [t for t in active_tools if t["function"]["name"] in EDIT_TEST_NAMES]
             metrics["transcript"].append(f"s{step} NO-EDIT-STOP-FORBIDDEN tools withheld (edit/test-only)")
+        elif matched_weight_classes and metrics["edits_applied"] == 0 and reads_since_edit >= WEIGHT_FORCE_EDIT_AFTER:
+            _weight_allowed = EDIT_ONLY_NAMES if weight_force_refused >= WEIGHT_FORCE_REFUSAL_ULTIMATUM else EDIT_TEST_NAMES
+            step_tools = [t for t in active_tools if t["function"]["name"] in _weight_allowed]
+            if not weight_force_prompted:
+                _weight_hint = "\n".join(matched_weight_hints[:3]) or ", ".join(matched_weight_classes)
+                messages.append({"role": "user", "content": (
+                    "A proof-carrying learned strategy matched this task (" + ", ".join(matched_weight_classes) + "). "
+                    "You have enough context to apply that operator. STOP reading now and apply this proven operator:\n"
+                    + _weight_hint + "\nEmit the smallest atomic_replace/atomic_create "
+                    + ("and stop." if NO_GATE else "then quick_check/run_tests; feedback will refine it if needed."))})
+                metrics["transcript"].append(f"s{step} WEIGHT-EARLY-COMMIT engaged ({','.join(matched_weight_classes)}; reads={reads_since_edit}, 0 edits) — read tools withheld")
+                weight_force_prompted = True
+            elif weight_force_refused >= WEIGHT_FORCE_REFUSAL_ULTIMATUM:
+                metrics["transcript"].append(f"s{step} WEIGHT-EARLY-COMMIT ultimatum active (refused_reads={weight_force_refused}; edit-only)")
         elif _redundant_reads() >= FORCE_EDIT_AFTER or reads_since_edit >= READ_HARD_CAP:
             step_tools = [t for t in active_tools if t["function"]["name"] in EDIT_TEST_NAMES]
             if not forced:
@@ -1119,7 +1145,19 @@ def main():
         try:
             msg, usage = deepseek(messages, step_tools)
         except Exception as e:
-            metrics["transcript"].append(f"s{step} DEEPSEEK-ERROR {str(e)[:200]}")
+            code = getattr(e, "code", None)
+            model_call_error_kind = (
+                "model_payment_required" if code == 402 else
+                "model_auth_error" if code in (401, 403) else
+                "model_timeout" if isinstance(e, TimeoutError) else
+                "model_call_error"
+            )
+            model_call_error = f"{type(e).__name__}: {str(e)[:200]}"
+            metrics["model_call_error"] = model_call_error
+            metrics["model_call_error_kind"] = model_call_error_kind
+            metrics["round_invalid"] = True
+            metrics["invalid_reason"] = model_call_error_kind
+            metrics["transcript"].append(f"s{step} DEEPSEEK-ERROR {model_call_error_kind} {str(e)[:200]}")
             break
         metrics["tokens"] += int(usage.get("total_tokens", 0) or 0)
         # FULL-REASONING CAPTURE (wall-hunting obligation): record the model's verbatim chain-of-thought
@@ -1223,6 +1261,21 @@ def main():
                 res = ("PRE-EDIT TOPOLOGY DECISION REQUIRED — reply in text only, no tool call. "
                        "Choose the canonical implementation location and delegating wrappers before the first edit.")
                 metrics["transcript"].append(f"s{step} {fn} REFUSED (pre-edit topology active)")
+                messages.append({"role": "tool", "tool_call_id": c["id"], "content": res})
+                continue
+
+            if fn in READ_FNS and matched_weight_classes and metrics["edits_applied"] == 0 and reads_since_edit >= WEIGHT_FORCE_EDIT_AFTER:
+                weight_force_refused += 1
+                _weight_hint = "\n".join(matched_weight_hints[:3]) or ", ".join(matched_weight_classes)
+                _ultimatum = weight_force_refused >= WEIGHT_FORCE_REFUSAL_ULTIMATUM
+                res = ("READING DISABLED — a proof-carrying learned strategy matched this task (" + ", ".join(matched_weight_classes) + "). "
+                       "You have enough context to apply it. Do not request another read/search. Apply this proven operator now:\n"
+                       + _weight_hint + "\nEmit one atomic_replace/atomic_create at the weighted root site now; "
+                       + ("then stop." if NO_GATE else "then quick_check/run_tests."))
+                if _ultimatum:
+                    res += "\nULTIMATUM: repeated stale reads are being refused; the next productive action is edit-only (atomic_replace or atomic_create)."
+                metrics["invalid_states_prevented"] += 1
+                metrics["transcript"].append(f"s{step} {fn} REFUSED (weight early-commit lockout; reads={reads_since_edit}, edits=0, refused={weight_force_refused})")
                 messages.append({"role": "tool", "tool_call_id": c["id"], "content": res})
                 continue
 
@@ -1573,10 +1626,21 @@ def main():
                         # neither "not found" nor "not unique", so the correction (which shows the candidate sites +
                         # "include more surrounding lines") never fired. Trigger it on ambiguous/occurrence errors too.
                         _rl = res.lower()
-                        if fn == "atomic_replace" and ("not found" in _rl or "not unique" in _rl or "ambiguous" in _rl or "occurrence" in _rl):
+                        if fn == "atomic_replace" and ("not found" in _rl or "not unique" in _rl or "ambiguous" in _rl or "occurrence" in _rl or "selector" in _rl):
                             corr = _edit_correction(workdir, a.get("file", ""), a.get("oldText", ""))
                             if corr:
                                 res = res + corr
+                            else:
+                                # CLASS-EDIT-SELECTOR-NO-LINE-FALLBACK (R053, generalist): the model used a SYMBOL/anchor
+                                # selector the engine could not resolve (e.g. 'class Equality' not found, or an ambiguous
+                                # multi-def) with NO oldText to correct → it would re-read/grep forever without committing
+                                # the edit (sympy-20438 A/B LOSS: 0 atomic_replace in 70 steps, worse than native). The
+                                # model ALREADY has the line numbers from atomic_grep/atomic_read; steer it to the LINE-
+                                # RANGE form atomic_replace already supports, so a selector-miss never blocks an edit again.
+                                res = res + ("\n[edit-help] The symbol/anchor selector could not be resolved. Do NOT keep "
+                                             "re-reading — COMMIT the edit BY LINE RANGE: call atomic_replace with "
+                                             "selector=\"L<start>:L<end>\" (the exact line numbers you already have from "
+                                             "atomic_grep/atomic_read) and newText = the full replacement block for those lines.")
                 metrics["transcript"].append(f"s{step} {fn}({json.dumps(a)[:90]}) -> {res.splitlines()[0][:120] if res else '(empty)'}")
             else:
                 res = f"Unknown tool {fn}. Use only the atomic tools."
@@ -1632,7 +1696,10 @@ def main():
             messages.append({"role": "user", "content": "You have read a lot without editing. You likely have enough context — " + _act})
 
     # final scoring (authoritative) + diff
-    if NO_GATE:
+    if model_call_error:
+        metrics["gate_pass"] = None
+        metrics["transcript"].append(f"ROUND INVALID (model call error: {model_call_error_kind})")
+    elif NO_GATE:
         metrics["gate_pass"] = None  # scored externally by the official SWE-bench Docker harness
     else:
         final_pass, _, _ = run_gate(workdir, args.gate)
