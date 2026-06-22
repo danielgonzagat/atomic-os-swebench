@@ -431,6 +431,9 @@ def main():
     force_refused = 0  # CLASS-FORCE-EDIT-DEADLOCK: consecutive refused reads under force-edit (deadlock-spin detector)
     green_minimize_prompted = False
     green_minimize_active = False
+    green_minimize_f1b_stripped = False  # CLASS-GREEN-MINIMIZE-DECLINE-COST (F1c): when F1b deterministically
+    # stripped comments, DECLINE's forced minimize re-prompt is redundant (the reduction already happened) and only
+    # burns a round-trip the model then fails (F1 rejects the non-shrink). Skip the forced re-prompt in that case.
     green_minimize_start_lines = 0
     green_minimize_edits = 0
     green_minimize_pre_files = {}  # CLASS-GREEN-MINIMIZE-NOSHRINK (F1): capture the green fix's changed-file
@@ -510,6 +513,7 @@ def main():
                 _cstrip_after = diff_lines(git_diff(workdir))
                 if _cstrip_pass and _cstrip_after < green_minimize_start_lines:
                     green_minimize_start_lines = _cstrip_after
+                    green_minimize_f1b_stripped = True  # F1c: deterministic reduction happened -> DECLINE skips its forced re-prompt
                     green_minimize_pre_files = {cf: open(os.path.join(workdir, cf), encoding="utf-8").read() for cf in green_minimize_pre_files}
                     metrics["transcript"].append(f"s{step} DETERMINISTIC comment-strip: removed {_cstrip} added comment line(s); gate green; diff_lines->{green_minimize_start_lines}")
                 else:
@@ -569,7 +573,7 @@ def main():
                 empties = 0
                 messages.append({"role": "user", "content": "Now implement that topology with the smallest faithful atomic edit(s), then run_tests."})
                 continue
-            if green_minimize_active and green_minimize_edits == 0 and green_minimize_refusals < 1:
+            if green_minimize_active and green_minimize_edits == 0 and green_minimize_refusals < 1 and not green_minimize_f1b_stripped:
                 green_minimize_refusals += 1
                 metrics["transcript"].append(f"s{step} GREEN-MINIMIZE refused-stop -> re-prompt once (a smaller equivalent exists)")
                 messages.append({"role": "user", "content": (

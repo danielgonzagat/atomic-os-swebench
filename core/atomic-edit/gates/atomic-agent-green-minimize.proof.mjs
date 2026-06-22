@@ -88,6 +88,15 @@ record('CLASS-GREEN-MINIMIZE-NOSHRINK (F1): a non-shrinking minimize edit is rej
     shrinkGuard: source.includes('minimized_lines < green_minimize_start_lines'),
     rejectMarker: source.includes('GREEN-MINIMIZE REJECTED (did not shrink'),
   });
+record('CLASS-GREEN-MINIMIZE-DECLINE-COST (F1c): DECLINE forced re-prompt is skipped when F1b already stripped comments (no redundant round-trip burn)',
+  source.includes('green_minimize_f1b_stripped = False') &&
+  source.includes('green_minimize_f1b_stripped = True') &&
+  source.includes('and not green_minimize_f1b_stripped'),
+  {
+    init: source.includes('green_minimize_f1b_stripped = False'),
+    setOnStrip: source.includes('green_minimize_f1b_stripped = True'),
+    guardSkip: source.includes('and not green_minimize_f1b_stripped'),
+  });
 record('CLASS-DOCSTRING-SURFACE-MINIMALITY (F1b): deterministic strip of agent-ADDED stand-alone comment lines at minimize-offer',
   source.includes('CLASS-DOCSTRING-SURFACE-MINIMALITY (F1b, deterministic)') &&
   source.includes('_cstrip') &&
