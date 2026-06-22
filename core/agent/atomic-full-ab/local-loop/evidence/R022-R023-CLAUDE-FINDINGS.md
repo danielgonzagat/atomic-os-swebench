@@ -250,3 +250,20 @@ exactly where native's text-patching over-reaches and atomic's minimal-faithful-
 MARGIN. This is the by-number dominance signal the doctrine wants, on a harder multi-file instance. Residual
 loss = tokens (DeepSeek reasoning verbosity, the model — keep hunting via perception compaction). Official runs
 pytest8399_atomic ✓ / pytest8399_native ✓.
+
+## ★★★ R039 — multi-file dominance STABLE (N=3): atomic edit-quality beats native, all samples
+pytest-8399 atomic N=3: edits {1,1,1}, diff_lines {2,2,2}, files {1,1,1}, calls {7,5,3} (median 5).
+Native: 5 edits, 10 diff_lines, 2 files, 10 calls. Both RESOLVED (correctness parity).
+→ ATOMIC DOMINATES edit-quality on the multi-file instance, STABLE across all 3 samples: 5× fewer edits, 5×
+smaller diff surface, fewer files, ~2× fewer tool-calls. Residual loss = tokens (DeepSeek reasoning verbosity,
+84k vs 42k) — the model, not the representation. This is the doctrine's by-number dominance signal: the atomic
+minimal-faithful-transformation principle creates real margin where native's text-patching over-reaches.
+
+## ESCALATION ARC SUMMARY (by number, official harness, 3 difficulty levels)
+- L1 (5 single-file): DeepSeek-atomic 5/5 cross-model resolved (= native one-shot 4/5 + pylint via gate-ON);
+  complete-chain regression-free (R034 4/4).
+- L2 (astropy-12907, harder single-file): correctness PARITY + tool-economy PARITY (N=3 median 3 = native 3).
+- L3 (pytest-8399, multi-file): correctness PARITY + edit-quality DOMINANCE (5× fewer edits/diff, stable N=3).
+Thesis demonstrated: weaker DeepSeek + complete atomic representation matches-or-beats stronger native-Claude on
+correctness and edit-quality across difficulty; sole residual = DeepSeek token verbosity (model). 13 generalist
+demolitions this session, all committed, all by-number; model locked DeepSeek V4 Pro; every gap = my representation.
