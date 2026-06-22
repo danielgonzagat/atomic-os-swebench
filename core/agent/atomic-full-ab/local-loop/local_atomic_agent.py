@@ -298,6 +298,34 @@ def _post_edit_view(workdir, file, anchor):
     return f"\n[post-edit view] the file now reads (around your change) — no need to re-read to verify:\n{body}"
 
 
+# CLASS-SELECTOR-NOT-FOUND-DEADEND (R049, generalist): the engine's symbol selector resolver FAILS to find class
+# methods that are ambiguous/overloaded (sympy sets.py: `is_subset` is defined at L349, L1278, ... → resolver
+# returns "❌ Selector not found"). Measured: the model then can't read the method body by name and falls back to
+# fragmented line-range RE-reads (the sympy 0-edit/deadlock struggle). FIX: when a selector read returns
+# not-found, GREP for `def <selector>` / `class <selector>` and return each match's body region directly — so the
+# model gets the bodies it asked for in one shot instead of re-reading fragments. Any language with def/class/func.
+def _selector_fallback(workdir, path, selector):
+    if not path or not selector:
+        return ""
+    try:
+        p = path if os.path.isabs(path) else os.path.join(workdir, path)
+        lines = open(p, encoding="utf-8", errors="replace").read().split("\n")
+    except Exception:
+        return ""
+    sel = selector.split(".")[-1].strip()
+    pat = re.compile(rf"^\s*(?:async\s+)?(?:def|class|func|function|fn)\s+{re.escape(sel)}\b")
+    hits = [i for i, l in enumerate(lines) if pat.match(l)]
+    if not hits:
+        return ""
+    blocks = []
+    for i in hits[:4]:
+        e = min(len(lines), i + 30)
+        blocks.append("\n".join(f"{n+1}: {lines[n]}" for n in range(i, e)))
+    note = "" if len(hits) == 1 else f" ({len(hits)} definitions of `{sel}` — overloaded/ambiguous; all shown)"
+    return (f"(selector resolver missed `{selector}`; located the definition(s) by grep{note}):\n"
+            + "\n---\n".join(blocks))
+
+
 # CLASS-GUARD-CALLS-EXISTING (R029, generalist): three TEXT steers (tool exposure, lean steer, red-test steer)
 # did NOT get the model to consult the call-graph before adding a redundant guard (measured: pylint-7080, the
 # model added a 2nd _is_ignored_file(...) call and never called atomic_callers). Optional perception is ignored;
@@ -1086,6 +1114,13 @@ def main():
                     metrics["body_context_reads"] += 1
                 before = git_diff(workdir)
                 res, ok = atomic_call(workdir, tool, call_args)
+                # CLASS-SELECTOR-NOT-FOUND-DEADEND (R049): a selector read that the resolver can't find (ambiguous/
+                # overloaded class methods) must not dead-end into fragmented re-reads — grep the def(s) and return
+                # the bodies so the model gets what it asked for in one shot.
+                if fn == "atomic_read" and a.get("selector") and ("not found" in res.lower() and "selector" in res.lower()):
+                    fb = _selector_fallback(workdir, a.get("path", ""), a.get("selector"))
+                    if fb:
+                        res = fb
                 after = git_diff(workdir)
                 if fn in ("atomic_replace", "atomic_create"):
                     if after != before:
