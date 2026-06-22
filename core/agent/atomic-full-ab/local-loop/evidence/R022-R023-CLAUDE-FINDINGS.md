@@ -406,3 +406,11 @@ the representation gaps I could find are closed (deadlock-at-0 [16th], selector-
 nav-wander); the residual one-shot incompleteness on a hard multi-file synthesis task — where BOTH models fail
 one-shot — is bounded by the iterate loop (harness-blocked for sympy) and/or the model, recorded honestly, not
 chased infinitely. Sympy frontier is thoroughly characterized: 2 new demolitions + 2 honest boundaries.
+
+## ★ R051 — CLASS-GATE-NATIVE-RUNNER (18th): sympy gate-ON UNBLOCKED (built the keystone)
+Built the native-runner gate (the lever I'd deferred): (1) auto-detect runner — pytest if available, else sympy's
+own `python bin/test` (no pytest in sympy testbed); (2) bare-name mode runs the test_patch FILE(s) WHOLE (sympy's
+bin/test -k is a substring filter, no "a or b" — whole-file is a valid stricter gate for both runners). VALIDATED
+it DISCRIMINATES: gold patch → 96 passed/0 failed (PASS); no-fix → 94 passed/2 FAILED (FAIL). So sympy gate-ON now
+works (snapshot: evidence/swe_gate_iso_R051.sh). This unblocks the doctrine's core value test on the 5th repo:
+does atomic's proof-carrying loop RESOLVE sympy-20438 (both arms fail one-shot)? → R052 gate-ON.
