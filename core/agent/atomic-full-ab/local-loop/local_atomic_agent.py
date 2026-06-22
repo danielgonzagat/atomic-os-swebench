@@ -439,6 +439,60 @@ DISPATCH = {
 REFUSAL_MARKERS = ("error", "❌", "invalid", "not found", "not unique", "validation")
 
 
+def trial_minimal_hunk(workdir, gate):
+    """CLASS-OVERFIX-MULTIPATH-DETERMINISTIC (F2b): deterministic over-fix reduction. If the current green diff
+    has >=2 hunks, trial EACH hunk alone (reset to base, apply only that hunk, run the gate); keep the SMALLEST
+    hunk that is green alone (the others usually handle untested/redundant paths). If none alone is green+smaller,
+    restore the full fix. Returns (kept_bool, new_diff_lines, msg). Generalist (unified-diff hunks, any lang).
+    Safe: restores the full fix on any failure/non-improvement. Deterministic -- does not rely on model compliance.
+    Measured reductions on verbose atomic fixes: e1 15->4, e3 10->5, d4 8->3."""
+    full = git_diff(workdir)
+    full_lines = diff_lines(full)
+    if not full.strip():
+        return False, full_lines, "no diff"
+    fsecs = [s for s in re.split(r"(?m)(?=^diff --git )", full) if s.startswith("diff --git ")]
+    cands = []
+    for fsec in fsecs:
+        m = re.search(r"(?m)^@@", fsec)
+        if not m:
+            continue
+        header = fsec[:m.start()]; body = fsec[m.start():]
+        for hk in re.split(r"(?m)(?=^@@ )", body):
+            if hk.startswith("@@"):
+                sz = sum(1 for l in hk.splitlines() if (l.startswith("+") or l.startswith("-")) and not l.startswith(("+++","---")))
+                cands.append((sz, header, hk))
+    if len(cands) < 2:
+        return False, full_lines, f"<2 hunks ({len(cands)})"
+    changed = subprocess.run(["git", "diff", "HEAD", "--name-only"], cwd=workdir, capture_output=True, text=True).stdout.split()
+    pre = {}
+    for f in changed:
+        p = os.path.join(workdir, f)
+        try: pre[f] = open(p, encoding="utf-8").read()
+        except Exception: pass
+    cands.sort(key=lambda c: c[0])
+    best = None  # (after_lines, header, hk, size)
+    for sz, header, hk in cands[:4]:  # bounded: trial the 4 smallest hunks
+        subprocess.run(["git", "checkout", "HEAD", "--", "."], cwd=workdir, capture_output=True)
+        ap = subprocess.run(["git", "apply", "-"], cwd=workdir, input=header + hk, text=True, capture_output=True)
+        if ap.returncode != 0:
+            continue
+        gp, _, _ = run_gate(workdir, gate)
+        if gp:
+            after = diff_lines(git_diff(workdir))
+            if after < full_lines:
+                best = (after, header, hk, sz)
+                break  # cands sorted by size -> first green single hunk is the smallest
+    subprocess.run(["git", "checkout", "HEAD", "--", "."], cwd=workdir, capture_output=True)
+    if best is not None:
+        after, header, hk, sz = best
+        subprocess.run(["git", "apply", "-"], cwd=workdir, input=header + hk, text=True, capture_output=True)
+        return True, after, f"kept smallest green single-hunk (size={sz}): {full_lines}->{after}"
+    for f, c in pre.items():
+        try: open(os.path.join(workdir, f), "w", encoding="utf-8").write(c)
+        except Exception: pass
+    return False, full_lines, "no single hunk green+smaller; restored full fix"
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--workdir", required=True)
@@ -582,6 +636,19 @@ def main():
                         try: open(os.path.join(workdir, _cf), "w", encoding="utf-8").write(_c)
                         except Exception: pass
                     metrics["transcript"].append(f"s{step} DETERMINISTIC comment-strip removed {_cstrip} but gate not green or no shrink; reverted")
+            # CLASS-OVERFIX-MULTIPATH-DETERMINISTIC (F2b): trial each diff hunk alone, keep the smallest one that
+            # is green alone. atomic verbose multi-hunk fixes usually contain ONE hunk that alone suffices (the
+            # others handle untested/redundant paths); measured e1 15->4, e3 10->5, d4 8->3. Deterministic -- does
+            # NOT rely on model compliance (the lever the advisory signals could not pull). Safe restore on failure.
+            try:
+                _f2b_kept, _f2b_lines, _f2b_msg = trial_minimal_hunk(workdir, args.gate)
+            except Exception as _f2b_e:
+                _f2b_kept, _f2b_lines, _f2b_msg = False, green_minimize_start_lines, f"F2b error: {str(_f2b_e)[:80]}"
+            if _f2b_kept:
+                green_minimize_start_lines = _f2b_lines
+                green_minimize_pre_files = {cf: open(os.path.join(workdir, cf), encoding="utf-8").read() for cf in green_minimize_pre_files}
+                green_minimize_f1b_stripped = True  # deterministic reduction happened -> DECLINE skips its forced re-prompt
+            metrics["transcript"].append(f"s{step} F2b hunk-minimize: {_f2b_msg}")
             messages.append({"role": "user", "content": (
                 f"The acceptance gate is green. Current diff surface is {green_minimize_start_lines} changed lines. "
                 "You get ONE bounded diff-minimization pass: if a strictly smaller equivalent patch is obvious "

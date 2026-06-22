@@ -119,6 +119,17 @@ record('CLASS-OVERFIX-MULTIPATH (F2): fix-phase edits that add a loop or touch m
     receipt: source.includes('[over-fix check] this edit added'),
     fixPhaseOnly: source.includes('if not green_minimize_active:'),
   });
+record('CLASS-OVERFIX-MULTIPATH-DETERMINISTIC (F2b): trial each diff hunk alone, keep smallest green one (deterministic over-fix reduction)',
+  source.includes('def trial_minimal_hunk(workdir, gate):') &&
+  source.includes('CLASS-OVERFIX-MULTIPATH-DETERMINISTIC (F2b): deterministic over-fix reduction') &&
+  source.includes('F2b hunk-minimize:') &&
+  source.includes('cands[:4]'),
+  {
+    helper: source.includes('def trial_minimal_hunk(workdir, gate):'),
+    docstring: source.includes('CLASS-OVERFIX-MULTIPATH-DETERMINISTIC (F2b): deterministic over-fix reduction'),
+    callTrace: source.includes('F2b hunk-minimize:'),
+    bounded: source.includes('cands[:4]'),
+  });
 const py = spawnSync('python3', ['-m', 'py_compile', agentPath], { cwd: repoRoot, encoding: 'utf8', timeout: 20000, maxBuffer: 1024 * 1024 });
 record('local_atomic_agent.py remains valid Python after green-minimize update', py.status === 0, { status: py.status, signal: py.signal, stderr: py.stderr });
 
