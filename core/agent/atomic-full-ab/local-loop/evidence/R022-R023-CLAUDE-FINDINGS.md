@@ -440,3 +440,13 @@ but adaptive, since it plateaus); (b) the DOMINANT residual is multi-handler syn
 editing one @dispatch handler, surface the SIBLING handlers registering the same generic) — but uncertain + risks
 task-specificity. sympy-20438 NOT resolved even at 150 steps (95/1). Gate-ON loop value still shown (0-edit→95/1).
 Sympy frontier now EXHAUSTIVELY explored: 4 demolitions (16/17/18 + step-budget insight) + honest dominant residual.
+
+## ★ R054 — sklearn-13328 (6th repo): cross-model PARITY + atomic ROOT-CAUSE quality edge
+HuberRegressor TypeError on boolean X. One-shot A/B, OFFICIAL harness: native RESOLVED (gold's localized huber.py
+dtype patch), atomic RESOLVED (deeper-ROOT fix: sklearn/utils/validation.py check_array, dtype_orig.kind in
+("O","b") → upcast bool→float for ALL estimators). BOTH resolve one-shot (6th repo, cross-model correctness PARITY).
+QUALITY EDGE for atomic: same 1-line footprint but fixes the ROOT CAUSE (check_array bool upcast benefits every
+estimator) vs native's per-estimator patch — AND atomic's general fix is REGRESSION-FREE (passes all P2P officially).
+The minimal-faithful/root-cause principle: atomic found the deeper, more-general fix without over-reaching. (Note:
+not the hard-one-shot→gate-ON datapoint sought — both resolved one-shot — but a valuable breadth+quality datapoint.)
+Repos now: pylint, pytest, flask, requests, astropy, sympy, scikit-learn (7 repos).
