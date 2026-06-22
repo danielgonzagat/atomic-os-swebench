@@ -844,3 +844,12 @@ weight-substrate arc: substrate mechanics PROVEN (deterministic); weight-as-advi
 NARROW. This strengthens the gate>advice synthesis: ENFORCEMENT (proof-gate, which resolves where one-shot fails — proven)
 is the real lifting substrate; advisory weights are a weak, narrow, derivation-fit delivery. Recorded the negative result
 honestly — the loop does not bury a falsification.
+
+## ★ LOCKED-DeepSeek weight_lift PARTIAL (N=2-3, killed to free DeepSeek for primary A/B) — weight does NOT lift DeepSeek one-shot
+weight_lift_test on the LOCKED DeepSeek V4 Pro one-shot pylint-7080: sample1 baseline=0/weight=0, sample2 baseline=0.
+Per-run: BOTH baseline AND weight arms edits=1, normpath=FALSE, resolved=0 — the weight did NOT change DeepSeek's behavior
+(it made 1 edit, not the normpath fix, with or without the weight). So on the LOCKED config (the directive's actual model),
+the weight-as-advice does NOT lift (0=0, neither applies normpath) — DeepSeek one-shot is even LESS responsive to the
+injected advice than native Claude (which applied it ~30%). CONSISTENT with the whole arc: weight-as-prompt-advice is
+NARROW + unreliable; the GATE (enforcement) is the real lifting substrate (proven on the real A/B: atomic gate-ON resolved
+pylint-8898 where native one-shot failed). Killed at N=2-3 (slow, starving the primary A/B); signal clear + consistent.
