@@ -853,6 +853,10 @@ def main():
     empties = 0
     forced = False
     force_refused = 0  # CLASS-FORCE-EDIT-DEADLOCK: consecutive refused reads under force-edit (deadlock-spin detector)
+    no_edit_stop_refusals = 0  # CLASS-NO-EDIT-STOP-FORBIDDEN: a gated task that has made zero edits
+    # cannot convert repeated no-tool STOP responses into an empty patch. R054 proved that accepts byte-negative
+    # absence as a result: empty_patch_instances=1, edits=0, run_tests=0. Refuse that stop and withhold read tools.
+    force_no_edit_commit = False
     green_minimize_prompted = False
     green_minimize_active = False
     green_minimize_finalized = False  # CLASS-GREEN-MINIMIZE-RETEST-GREEN-FINALIZE: once post-green minimization
@@ -1050,6 +1054,9 @@ def main():
         elif green_minimize_active:
             allowed = {"run_tests"} if green_minimize_edits >= 1 else MINIMIZE_NAMES
             step_tools = [t for t in active_tools if t["function"]["name"] in allowed]
+        elif force_no_edit_commit:
+            step_tools = [t for t in active_tools if t["function"]["name"] in EDIT_TEST_NAMES]
+            metrics["transcript"].append(f"s{step} NO-EDIT-STOP-FORBIDDEN tools withheld (edit/test-only)")
         elif _redundant_reads() >= FORCE_EDIT_AFTER or reads_since_edit >= READ_HARD_CAP:
             step_tools = [t for t in active_tools if t["function"]["name"] in EDIT_TEST_NAMES]
             if not forced:
@@ -1134,6 +1141,17 @@ def main():
                 metrics["transcript"].append(f"s{step} DONE (no tool call{'; one-shot fix submitted' if NO_GATE else '; gate green'})")
                 break
             if empties >= 3:
+                if not NO_GATE and metrics["edits_applied"] == 0:
+                    no_edit_stop_refusals += 1
+                    force_no_edit_commit = True
+                    empties = 0
+                    metrics["invalid_states_prevented"] += 1
+                    metrics["transcript"].append(f"s{step} STOP refused (no edit yet) -> edit/test-only mode {no_edit_stop_refusals}")
+                    messages.append({"role": "user", "content": (
+                        "STOP is invalid: no bytes changed and the acceptance gate is not green. "
+                        "Read tools are now disabled. Make the smallest atomic_replace/atomic_create based on "
+                        "the context already read, then run_tests.")})
+                    continue
                 metrics["transcript"].append(f"s{step} STOP (gave up)")
                 break
             nudge = ("You have not edited anything yet. Implement the fix now with atomic_replace/atomic_create, then stop."
@@ -1374,6 +1392,7 @@ def main():
                         read_coverage.pop(a.get("file", ""), None)  # CLASS-OVERLAPPING-REREAD: edited file content changed → its coverage is stale; allow fresh reads of it
                         forced = False
                         force_refused = 0  # an edit landed → spin broken
+                        force_no_edit_commit = False
                         if green_minimize_active and fn == "atomic_replace":
                             green_minimize_edits += 1
                         # CLASS-EDIT-RECEIPT-BLIND: show the post-edit region so the model confirms by
@@ -1417,7 +1436,12 @@ def main():
                                 "just fixed. This catches incorrect approaches BEFORE the expensive run_tests.")
                     elif any(m in res.lower() for m in REFUSAL_MARKERS):
                         metrics["invalid_states_prevented"] += 1
-                        if fn == "atomic_replace" and ("not found" in res.lower() or "not unique" in res.lower() or "not unique" in res.lower()):
+                        # CLASS-AMBIGUOUS-EDIT-NO-HELP (WFB WALL-5): the engine rejects a non-unique oldText with
+                        # "ambiguous: N occurrences" (sklearn: cost a wasted turn + a reread). That message contains
+                        # neither "not found" nor "not unique", so the correction (which shows the candidate sites +
+                        # "include more surrounding lines") never fired. Trigger it on ambiguous/occurrence errors too.
+                        _rl = res.lower()
+                        if fn == "atomic_replace" and ("not found" in _rl or "not unique" in _rl or "ambiguous" in _rl or "occurrence" in _rl):
                             corr = _edit_correction(workdir, a.get("file", ""), a.get("oldText", ""))
                             if corr:
                                 res = res + corr
