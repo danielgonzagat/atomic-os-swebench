@@ -205,6 +205,68 @@ def _edit_correction(workdir, file, old_text):
             "whitespace, no line numbers) from here:\n" + "\n---\n".join(blocks))
 
 
+# CLASS-ARG-NAME-RIGIDITY (R022, generalist): the model carries strong priors for parameter names from every
+# other editing tool it has ever seen (old_string/new_string/file_path, symbol, query...). When my schema
+# demanded different names (oldText/newText/file), the model used its natural names → the mapper read ""
+# → the edit hit the repo root with `{"ok":false,"error":"not a regular file"}` → the model BLIND-RETRIED
+# (pytest-5262: 5 wasted atomic_replace calls before guessing oldText/newText). A faithful representation
+# accepts what the model naturally knows. Map every common alias to the canonical key, per tool. Also parse
+# a line-range given in the `selector` slot ("L34:L80" / "34-80") — the model's natural way to ask for lines.
+_ARG_ALIASES = {
+    "atomic_replace": {"old_string": "oldText", "old_str": "oldText", "old_text": "oldText", "old": "oldText",
+                       "search": "oldText", "find": "oldText",
+                       "new_string": "newText", "new_str": "newText", "new_text": "newText", "new": "newText",
+                       "replace": "newText", "replacement": "newText",
+                       "path": "file", "file_path": "file", "filename": "file", "filepath": "file",
+                       "reason": "proofOfIncorrectness", "proof": "proofOfIncorrectness", "why": "proofOfIncorrectness"},
+    "atomic_create": {"path": "file", "file_path": "file", "filename": "file", "filepath": "file",
+                      "text": "content", "code": "content", "contents": "content", "body": "content"},
+    "atomic_read": {"file": "path", "file_path": "path", "filepath": "path",
+                    "symbol": "selector", "name": "selector", "function": "selector",
+                    "start_line": "startLine", "end_line": "endLine", "start": "startLine", "end": "endLine",
+                    "from": "startLine", "to": "endLine", "lines": "selector"},
+    "atomic_outline": {"path": "file", "file_path": "file", "filepath": "file"},
+    "atomic_grep": {"query": "pattern", "regex": "pattern", "search": "pattern", "text": "pattern",
+                    "dir": "path", "directory": "path", "context": "contextAfter"},
+    "atomic_survey": {"pattern": "glob", "globs": "glob", "files": "glob"},
+    "atomic_read_many": {"files": "items", "paths": "items"},
+}
+_LINERANGE_RE = re.compile(r"^[Ll]?(\d+)\s*[-:]\s*[Ll]?(\d+)$")
+
+def _normalize_args(fn, a):
+    if not isinstance(a, dict):
+        return a
+    out = dict(a)
+    for alt, canon in _ARG_ALIASES.get(fn, {}).items():
+        if alt in out and canon not in out:
+            out[canon] = out.pop(alt)
+    # selector-as-line-range: the model often asks atomic_read(path, selector="L34:L80") or "34-80".
+    if fn == "atomic_read" and isinstance(out.get("selector"), str) and "startLine" not in out:
+        m = _LINERANGE_RE.match(out["selector"].strip())
+        if m:
+            out["startLine"] = int(m.group(1)); out["endLine"] = int(m.group(2)); out.pop("selector", None)
+    return out
+
+
+# CLASS-EDIT-RECEIPT-BLIND (R022, generalist): a successful atomic_replace/atomic_create returned only the
+# headline "✅ Atomic edit applied" — so the model could not SEE the result of its own edit and re-read the
+# symbol to verify on EVERY instance (measured: 1 verify-read after each edit). A faithful edit receipt shows
+# the post-edit code region with line numbers, so the model confirms by perception, not by another round-trip.
+def _post_edit_view(workdir, file, anchor):
+    try:
+        path = file if os.path.isabs(file) else os.path.join(workdir, file)
+        lines = open(path, encoding="utf-8", errors="replace").read().split("\n")
+    except Exception:
+        return ""
+    key = next((l.strip() for l in (anchor or "").split("\n") if l.strip()), "")
+    idx = next((i for i, l in enumerate(lines) if key and key in l), -1)
+    if idx < 0:
+        idx = 0
+    s = max(0, idx - 3); e = min(len(lines), idx + 9)
+    body = "\n".join(f"{n+1}: {lines[n]}" for n in range(s, e))
+    return f"\n[post-edit view] the file now reads (around your change) — no need to re-read to verify:\n{body}"
+
+
 def atomic_call(workdir, tool, args):
     args = _absolutize(workdir, args)
     if tool == "code_outline_batch" and not args.get("cwd"):  # glob is workdir-relative
@@ -362,14 +424,21 @@ def main():
         metrics["steps"] = step
         step_tools = active_tools
         if os.environ.get("ATOMIC_TOPOLOGY_TURN", "1") == "1" and metrics["edits_applied"] == 0 and metrics["body_context_reads"] > 0 and not pre_edit_topology_prompted:
+            # CLASS-TOPOLOGY-WITHHOLD (R022, generalist): the old turn DEMANDED "text only, no tool call" and
+            # WITHHELD all tools (pre_edit_topology_active). DeepSeek-v4-pro will not sit idle — it emitted its
+            # intended reads as dead DSML pseudo-tool-call prose (measured: 1-2 wasted round-trips on EVERY
+            # instance + a re-read of context it already had). Withholding tools to force a text turn is
+            # gravitationally adversarial to this model. Keep the topology GUIDANCE (diff-minimization intent)
+            # but make it NON-BLOCKING: the model thinks about topology in its reasoning and edits in the SAME
+            # turn. Do NOT set pre_edit_topology_active — never withhold tools.
             messages.append({"role": "user", "content": (
-                "Before the first edit, choose the smallest implementation topology over the files you already read. "
-                "Reply with text only and no tool call: name the canonical implementation location, any delegating wrappers, "
-                "and why this preserves public exports while minimizing changed bytes. If multiple exported functions need "
-                "the same semantics, prefer one canonical implementation plus wrappers before writing duplicated logic.")})
-            metrics["transcript"].append(f"s{step} PRE-EDIT-TOPOLOGY requested")
+                "You have read enough to edit. Pick the smallest implementation topology — the canonical "
+                "implementation location and any delegating wrappers, preferring ONE canonical implementation "
+                "plus wrappers over duplicated logic when several exported functions need the same semantics — "
+                "then make the smallest faithful edit(s) with atomic_replace/atomic_create in THIS turn. "
+                "You may state your topology reasoning as content alongside the tool call.")})
+            metrics["transcript"].append(f"s{step} TOPOLOGY-GUIDANCE injected (non-blocking)")
             pre_edit_topology_prompted = True
-            pre_edit_topology_active = True
         if last_pass and not green_minimize_prompted and not NO_GATE:
             current_diff = git_diff(workdir)
             green_minimize_start_lines = diff_lines(current_diff)
@@ -446,6 +515,7 @@ def main():
                 a = json.loads(c["function"]["arguments"] or "{}")
             except Exception:
                 a = {}
+            a = _normalize_args(fn, a)  # CLASS-ARG-NAME-RIGIDITY: accept the model's natural param names
             metrics["tool_calls"][fn] = metrics["tool_calls"].get(fn, 0) + 1
 
             if pre_edit_topology_active:
@@ -540,6 +610,10 @@ def main():
                         force_refused = 0  # an edit landed → spin broken
                         if green_minimize_active and fn == "atomic_replace":
                             green_minimize_edits += 1
+                        # CLASS-EDIT-RECEIPT-BLIND: show the post-edit region so the model confirms by
+                        # perception instead of spending a round-trip re-reading what it just changed.
+                        res = res + _post_edit_view(workdir, a.get("file", ""),
+                                                    a.get("newText") or a.get("content", ""))
                     elif any(m in res.lower() for m in REFUSAL_MARKERS):
                         metrics["invalid_states_prevented"] += 1
                         if fn == "atomic_replace" and ("not found" in res.lower() or "not unique" in res.lower() or "not unique" in res.lower()):
