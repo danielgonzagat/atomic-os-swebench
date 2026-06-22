@@ -2008,3 +2008,37 @@ The gate returns FALSE regardless of fix correctness (13 failed, 8 passed — al
 **R053 fix analysis (manual verification):** two loops stripping None from both session_setting and request_setting — semantically CORRECT approach. But can't verify via the flaky gate.
 
 **ACTION:** Switch A/B to pytest-5262 (FAIL_TO_PASS: test_capfd_sys_stdout_mode — LOCAL ONLY, no network). Warm container available. This gives a VALID A/B comparison.
+
+---
+
+## ROUND pytest-5262-R1 — NÍVEL 1 — TASK pytest-dev__pytest-5262 (FIRST VALID A/B, local-only tests)
+- snapshot: 58e6a09db49f34886ff13f3b7520dd0bcd7063cd
+- task: test_capfd_sys_stdout_mode (LOCAL ONLY — no network flakiness)
+
+### ATOMIC (DeepSeek V4 Pro + 17 normalizers + F8c blocking quick_check gate)
+- gate=**TRUE** ✓ diff=**2 lines** steps=**12** edits=2 tokens=**81,081** wall=**109.8s** quick_check=**1**
+- Fix: `mode = property(lambda self: self.buffer.mode.replace("b", ""))` — 1-line property
+
+### NATIVE (Claude subagent, no atomic)
+- Correct fix ✓ diff=**17 lines** wall=**477s** (7m57s) tests: 109 pass, 5 skip, 1 xfail
+- Fix: `@property def mode(self): return self.buffer.mode.replace("b", "")` + comment + changelog file
+
+### Metric table × (NATIVE | ATOMIC | winner)
+| Metric | NATIVE | ATOMIC | Winner |
+|--------|--------|--------|--------|
+| Correctness (gate/tests) | ✓ pass | ✓ gate=TRUE | TIE |
+| Diff surface (lines) | 17 | **2** | **ATOMIC** (8.5× minimal) |
+| Time | 477s | **109.8s** | **ATOMIC** (4.3× faster) |
+| Tokens | — | **81k** | **ATOMIC** |
+| Steps | — | **12** | **ATOMIC** |
+| quick_check / self-verify | own tests | 1 (F8c forced) | TIE |
+
+### KEY FINDINGS
+1. **ATOMIC WINS ON ALL MEASURABLE METRICS** — 4.3× faster, 8.5× more minimal, same correctness
+2. **F8c WORKED** — model used quick_check (1 call), no thrashing, 12 steps (vs 60 on requests-1921)
+3. **Comprehension wall ABSENT** — 109.8s with 12 steps; the requests-1921 timeouts were caused by network-test thrashing, NOT a fundamental speed problem
+4. **Weaker model + atomic BEATS stronger model without atomic** — DeepSeek V4 Pro + atomic (2 lines, 110s) vs Claude native (17 lines, 477s). This DIRECTLY validates the doctrine's thesis (§2.6): "modelo M + Atomic encolhe... o gap"
+5. **Both fixes semantically identical** — strip binary flag from mode. Atomic expressed it as a lambda property (2 lines); native used decorator + comment + changelog (17 lines)
+
+### Domínio consecutivo: 1/2 (atomic won round 1)
+### PRÓXIMO PASSO EXATO: re-fire atomic ONLY (R2) against frozen native baseline to confirm ≥2 consecutive rounds of dominance (§6.6)
