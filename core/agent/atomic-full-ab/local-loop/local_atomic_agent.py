@@ -541,6 +541,13 @@ def main():
 
     last_pass = False
     reads_since_edit = 0
+    # CLASS-FORCE-EDIT-TOO-RIGID (R030, generalist): the force-edit lockout fired on TOTAL reads_since_edit >= 12,
+    # which on a genuinely hard multi-file task (pylint-7080: the model read _discover_files, _expand_files,
+    # _check_files, check, _iterate_file_descrs, base_options, argument.py — a NEW symbol each step, tracing the
+    # ignore_paths flow) misclassified BREADTH as a read-loop and killed the investigation right as it neared the
+    # root. Paralysis = RE-READING the same targets, not reading new ones. Track distinct read targets since the
+    # last edit; gate the lockout on REDUNDANT reads (total - distinct), not raw total. Breadth never trips it.
+    distinct_since_edit = set()
     empties = 0
     forced = False
     force_refused = 0  # CLASS-FORCE-EDIT-DEADLOCK: consecutive refused reads under force-edit (deadlock-spin detector)
@@ -565,9 +572,16 @@ def main():
     # pylint, never entering the feedback loop) needs the loop to FORCE a commit. After this many reads
     # with no edit, offer ONLY edit+test tools + a firm steer. Not blind (ample context already gathered);
     # feedback (run_tests) lets it refine. Generalist (any over-reading model, any task).
-    FORCE_EDIT_AFTER = 12
+    FORCE_EDIT_AFTER = 12          # absolute backstop: this many REDUNDANT (repeat-target) reads since last edit
+    READ_HARD_CAP = 40             # absolute breadth cap (even pure new-target reads stop here — runaway guard)
     EDIT_TEST_NAMES = {"atomic_replace", "atomic_create", "run_tests"}
     MINIMIZE_NAMES = {"atomic_replace", "run_tests"}
+    READ_FNS = {"atomic_survey", "atomic_read_many", "atomic_outline", "atomic_read", "atomic_grep", "atomic_callers"}
+    def _read_target_key(_fn, _a):  # what this read is ABOUT — re-reading the same key = looping, new key = breadth
+        return (_fn, str(_a.get("path") or _a.get("file") or _a.get("glob") or _a.get("name") or ""),
+                str(_a.get("selector") or _a.get("pattern") or _a.get("startLine") or ""))
+    def _redundant_reads():  # reads that did NOT surface a new target = the real paralysis signal
+        return max(0, reads_since_edit - len(distinct_since_edit))
 
     for step in range(1, args.max_steps + 1):
         metrics["steps"] = step
@@ -664,14 +678,14 @@ def main():
         elif green_minimize_active:
             allowed = {"run_tests"} if green_minimize_edits >= 1 else MINIMIZE_NAMES
             step_tools = [t for t in active_tools if t["function"]["name"] in allowed]
-        elif reads_since_edit >= FORCE_EDIT_AFTER:
+        elif _redundant_reads() >= FORCE_EDIT_AFTER or reads_since_edit >= READ_HARD_CAP:
             step_tools = [t for t in active_tools if t["function"]["name"] in EDIT_TEST_NAMES]
             if not forced:
                 messages.append({"role": "user", "content": (
                     "You have read extensively without editing. STOP reading — you have enough context. "
                     "Make your single best edit NOW with atomic_replace/atomic_create" +
                     ("" if NO_GATE else ", then run_tests; the test result will tell you if it's right and you can refine") + ".")})
-                metrics["transcript"].append(f"s{step} FORCE-EDIT engaged (>= {FORCE_EDIT_AFTER} reads, 0 edits) — read tools withheld")
+                metrics["transcript"].append(f"s{step} FORCE-EDIT engaged (redundant={_redundant_reads()} total={reads_since_edit}, 0 edits) — read tools withheld")
                 forced = True
         try:
             msg, usage = deepseek(messages, step_tools)
@@ -747,19 +761,21 @@ def main():
             # CLASS-S2-A teeth: when force-edit is active, REFUSE reads at dispatch (the model ignores a
             # restricted schema and re-emits reads from history). Not blind — it has FORCE_EDIT_AFTER+ reads
             # of context; refusing further reads makes edit the only productive move. Feedback then refines.
-            if reads_since_edit >= FORCE_EDIT_AFTER and fn in {"atomic_survey", "atomic_read_many", "atomic_outline", "atomic_read", "atomic_grep", "atomic_callers"}:
+            # CLASS-FORCE-EDIT-TOO-RIGID (R030): refuse a read ONLY when it is REDUNDANT (its target was already
+            # read = looping) or past the absolute breadth cap. A read of a NEW target is genuine investigation —
+            # ALLOW it (it falls through to dispatch below, where distinct_since_edit grows). This lets a hard
+            # multi-file task explore widely while still killing true read-loops.
+            if fn in READ_FNS and (_redundant_reads() >= FORCE_EDIT_AFTER or reads_since_edit >= READ_HARD_CAP) \
+                    and _read_target_key(fn, a) in distinct_since_edit:
                 force_refused += 1
-                res = ("READING DISABLED — you have read 12+ times with no edit; you have enough context. "
-                       "Emit atomic_replace (or atomic_create) with your single best fix NOW" +
+                res = ("READING DISABLED — you are RE-READING things you already saw (a loop), with no edit. "
+                       "You have enough context. Emit atomic_replace (or atomic_create) with your best fix NOW" +
                        ("." if NO_GATE else "; then run_tests will show if it's right and you can refine."))
-                metrics["transcript"].append(f"s{step} {fn} REFUSED (force-edit active, {force_refused})")
+                metrics["transcript"].append(f"s{step} {fn} REFUSED (redundant-read loop, {force_refused})")
                 messages.append({"role": "tool", "tool_call_id": c["id"], "content": res})
-                # CLASS-FORCE-EDIT-DEADLOCK: refusing reads removes the model's move without giving it
-                # edit-confidence; a model that keeps re-emitting reads will spin to max-steps (pylint:
-                # 18 wasted steps / 1.5M tokens, 0 edits). After K consecutive refused reads with still 0
-                # edits, STOP — break with an honest "could-not-commit" outcome instead of burning tokens.
-                if force_refused >= 4 and metrics["edits_applied"] == 0:
-                    metrics["transcript"].append(f"s{step} FORCE-EDIT DEADLOCK — {force_refused} refused reads, 0 edits; stopping (model would not commit)")
+                # CLASS-FORCE-EDIT-DEADLOCK: only on REPEATED redundant refusals (true spin), never on breadth.
+                if force_refused >= 5 and metrics["edits_applied"] == 0:
+                    metrics["transcript"].append(f"s{step} FORCE-EDIT DEADLOCK — {force_refused} redundant refused reads, 0 edits; stopping (model would not commit)")
                     deadlock_break = True
                 continue
             if green_minimize_active and fn in {"atomic_survey", "atomic_read_many", "atomic_outline", "atomic_read", "atomic_grep", "atomic_callers"}:
@@ -800,7 +816,7 @@ def main():
                                 "normalization/comparison) or in an EXISTING call site — not the absence of your "
                                 "guard. Call atomic_callers(<that function>) to see where it is ALREADY used, then "
                                 "read its body and fix the ROOT there instead of adding another guard.")
-                    reads_since_edit = 0  # test feedback received (pass OR fail) → fresh read budget to diagnose & refine; without this a failed edit deadlocks against the force-edit read-lockout
+                    reads_since_edit = 0; distinct_since_edit.clear()  # test feedback received (pass OR fail) → fresh read budget to diagnose & refine; without this a failed edit deadlocks against the force-edit read-lockout
                     if last_pass:
                         if green_minimize_active:
                             minimized_lines = diff_lines(git_diff(workdir))
@@ -836,6 +852,7 @@ def main():
                 if fn in ("atomic_read", "atomic_outline", "atomic_grep", "atomic_survey", "atomic_read_many", "atomic_callers"):
                     metrics["reads"] += 1
                     reads_since_edit += 1
+                    distinct_since_edit.add(_read_target_key(fn, a))  # breadth tracker (CLASS-FORCE-EDIT-TOO-RIGID)
                 # L01-H: choose topology only after BODY-level context (real code bodies), not mere
                 # navigation (survey/outline/grep). Track body reads separately so the pre-edit topology
                 # turn fires after atomic_read/atomic_read_many — generalist (any model, any task).
@@ -849,7 +866,7 @@ def main():
                         if last_pass:
                             last_pass = False  # a new edit invalidates the previous green gate
                         metrics["edits_applied"] += 1
-                        reads_since_edit = 0
+                        reads_since_edit = 0; distinct_since_edit.clear()
                         forced = False
                         force_refused = 0  # an edit landed → spin broken
                         if green_minimize_active and fn == "atomic_replace":
