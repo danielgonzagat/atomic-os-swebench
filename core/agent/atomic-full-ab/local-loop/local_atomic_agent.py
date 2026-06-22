@@ -1372,6 +1372,15 @@ def main():
                         _suppress_note = (f"[ALREADY READ] {_sf}:{_ss}-{_se} was returned earlier and is UNCHANGED — "
                                           f"you have it in context above. Do NOT re-read it; make the edit now with "
                                           f"atomic_replace, or read a DIFFERENT range/symbol you have not seen yet.")
+                # CLASS-OVERLAPPING-REREAD extension (WFB): also suppress an EXACT-REPEAT selector/grep read (same
+                # file+selector/pattern already served since the last edit) — sympy re-read nthroot_mod by selector
+                # 4× and igcdex 3× with no intervening mutation. The interval check above only covers line-ranges.
+                if _suppress_note is None and fn in ("atomic_read", "atomic_grep", "atomic_callers") \
+                        and (a.get("selector") or a.get("pattern")) and _read_target_key(fn, a) in distinct_since_edit:
+                    _what = a.get("selector") or a.get("pattern")
+                    _suppress_note = (f"[ALREADY READ] you already fetched `{_what}` in {a.get('path','')} since your "
+                                      f"last edit and it is UNCHANGED — it's in context above. Do NOT re-read it; act "
+                                      f"on what you have (edit, or read something genuinely new).")
                 if fn in ("atomic_read", "atomic_outline", "atomic_grep", "atomic_survey", "atomic_read_many", "atomic_callers"):
                     metrics["reads"] += 1
                     reads_since_edit += 1
