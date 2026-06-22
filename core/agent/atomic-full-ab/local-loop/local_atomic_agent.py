@@ -21,7 +21,7 @@ The result JSON records EVERYTHING (loop manual step 3): gate pass, steps, per-t
 call counts, edits applied, invalid-states-prevented (governed refusals = a GOOD
 atomic property), reads, diff surface (lines), tokens, wall time, and a transcript.
 """
-import json, os, re, sys, time, argparse, subprocess, urllib.request
+import json, os, re, sys, time, signal, argparse, subprocess, urllib.request
 from pathlib import Path
 
 API_KEY = os.environ["DEEPSEEK_API_KEY"]
@@ -43,15 +43,24 @@ def deepseek(messages, tools):
     req = urllib.request.Request("https://api.deepseek.com/v1/chat/completions", data=body,
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {API_KEY}"})
     timeout_s = float(os.environ.get("DEEPSEEK_TIMEOUT", "120"))  # CLASS-MODEL-CALL-LIVENESS-OBSERVABILITY
+    total_timeout_s = float(os.environ.get("DEEPSEEK_TOTAL_TIMEOUT", str(timeout_s)))
+    def _deepseek_total_timeout(_signum, _frame):
+        raise TimeoutError(f"DeepSeek model call exceeded total deadline {total_timeout_s}s")
     for attempt in range(5):
+        old_alarm = signal.getsignal(signal.SIGALRM)
         try:
+            signal.signal(signal.SIGALRM, _deepseek_total_timeout)
+            signal.setitimer(signal.ITIMER_REAL, total_timeout_s)
             with urllib.request.urlopen(req, timeout=timeout_s) as r:
                 d = json.loads(r.read())
                 return d["choices"][0]["message"], d.get("usage", {})
         except Exception as e:
-            if attempt == 4:
+            if isinstance(e, TimeoutError) or attempt == 4:
                 raise
             time.sleep(3 * (attempt + 1))
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, old_alarm)
 
 
 # ── atomic hands: dispatch one tool through atomic-call against the local workdir ──
@@ -758,7 +767,7 @@ def main():
 
     metrics = {"arm": "atomic-cli-deepseek-v4-pro", "task": args.task, "workdir": workdir,
                "steps": 0, "tool_calls": {}, "edits_applied": 0, "invalid_states_prevented": 0,
-               "reads": 0, "body_context_reads": 0, "run_tests_calls": 0, "tokens": 0, "gate_pass": False,
+               "reads": 0, "body_context_reads": 0, "run_tests_calls": 0, "quick_check_calls": 0, "tokens": 0, "gate_pass": False,
                "diff_lines": 0, "wall_s": 0.0, "transcript": [], "reasoning_trace": []}
     t0 = time.time()
 
@@ -1165,6 +1174,18 @@ def main():
 
             if fn == "run_tests":
                 metrics["run_tests_calls"] += 1
+                # F8c BLOCKING SELF-VERIFY (R051+R052: model ignored advisory + deterministic nudge — 0
+                # quick_check calls both times). This FORCES self-verification: refuse run_tests until ≥1
+                # quick_check call after first edit. Generalist (any task, any edit). Prevents the model
+                # from burning an expensive gate call (~20s) on an unverified fix. R050 root cause revisited.
+                if metrics["edits_applied"] >= 1 and metrics["quick_check_calls"] == 0 and not NO_GATE:
+                    res = ("BLOCKED: you have edited code but have NOT called quick_check yet. Call quick_check "
+                           "NOW with a 3-5 line Python snippet asserting the fixed behavior (e.g. assert that the "
+                           "function returns the expected value for the input from the issue). You MUST verify "
+                           "your fix works BEFORE calling run_tests. After quick_check passes, you may call run_tests.")
+                    metrics["transcript"].append(f"s{step} run_tests BLOCKED (F8c: no quick_check yet)")
+                    messages.append({"role": "tool", "tool_call_id": c["id"], "content": res})
+                    continue
                 d_before = git_diff(workdir)
                 if not d_before.strip():
                     res = ("Working tree is unmodified (empty diff). run_tests only verifies; the target "
@@ -1226,6 +1247,7 @@ def main():
                             green_minimize_active = False
                 metrics["transcript"].append(f"s{step} run_tests -> {res.splitlines()[0][:120]}")
             elif fn == "quick_check":
+                metrics["quick_check_calls"] += 1
                 # F8 SELF-VERIFY (R050 CLASS-INCORRECT-FIX-APPROACH): the model had no way to write+run a
                 # focused test before the expensive gate. The native worker won R050 by writing its own unit
                 # tests. This gives the atomic agent the same capability -- generalist (any repo, any fix).
