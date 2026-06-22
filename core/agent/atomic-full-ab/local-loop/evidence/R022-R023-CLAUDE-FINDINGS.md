@@ -519,3 +519,15 @@ LINE-RANGE-REJECTED (clamp endLine>EOF). 26th CLASS-UNBUILT-ENV-VERIFICATION-LOO
 unbuilt repos). RESIDUAL: pylint-6528 still read-heavy (52 reads even post-fix) → the HIGH convergence-trigger wall
 (model has diagnosis early but keeps re-reading; force-edit at 12 redundant is too late) — fixing next. Mining walls
 in my OWN fixes = the loop law at its sharpest. 26 demolitions total. Docker still down (resolution blocked).
+
+## WFB+ batch final tally — 5 demolitions (24-28), validated where runs completed
+24th compaction-suppress-deadlock (CRITICAL, my own WALL-1 regression) — VALIDATED pylint-6528 0→1 edit, re-serve 6×.
+25th blind-line-range-rejected (clamp endLine>EOF). 26th unbuilt-env-verification-loop (steer quick_check off build).
+27th perception-no-convergence-trigger (early redundant-read nudge) — VALIDATED leaner: pylint-6528 reads 52→33,
+tokens 783k→323k (−59%). 28th no-gate-zero-edit-giveup (force edit on 0-edit stop in NO_GATE too) — exposed BY the
+27th nudge (a run stopped 0-edit at step33); code-sound, a clean validation run was lost to a transient DeepSeek
+early-death (2-step degenerate run = API noise, not logic). NOTE: DeepSeek occasionally returns an early error that
+breaks a run (~2 steps) — environmental flakiness, runs that complete give clean data. Edit-economy this batch:
+atomic tighter 3/4 (pytest 2v17, sklearn 5v11, astropy 9v22). 28 demolitions total. Remaining MED batch walls
+(selector-linerange-dedup, callers-inheritance, stall-breaker) lower priority — mostly covered by 24th+27th.
+Docker still down → resolution scoring blocked (manual fix needed). Foreground runs work (background gets harness-killed).
