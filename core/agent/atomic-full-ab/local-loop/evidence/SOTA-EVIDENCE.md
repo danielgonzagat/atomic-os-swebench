@@ -1,5 +1,27 @@
 # Atomic A/B — by-number proof of superiority (Claude-Code session, 2026-06-21→22)
 
+## ★★★ COMPLETE HONEST VERDICT (after official resolution scoring, 2026-06-22)
+By-number, no façade, self-audited (2 of my own claims falsified by testing them):
+- ONE-SHOT atomic resolution is INSTANCE-CLASS-DEPENDENT, not uniform: STRONG on localized-fix instances
+  (sklearn-14496 ✓ + sklearn-10297 ✓ = 2/2 — single-function fixes like bool-upcast, BaseRidgeCV) but WEAK on
+  SCOPE-COMPLEX instances (astropy/pytest/pylint/sympy = 0 — multi-location/wrong-location/missed-file). Native
+  0/2 on the comparable hard instances (hard-for-both). So "atomic one-shot ≫ native huge margin" is NOT supported
+  on scope-complex hard instances; on easy/localized both resolve (earlier L1 5/5).
+- EDIT-ECONOMY: atomic diffs 2.17× tighter (WFB) — REAL but ≠ Pass@1 (a tight diff can be wrong; the scope-complex
+  one-shot diffs were tighter AND wrong).
+- GATE-ON is atomic's PROVEN value, now MECHANISM-CONFIRMED: resolves where one-shot fails on single-file algorithms
+  (pylint-7080 ✓ + pylint-8898 ✓, official, ~71% N>3). On scope-complex pytest-10356 the test feedback STEERED the
+  model from the wrong location (get_unpacked_marks) to the GOLD locations (store_mark @388 + __call__ @355) — the
+  causal mechanism (feedback disambiguates location/completeness) shown by number — but it did NOT fully resolve
+  (read-first ~34 steps + edit-without-test → ran out of iterate-budget). → 31st demolition (gate-ON edit-early,
+  evidence-backed) targets exactly this; validation re-run pending (runs slow).
+- 31 generalist demolitions (process walls), monotonic + regression-clean (sympy reads 24→5) — but they optimize
+  PROCESS not Pass@1; honest scope. THE LOOP WORKED: measurement overturned my assumption, I investigated losses,
+  falsified my own mechanism-claims (conclusion-latch NOT the cause; gate-ON deaths = Docker contention NOT harness),
+  and let the data redirect the mission to gate-ON. Honestidade epistêmica é o que faz o loop compor.
+
+
+
 The A/B: **DeepSeek V4 Pro + complete atomic representation** (the ATOMIC arm) vs **native-Claude subagent**
 (plain tools). Model LOCKED to DeepSeek V4 Pro for atomic — it must match/beat the stronger native model
 *despite* being weaker, because any gap is the representation's (mine), not the model's. Correctness is the
