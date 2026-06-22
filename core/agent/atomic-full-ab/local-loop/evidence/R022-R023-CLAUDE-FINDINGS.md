@@ -357,3 +357,12 @@ like pylint one-shot) — atomic's 0-edit is worse (native at least produced a w
 a working native fix. The real differentiator is the gate-ON iterate loop. R048 = sympy-20438 GATE-ON with the
 16th fix (deadlock-at-zero-edits forces a commit) + the now-built sympy image: does atomic's proof-carrying loop
 resolve it where both one-shot fail? (Same value test as pylint-7080/8898.)
+
+## R048 — gate wall #2: CLASS-GATE-BARE-TEST-NAMES (sympy ids are bare function names, not path::test)
+sympy F2P/P2P are BARE names (test_Eq, test_issue_19378), not path::test node ids → my gate's ok() filter drops
+them (no "::") → ntargets=0 → broken feedback (R043-class). So my local FEEDBACK gate only supports node-id repos
+(pylint/pytest/flask/requests/astropy), NOT bare-name repos (sympy) — would need to derive the test FILE from the
+test_patch + run `pytest <file> -k "name1 or name2"`. (Official SCORING harness handles all repos via repo-specific
+test commands — scoring is unaffected; only local gate-ON iterate is limited.) Killed R048 (don't iterate on garbage,
+the R043 lesson). Validating the 16th fix (deadlock-at-zero-edits) via sympy ONE-SHOT instead: does atomic now
+COMMIT an edit (vs R047's 0 edits)?
