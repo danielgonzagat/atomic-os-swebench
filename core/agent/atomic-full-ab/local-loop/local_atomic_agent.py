@@ -366,10 +366,16 @@ def atomic_call(workdir, tool, args):
     # `[atomic-edit] ready ...` banner (which flips ok=False), not a real error. Only surface stderr
     # when there's no usable stdout. This is the perception-compaction win (raw ride-along → lean).
     if out:
+        # CLASS-WHOLEFILE-READ-THRESHOLD (R035, generalist): native's Read returns a whole file in ONE call; the
+        # atomic read result was capped at 6000 chars, so a moderately-large file (astropy separable.py ~12k
+        # chars) forced the model into 5 reads (whole→read_many→maxFullChars→2 line-ranges) to assemble what
+        # native read once. Give CODE-READ tools a native-comparable cap (24000) so a single read returns the
+        # whole moderate file; keep the lean 6000 cap for grep/survey/outline (token economy on navigation).
+        cap = 24000 if tool in ("code_readcode", "code_readcode_batch", "atomic_read_file") else 6000
         if os.environ.get("ATOMIC_COMPACT", "1") == "1":
-            return _compact_result(workdir, tool, out)[:6000], ok
+            return _compact_result(workdir, tool, out)[:cap], ok
         body = out if not err else out + "\n[stderr] " + err  # OFF = original raw-capped behavior
-        return body[:6000], ok
+        return body[:cap], ok
     body = err or "(empty)"
     return body[:6000], ok
 
@@ -431,7 +437,9 @@ DISPATCH = {
     "atomic_survey": ("code_outline_batch", lambda a: {"glob": a.get("glob", "")}),
     "atomic_read_many": ("code_readcode_batch", lambda a: {k: v for k, v in {"items": a.get("items", []), "maxFullCharsPerFile": a.get("maxFullCharsPerFile")}.items() if v not in (None,)}),
     "atomic_outline": ("code_outline", lambda a: {"file": a.get("file", "")}),
-    "atomic_read": ("code_readcode", lambda a: {k: v for k, v in {"path": a.get("path", ""), "selector": a.get("selector"), "maxFullChars": a.get("maxFullChars")}.items() if v not in (None, "")}),
+    # CLASS-WHOLEFILE-READ-THRESHOLD: a no-selector atomic_read defaults maxFullChars=24000 so a moderate file
+    # returns its FULL body in one call (like native Read) instead of a summary that forces escalating re-reads.
+    "atomic_read": ("code_readcode", lambda a: {k: v for k, v in {"path": a.get("path", ""), "selector": a.get("selector"), "maxFullChars": a.get("maxFullChars") or (None if a.get("selector") else 24000)}.items() if v not in (None, "")}),
     "atomic_grep": ("atomic_grep", lambda a: {k: v for k, v in {"pattern": a.get("pattern", ""), "path": a.get("path"), "glob": a.get("glob"), "contextAfter": a.get("contextAfter")}.items() if v not in (None, "")}),
     "atomic_replace": ("atomic_replace_text", lambda a: {k: v for k, v in {"file": a.get("file", ""), "oldText": a.get("oldText", ""), "newText": a.get("newText", ""), "proofOfIncorrectness": a.get("proofOfIncorrectness")}.items() if v not in (None,)}),
     "atomic_create": ("atomic_create_file", lambda a: {k: v for k, v in {"file": a.get("file", ""), "content": a.get("content", ""), "overwrite": a.get("overwrite")}.items() if v not in (None,)}),
