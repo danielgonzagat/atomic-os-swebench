@@ -119,10 +119,19 @@ export async function decorators(content: string, rel: string): Promise<Decorato
   return out;
 }
 
-/** Call expressions read from real `call_expression` nodes only (member callees kept whole). */
+/** Call nodes read from real call AST nodes only (member callees kept whole).
+ * CLASS-CALLGRAPH-BLIND-NONJS (R027): the node set was JS-only (`call_expression`), so call-graph perception
+ * (atomic_grep_calls / who-calls-X) returned 0 callers for EVERY Python/Ruby/Java function — measured: on
+ * pylint-7080 the agent could not see that `_is_ignored_file` was ALREADY called inside `_discover_files`
+ * (pylinter.py:600), so it added a REDUNDANT guard instead of fixing the root (path normalization in the
+ * existing function). Tree-sitter names the call node differently per language: `call_expression` (JS/TS/Go/
+ * C/Rust), `call` (Python/Ruby), `method_invocation` (Java). Query all three → call-graph perception works
+ * cross-language. Additive/monotonic: JS still matches call_expression; the downstream callee-parse (slice to
+ * first `(`) is identical for every call-node shape. Verified empirically: Python `_is_ignored_file(...)` is a
+ * `call` node. */
 export async function calls(content: string, rel: string): Promise<CallFact[] | null> {
   const lang = langOf(rel);
-  const nodes = await astNodes(content, lang, new Set(['call_expression']));
+  const nodes = await astNodes(content, lang, new Set(['call_expression', 'call', 'method_invocation']));
   if (nodes === null) return null;
   const out: CallFact[] = [];
   for (const n of nodes) {

@@ -40,7 +40,13 @@ const SKIP = new Set([
   'vendor',
   'node-compile-cache',
 ]);
-const SOURCE_RE = /\.(ts|tsx|js|jsx|mjs|cjs)$/;
+// CLASS-CALLGRAPH-BLIND-NONJS (R027): this scan's SOURCE_RE was JS-only, so atomic_grep_calls / the lens walk
+// NEVER READ .py/.go/.rb/.rs/.java/.c files → call-graph perception returned 0 callers for every non-JS
+// function (measured: pylint-7080's `_is_ignored_file` showed 0 callers though called at pylinter.py:600). The
+// multi-language structural engine + the connection-gate SOURCE_RE already cover these languages; this walk was
+// the lone JS-only filter starving cross-language perception. Widened to match (additive — more files scanned,
+// none dropped). Pairs with the perception.calls() node-set fix (call_expression|call|method_invocation).
+const SOURCE_RE = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rb|rs|java|c|cc|cpp|h|hpp)$/;
 const DIRECT_STRUCTURAL_FILE_EXTS = new Set([
   '.py', '.rb', '.sh', '.bash', '.zsh', '.yaml', '.yml', '.toml',
   '.go', '.rs', '.java', '.kt', '.c', '.h', '.cc', '.cpp', '.hpp',
@@ -601,9 +607,19 @@ export function registerToolsLens(server: McpServer): void {
                 ? []
                 : ['file readable, but no declared source-language battery could classify these bytes as positive']
               : report.unjudged.slice(0, 50),
+          // L01-H2 (WALL: read-output verbosity): the prior headline emitted jargon counts
+          // ("N classified byte zone(s), M negative evidence record(s)") on EVERY read, including clean
+          // ones (M=0) — pure token noise that inflated every read with no actionable perception.
+          // Attribution: the concurrent session's fair re-run proved the atomic token gap (54k vs 38k)
+          // is read-output verbosity, NOT model verbosity. Generalist fix (any read, any file, any
+          // model): on a CLEAN read (no negative bytes — the common case) emit a concise headline and
+          // let the code be the verified perception; surface the byte-classification counts ONLY when
+          // there are negatives to heed (actionable signal). The perception (byte-classification) is
+          // computed regardless and stays in structuredContent — only the NOISY PRESENTATION changes.
           summaryForHuman:
-            `Atomic read ${displayPath} L${window.startLine}-L${window.endLine}: ${verdict}; ` +
-            `${zones.length} classified byte zone(s), ${negativeEvidence.length} negative evidence record(s).`,
+            negativeEvidence.length === 0
+              ? `Atomic read ${displayPath} L${window.startLine}-L${window.endLine}: clean — ${window.text.length} bytes, no negative bytes (code is the verified perception).`
+              : `Atomic read ${displayPath} L${window.startLine}-L${window.endLine}: ${verdict}; ${zones.length} zone(s), ${negativeEvidence.length} negative byte(s) to heed.`,
         });
       } catch (e) {
         return fail(e instanceof Error ? e.message : String(e));
