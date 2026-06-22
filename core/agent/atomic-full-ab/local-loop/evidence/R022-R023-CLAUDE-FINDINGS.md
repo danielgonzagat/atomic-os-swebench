@@ -233,3 +233,20 @@ s2/s3 are clean survey+read+replace=3; s1=4 (grep+read_many+read+replace). All r
 HONEST: astropy is a 1-line fix — too small for DOMINANCE (both arms tie at the locate+edit floor). To show
 atomic's proof-carrying MARGIN, the next rung needs a harder MULTI-FILE instance where native's text-patching
 incurs cost/errors atomic's verified ops avoid. Model stays DeepSeek V4 Pro.
+
+## ★★ R038 — MULTI-FILE instance pytest-8399 — atomic WINS edit-quality (the dominance signal)
+pytest-8399 (unittest setUpClass fixture should be private; gold touches 2 files). BOTH arms ONE-SHOT, official
+harness BOTH RESOLVED. By number:
+| metric | DeepSeek-atomic | native-Claude | winner |
+| resolved | ✓ | ✓ | tie |
+| diff surface | 2 lines | 10 lines | ATOMIC (5×) |
+| edits | 1 | 5 | ATOMIC |
+| files | 1 (unittest.py) | 2 (unittest.py+python.py) | ATOMIC |
+| tool-calls | 9 | 10 | ATOMIC |
+| tokens | 84k | 42.6k | native (DeepSeek verbosity) |
+**Atomic's minimal verified single-edit fix matched native's correctness while WINNING diff surface (5×), edit
+count, files, and tool-calls.** Native OVER-EDITED (fixed 5 xunit sites; only the setUpClass site is tested) —
+exactly where native's text-patching over-reaches and atomic's minimal-faithful-transformation principle shows
+MARGIN. This is the by-number dominance signal the doctrine wants, on a harder multi-file instance. Residual
+loss = tokens (DeepSeek reasoning verbosity, the model — keep hunting via perception compaction). Official runs
+pytest8399_atomic ✓ / pytest8399_native ✓.
