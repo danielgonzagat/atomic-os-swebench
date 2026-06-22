@@ -536,6 +536,96 @@ def trial_minimal_hunk(workdir, gate):
     return False, full_lines, "no single hunk green+smaller; restored full fix"
 
 
+def trial_revert_intra_hunk_line_pairs(workdir, gate):
+    """CLASS-GREEN-MINIMIZE-INTRA-HUNK-SIBLING-REVERT (F2c): deterministic green minimizer for
+    single-hunk over-fixes. Unified hunks often contain multiple independent line replacements; a whole-hunk
+    reducer cannot drop one sibling change. Trial-revert each -old/+new line pair, run the same gate, and keep
+    only strictly smaller green states. Bounded, language-agnostic, and safe: any red/non-shrinking trial is
+    restored before the next candidate."""
+    start_lines = diff_lines(git_diff(workdir))
+    if start_lines <= 0:
+        return False, start_lines, "no diff"
+
+    def _state():
+        files = subprocess.run(["git", "diff", "HEAD", "--name-only"], cwd=workdir,
+                               capture_output=True, text=True).stdout.split()
+        out = {}
+        for f in files:
+            p = os.path.join(workdir, f)
+            try:
+                out[f] = open(p, encoding="utf-8").read()
+            except Exception:
+                pass
+        return out
+
+    def _restore(state):
+        for f, c in state.items():
+            try:
+                open(os.path.join(workdir, f), "w", encoding="utf-8").write(c)
+            except Exception:
+                pass
+
+    def _pairs():
+        out = []
+        for cf in subprocess.run(["git", "diff", "HEAD", "--name-only"], cwd=workdir,
+                                 capture_output=True, text=True).stdout.split():
+            d0 = subprocess.run(["git", "diff", "-U0", "HEAD", "--", cf], cwd=workdir,
+                                capture_output=True, text=True).stdout.splitlines()
+            minus = []
+            for line in d0:
+                if line.startswith(("diff --git ", "index ", "--- ", "+++ ")):
+                    continue
+                if line.startswith("@@"):
+                    minus = []
+                    continue
+                if line.startswith("-"):
+                    minus.append(line[1:])
+                elif line.startswith("+"):
+                    if minus:
+                        old = minus.pop(0)
+                        new = line[1:]
+                        if old != new and old.strip() and new.strip():
+                            out.append((cf, old, new))
+                else:
+                    minus = []
+        return out
+
+    kept = 0
+    for _ in range(3):
+        current_lines = diff_lines(git_diff(workdir))
+        base = _state()
+        accepted = None
+        for cf, old, new in _pairs()[:8]:
+            _restore(base)
+            p = os.path.join(workdir, cf)
+            try:
+                txt = open(p, encoding="utf-8").read()
+            except Exception:
+                continue
+            if new not in txt:
+                continue
+            open(p, "w", encoding="utf-8").write(txt.replace(new, old, 1))
+            after_lines = diff_lines(git_diff(workdir))
+            if after_lines >= current_lines:
+                continue
+            gate_pass, _, _ = run_gate(workdir, gate)
+            if gate_pass:
+                accepted = (after_lines, _state())
+                break
+        _restore(base)
+        if not accepted:
+            break
+        after_lines, state = accepted
+        _restore(state)
+        kept += 1
+        if after_lines >= current_lines:
+            break
+    final_lines = diff_lines(git_diff(workdir))
+    if kept and final_lines < start_lines:
+        return True, final_lines, f"reverted {kept} green intra-hunk line-pair(s): {start_lines}->{final_lines}"
+    return False, start_lines, "no intra-hunk line-pair revert stayed green+smaller"
+
+
 def restore_deleted_comments(workdir, gate):
     """CLASS-COMMENT-DELETION-REGRESSION (F1d, deterministic): symmetric twin of F1b. When the agent\'s
     atomic_replace oldText spanned an ORIGINAL (HEAD) stand-alone comment line and DELETED it (the
@@ -863,11 +953,24 @@ def main():
                 green_minimize_start_lines = _f2b_lines
                 green_minimize_pre_files = {cf: open(os.path.join(workdir, cf), encoding="utf-8").read() for cf in green_minimize_pre_files}
             metrics["transcript"].append(f"s{step} F2b hunk-minimize: {_f2b_msg}")
+            # CLASS-GREEN-MINIMIZE-INTRA-HUNK-SIBLING-REVERT (F2c): when F2b cannot split a single unified hunk,
+            # trial-revert individual -old/+new line pairs and keep only smaller states that remain gate-green.
+            try:
+                _f2c_kept, _f2c_lines, _f2c_msg = trial_revert_intra_hunk_line_pairs(workdir, args.gate)
+            except Exception as _f2c_e:
+                _f2c_kept, _f2c_lines, _f2c_msg = False, green_minimize_start_lines, f"F2c error: {str(_f2c_e)[:80]}"
+            if _f2c_kept:
+                green_minimize_start_lines = _f2c_lines
+                green_minimize_pre_files = {cf: open(os.path.join(workdir, cf), encoding="utf-8").read() for cf in green_minimize_pre_files}
+            metrics["transcript"].append(f"s{step} F2c intra-hunk-revert: {_f2c_msg}")
             messages.append({"role": "user", "content": (
                 f"The acceptance gate is green. Current diff surface is {green_minimize_start_lines} changed lines. "
                 "You get ONE bounded diff-minimization pass: if a strictly smaller equivalent patch is obvious "
                 "from your own edits (for example by sharing one canonical helper instead of duplicated logic), "
-                "emit exactly one atomic_replace, then run_tests. If no strictly smaller equivalent is obvious, "
+                "emit exactly one atomic_replace, then run_tests. CLASS-GREEN-MINIMIZE-HELPER-TO-EXPRESSION: "
+                "if your green patch added a small helper/state-machine loop, first try deleting that helper and "
+                "rewriting the single failing call site with an existing language/library expression or already-local helper. "
+                "If no strictly smaller equivalent is obvious, "
                 "STOP with no tool call. Do not read more files and do not broaden behavior.")})
             metrics["transcript"].append(f"s{step} GREEN-MINIMIZE offered (diff_lines={green_minimize_start_lines})")
             green_minimize_prompted = True
@@ -1091,6 +1194,31 @@ def main():
                                     f"s{step} GREEN-MINIMIZE REJECTED (did not shrink: {green_minimize_start_lines}->{minimized_lines}); reverted to pre-minimize green state")
                             green_minimize_active = False
                 metrics["transcript"].append(f"s{step} run_tests -> {res.splitlines()[0][:120]}")
+            elif fn == "quick_check":
+                # F8 SELF-VERIFY (R050 CLASS-INCORRECT-FIX-APPROACH): the model had no way to write+run a
+                # focused test before the expensive gate. The native worker won R050 by writing its own unit
+                # tests. This gives the atomic agent the same capability -- generalist (any repo, any fix).
+                # Safe: tempfile in workdir, 30s timeout, cleaned up.
+                import tempfile as _tf
+                _code = a.get("code", "")
+                _tp = None
+                try:
+                    _fd, _tp = _tf.mkstemp(suffix=".py", dir=workdir)
+                    os.write(_fd, _code.encode()); os.close(_fd)
+                    _r = subprocess.run(["python3", os.path.basename(_tp)], cwd=workdir,
+                                        capture_output=True, text=True, timeout=30)
+                    os.unlink(_tp); _tp = None
+                    res = (_r.stdout + ("\n--- stderr ---\n" + _r.stderr if _r.stderr.strip() else ""))[-2000:]
+                    res = ("PASS (exit 0)\n" if _r.returncode == 0 else f"FAIL (exit {_r.returncode})\n") + res
+                except subprocess.TimeoutExpired:
+                    res = "TIMEOUT (30s) -- snippet took too long; simplify."
+                except Exception as _e:
+                    res = f"ERROR: {str(_e)[:200]}"
+                finally:
+                    if _tp:
+                        try: os.unlink(_tp)
+                        except Exception: pass
+                metrics["transcript"].append(f"s{step} quick_check -> {res.splitlines()[0][:120] if res else '(empty)'}")
             elif fn in DISPATCH:
                 tool, mapper = DISPATCH[fn]
                 call_args = mapper(a)
