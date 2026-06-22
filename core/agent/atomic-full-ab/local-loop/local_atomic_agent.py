@@ -836,6 +836,22 @@ def main():
                     f"prefer modifying an existing canonical construct over adding parallel logic.")
     except Exception:
         pass
+    # ★ WEIGHT INJECTION (proof-carrying learned operator — the substrate that LIFTS the model): a "weight" is a
+    # GENERALIZED resolution-strategy operator captured from a PROVEN resolution of a class (not the specific fix,
+    # the class essence). Retrieving + injecting the class-matched weight gives THIS model the capability a stronger
+    # config already proved on the class. ATOMIC_WEIGHTS_FILE = jsonl of {class, trigger, strategy, proof_n}; inject
+    # every weight whose `trigger` (a substring/regex of the task) matches — recoverable, composable, byte-cheap.
+    try:
+        _wf = os.environ.get("ATOMIC_WEIGHTS_FILE")
+        if _wf and os.path.exists(_wf):
+            _weights = [json.loads(l) for l in open(_wf) if l.strip()]
+            _matched = [w for w in _weights if not w.get("trigger") or re.search(w["trigger"], task, re.I)]
+            if _matched:
+                _wtxt = "\n".join(f"- [{w['class']}] (proven on {w.get('proof_n',1)} resolution(s)): {w['strategy']}" for w in _matched[:5])
+                system += ("\n\nLEARNED RESOLUTION STRATEGIES (atomic weights — generalized operators captured from "
+                           "PROVEN resolutions of this class; apply the matching one):\n" + _wtxt)
+    except Exception:
+        pass
     user = f"# Repository files\n{tree}\n\n# Your task\n{task}\n\nBegin. Use atomic tools only."
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
