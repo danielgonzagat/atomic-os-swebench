@@ -239,3 +239,15 @@ persist due to the model-bound core, but the demolitions WORK on what is mine. H
 (R6 empties) and the number (R059) proved it was my representation — the doctrine's "every loss = my representation until the best
 fix is tested" is correct, and I must TEST not guess. R10 (pylint flail) + R11 (wrong file) + R3/R4/R6 fix-finding = the model-bound
 core; paralysis/empties/scope-trigger = my representation (R058/R059 fix behavior, R055b trigger). atomic still 1 win/8 ties/2 losses.
+
+## R12 astropy-12907 = TIE (atomic 1 / native 1) — atomic resolves clean instance, FIRST confirmed green gate; verdict holds across 5 repos
+R12 OFFICIAL: atomic 1 / native 1 = TIE. The atomic RESOLVED astropy-12907 (gate_pass=True confirmed by OFFICIAL=1 — the first
+internal-gate-green that the official harness also confirmed this session; the _cstack 1-line fix). Native also resolved (same
+fix). So on a CLEAN/FINDABLE instance (astropy-12907 = simple 1-line _cstack change), the atomic keeps pace = tie. CONFIRMED
+scoreboard (12 rounds, 5 repos pylint/sympy/sklearn/pytest/astropy): atomic 1 WIN(R1)/9 TIES/2 LOSSES(R6,R11). The pattern is
+ROBUST across repos: atomic TIES on clean/findable instances (tools lift DeepSeek to parity + the gate confirms), WINS 1 rare
+non-generalizing verification-gap (R1), LOSES on hard navigation/fix-finding (R11 wrong-file, R6 fix-finding after empties fixed).
+FINAL: atomic (DeepSeek+tools+gate) = PARITY-TO-WEAKER vs native Claude. Dominance STRONGLY FALSIFIED by number across 5 repos.
+The tools' real value: clean-instance parity (DeepSeek alone would do worse; the gate/tools lift it to match Claude on findable
+fixes) + the rare gate verification catch. The model-bound fix-finding core (DeepSeek<Claude) caps it below the stronger Claude.
+Cross-model gap is the ceiling — by number, NOT dominance, NOT never-loses. Verdict COMPLETE + robust.
