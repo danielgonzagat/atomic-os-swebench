@@ -277,3 +277,10 @@ runs do redundant navigation: grep+read_many+read before edit, vs the clean surv
 REPRESENTATION/consistency lever (reduce redundant navigation), NOT a model verdict. On atomic's clean path it
 DOMINATES native on EVERY metric: tool-calls 3<10, edits 1<5, diff 2<10, files 1<2, AND tokens 38.7k<42.6k,
 correctness parity. Next lever: cut navigation variance so atomic reliably takes the 3-call path.
+
+## R040 — nav-wander steer (13th demolition) VALIDATED: changelog reads eliminated, calls 5→4
+pytest-8399 atomic N=3 with the steer: calls [4,6,4] median 4 (was [7,5,3] median 5), nonsrc_reads 0/0/0 (the
+changelog/.rst + issue-number wandering is GONE), edits 1/diff 2 all samples (edit-quality unchanged, all
+resolve). So atomic on the multi-file instance is now median 4 calls vs native 10 — dominating tool-calls (2.5×)
++ edit-quality (5× fewer edits/diff) at correctness parity, tokens-win on the clean path. The residual variance
+(s2=6) is minor benign navigation, not non-source wandering.
