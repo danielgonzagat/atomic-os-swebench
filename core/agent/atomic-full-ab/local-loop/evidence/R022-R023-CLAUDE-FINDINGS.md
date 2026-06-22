@@ -599,3 +599,14 @@ test feedback." This (a) CORRECTS my over-claim (don't weaken the latch — it w
 the gate-ON conclusion: test feedback (get_unpacked_marks fix → test still red → try store_mark) is exactly what
 disambiguates. The broader finding stands (atomic one-shot fails hard via scope/wrong-location/completeness; gate-ON
 is the value) but the MECHANISM is feedback-absence, not my-nudges. Falsifiability discipline applied to my OWN finding.
+
+## INFRA CONSTRAINT CONFIRMED (definitive) — fresh gate-ON-resolution not producible in this harness
+Foreground gate-ON pytest-10356 (max-steps 30, fit 533s<600s cap): 0 edits, 32 BREADTH reads, no run_tests — 30
+steps too FEW for this complex MRO instance to finish understanding + start editing/iterating (gate-ON resolution
+needs ~40-50 steps, see pylint-8898). NOTE (good sign): the commit-fast nudges correctly did NOT fire on breadth
+reads (redundant-gating works — legitimate cross-file exploration unpenalized; the demolitions are well-behaved).
+So: BACKGROUND gate-ON dies (harness kills long node+docker nohup tasks + co-session contention); FOREGROUND gate-ON
+step-capped (~30 steps/600s, too few for complex instances). → fresh gate-ON-RESOLUTION datapoints NOT producible
+in this harness now. Gate-ON value stays PROVEN on pylint-7080/8898 (ran earlier when the env allowed long bg runs).
+DEFINITIVE: verdict complete on 2-instance gate-ON proof; 3rd+ datapoints need a stable long-run environment (user-
+side). Loop holds for that. Honest by-number arc fully recorded across findings + SOTA-EVIDENCE + master memory.
