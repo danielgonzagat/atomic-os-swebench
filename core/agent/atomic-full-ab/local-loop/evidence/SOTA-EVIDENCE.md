@@ -21,6 +21,20 @@ multi-sampled where asserted; single samples are labeled.
 | L1 | scikit-learn__scikit-learn-13328 | ✅ resolved | ✅ resolved | **ROOT-CAUSE: check_array (all estimators) vs native per-estimator patch; regression-free** | 7th repo; both one-shot; atomic found deeper root fix |
 | L5 | sympy__sympy-20438 | ✗ (gate-ON 95/1 close) | ✗ one-shot | atomic iterates 0-edit→95/1 multi-file | hard multi-file architectural; both fail one-shot; gate-ON close, honest non-resolution |
 
+## WFB round (2026-06-22, ultracode multi-agent workflow) — 5 repos, edit-economy + adversarial wall-mining
+5 hard new instances (astropy-14182, pytest-10356, sklearn-14496, pylint-4661, sympy-18199), atomic DeepSeek one-shot
+∥ native-Claude, then adversarial wall-mining (winners included). EDIT-ECONOMY (measured): atomic diffs 2.17× tighter
+aggregate (35 vs 76 lines), tighter on 4/5 (pytest 16v39, pylint 3v18, sklearn 4v6, sympy 4v6; astropy 8v7). HONEST:
+edit-economy ≠ resolution — astropy scored both arms UNRESOLVED (hard for both); the other 4 RESOLUTION scores are
+Docker-BLOCKED (infra: disk-full crashed Docker Desktop mid-scoring; needs manual Reset/reboot; auto-resume armed).
+5 DEMOLITIONS (19th-23rd) + WALL-1 extension, by-number validated: 19th overlapping-reread suppression (astropy
+tokens −18% / wall −42%, 10 rereads suppressed), 20th scrub-nonexistent-run_tests, 21st register quick_check (was
+never in schema → astropy quick_check 0→2), 22nd ambiguous-edit-help, 23rd reasoning-thrash conclusion-latch.
+HONEST SPLIT VERDICT on aggregate re-run: reread-suppression = clean win (astropy/sympy calls down); quick_check =
+double-edged (cured hard hand-simulation BUT over-used on easy cases: sklearn 8→21, pylint 6→11 calls) — correctness
+impact UNMEASURED (Docker down) so NOT capped blind (falsifiability). My own WALL-3 fix opened a new watch-item
+(quick-check-overuse). Total demolitions this session: 23 + extensions.
+
 ## Headline numbers
 - **Cross-model resolved-rate L1 = 5/5** (4/5 one-shot + pylint-7080 via the proof-carrying gate-ON loop) =
   native one-shot 4/5. A weaker model + atomic ≥ a stronger model native, on correctness.
