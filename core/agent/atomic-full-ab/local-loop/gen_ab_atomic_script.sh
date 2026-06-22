@@ -29,7 +29,7 @@ cat <<SCRIPT
 #!/usr/bin/env bash
 # AUTO-GENERATED (gen_ab_atomic_script.sh) for $ID — correct repo grep + unique paths
 set -uo pipefail
-cd "\$(dirname "\$0")" 2>/dev/null || cd "$PWD"
+cd "$PWD"   # absolute local-loop dir captured at GENERATION time (NOT \$0's dir — the generated script lives in /tmp)
 source /tmp/.atomic_creds.sh 2>/dev/null || true
 export DEEPSEEK_MODEL=deepseek-v4-pro
 ID=$ID; TD="\$PWD/tasks/SWE-\$ID"
