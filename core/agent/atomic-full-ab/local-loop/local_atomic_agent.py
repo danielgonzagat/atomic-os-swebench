@@ -660,6 +660,23 @@ def main():
                   "IMPORTANT: the acceptance test is HIDDEN (supplied by the grader) and is NOT in this checkout — "
                   "do NOT search for it by name or try to read it; you cannot. When run_tests is red, fix the "
                   "SOURCE based on the issue and the failing assertion shown, not by hunting the test file.")
+    # §8 CORPUS RETRIEVAL (aprendizado entre sessões): read the cross-session corpus and inject a generalist
+    # experience hint. Generalist: structural patterns from past successes, not task-specific content.
+    try:
+        _cr_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".corpus")
+        _cr_file = os.path.join(_cr_dir, "repair-triples.jsonl")
+        if os.path.exists(_cr_file):
+            _cr_triples = [json.loads(l) for l in open(_cr_file) if l.strip()]
+            if _cr_triples:
+                _cr_n = len(_cr_triples)
+                _cr_avg_lines = sum(t.get("diff_lines", 0) for t in _cr_triples) / _cr_n
+                _cr_avg_edits = sum(t.get("edits", 0) for t in _cr_triples) / _cr_n
+                system += (f"\n\nCROSS-SESSION EXPERIENCE: this atomic agent has resolved {_cr_n} previous tasks "
+                    f"(avg {_cr_avg_lines:.0f} diff lines, {_cr_avg_edits:.0f} edits). From that experience: the smallest "
+                    f"correct fix is almost always a single-symbol mutation or a one-line policy-site change; "
+                    f"prefer modifying an existing canonical construct over adding parallel logic.")
+    except Exception:
+        pass
     user = f"# Repository files\n{tree}\n\n# Your task\n{task}\n\nBegin. Use atomic tools only."
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
 

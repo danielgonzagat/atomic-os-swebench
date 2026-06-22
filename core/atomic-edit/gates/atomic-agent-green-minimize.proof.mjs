@@ -186,6 +186,12 @@ record('CLASS-CORPUS-COLLECTION-FOUNDATION (§8): after each green run, a repair
     corpusFile: source.includes('repair-triples.jsonl'),
     guard: source.includes('if metrics.get("gate_pass") and not NO_GATE'),
   });
+record('CLASS-CORPUS-RETRIEVAL (§8): at startup the driver reads the cross-session corpus and injects a generalist experience hint (aprendizado entre sessões)',
+  source.includes('CLASS-CORPUS-RETRIEVAL') === false && source.includes('CROSS-SESSION EXPERIENCE') && source.includes('_cr_triples'),
+  {
+    marker: source.includes('CROSS-SESSION EXPERIENCE'),
+    retrieval: source.includes('_cr_triples'),
+  });
 const py = spawnSync('python3', ['-m', 'py_compile', agentPath], { cwd: repoRoot, encoding: 'utf8', timeout: 20000, maxBuffer: 1024 * 1024 });
 record('local_atomic_agent.py remains valid Python after green-minimize update', py.status === 0, { status: py.status, signal: py.signal, stderr: py.stderr });
 
