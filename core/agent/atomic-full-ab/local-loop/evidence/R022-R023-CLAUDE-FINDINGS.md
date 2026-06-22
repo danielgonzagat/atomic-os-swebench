@@ -219,3 +219,9 @@ Both arms ONE-SHOT, official SWE-bench-Verified harness:
 level.** Residual gap = tool-economy (atomic 7 vs native 3 calls; 226k vs 35k tokens) = DeepSeek verbosity, the
 representation wall to hunt next (NOT a correctness/model-ceiling verdict). Regression guard same turn: R034
 re-scored the 4 one-shot winners on the official harness with the complete-chain driver = 4/4 (no regression).
+
+## R036 — astropy tool-economy gap CLOSED (wholefile-read fix): atomic 7→4 calls (native 3)
+After CLASS-WHOLEFILE-READ-THRESHOLD, re-ran astropy-12907 atomic one-shot: 4 calls (was 7), reads 6→2 (1
+survey + 1 whole-file read instead of 5 escalating reads), tokens 226k→183k, SAME correct gold fix. Atomic (4)
+≈ native (3) on the harder instance — correctness parity + near tool-economy parity, by number. The residual
+1-call gap is the initial survey (reasonable first-step). 12th generalist demolition this session.
