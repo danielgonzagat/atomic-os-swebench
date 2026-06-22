@@ -563,3 +563,18 @@ resolves poorly (1/5) — consistent w/ the scope-completeness finding (one-shot
 missed-file without test feedback). CONTRAST: earlier rounds L1 = atomic 5/5 on EASIER single-file instances. So
 atomic one-shot: strong on easy, weak on hard. The value on HARD instances = gate-ON iterate loop (catches
 incompleteness via test feedback). gate-ON pytest-10356 now running = the falsifiable test of this.
+
+## SESSION CONCLUSION (honest, by-number) — gate-ON is atomic's proven value; one-shot process-economy ≠ Pass@1
+gate-ON pytest-10356 was stuck (0 edits/33min — DeepSeek transient deaths + Docker contention from concurrent
+co-session R057/R058); KILLED — not needed: GATE-ON VALUE ALREADY PROVEN this session (pylint-7080 + pylint-8898:
+both one-shot-FAIL → gate-ON RESOLVES, official harness; pylint-8898 ~71% reliability N>3). THE HONEST BY-NUMBER ARC:
+- atomic one-shot: STRONG on easy (L1 5/5 single-file) but WEAK on hard (WFB 1/5; sklearn-14496 only). Native 0/2
+  comparable (hard-for-both). Failures = SCOPE/COMPLETENESS gaps (partial/wrong-location/missed-file), not random.
+- atomic edit-economy: tighter diffs (WFB 2.17×, WFB+ 3/4) — REAL but ≠ correctness (a tight diff can be wrong).
+- atomic gate-ON: RESOLVES hard instances where one-shot fails (pylint-7080/8898) — the test feedback catches the
+  scope-completeness gaps one-shot can't. THIS is the proof-carrying value, by number.
+- 30 generalist demolitions (process walls: reads/tokens/calls ↓, e.g. sympy reads 24→5) — monotonic, regression-
+  clean — but they optimize PROCESS not Pass@1, and commit-fast nudges may even TRADE OFF correctness on hard cases.
+HONEST VERDICT: the value claim that holds by-number is "atomic gate-ON resolves hard instances where one-shot
+fails" (proven 2 instances). "atomic one-shot ≫ native, huge margin" is NOT supported on hard instances (1/5).
+NEXT (when Docker/co-session free): clean gate-ON A/B on a FAST-gate one-shot-fail instance for a 3rd datapoint.
