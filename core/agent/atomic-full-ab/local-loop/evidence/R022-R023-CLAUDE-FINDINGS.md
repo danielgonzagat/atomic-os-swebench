@@ -631,3 +631,12 @@ is now EVIDENCE-BACKED (not speculation). REFINED VERDICT: gate-ON resolves wher
 ALGORITHMS (pylint-7080/8898 ✓) but on a complex MULTI-region instance (pytest-10356) it steers correctly yet runs
 out of iterate-budget due to read-first behavior. ALSO: WFB+ one-shot sklearn-10297 RESOLVED (atomic sklearn 2/2 =
 localized-fix repos one-shot-friendly); refined one-shot finding = strong-on-localized / weak-on-scope-complex.
+
+## CORRECTION — full one-shot number: atomic 3/9 (~33%) on hard instances; pattern is INSTANCE-level not repo-level
+astropy-14508 one-shot RESOLVED (=1), correcting my coarser "weak-on-scope-complex" framing. FULL one-shot atomic:
+resolved sklearn-14496✓ sklearn-10297✓ astropy-14508✓ (3); failed astropy-14182✗ pytest-10356✗ pytest-5840✗
+pylint-4661✗ pylint-6528✗(deadlock) sympy-18199✗ (6) → 3/9 = ~33%. astropy is MIXED (14508✓ vs 14182✗) so it's
+INSTANCE-level (resolved skew more localized; failed skew scope-complex/multi-location) NOT a clean repo split.
+HONEST: atomic one-shot resolves ~1/3 of deliberately-hard instances; the doctrine's value is gate-ON for the
+other ~2/3 (feedback disambiguates). (3rd honest refinement this stretch — kept the number, dropped the over-clean
+generalization.)
