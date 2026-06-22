@@ -257,6 +257,8 @@ _ARG_ALIASES = {
     "atomic_outline": {"path": "file", "file_path": "file", "filepath": "file"},
     "atomic_grep": {"query": "pattern", "regex": "pattern", "search": "pattern", "text": "pattern",
                     "dir": "path", "directory": "path", "context": "contextAfter"},
+    "atomic_callers": {"function": "name", "symbol": "name", "callee": "name", "query": "name",
+                       "path": "scope", "file": "scope", "dir": "scope", "directory": "scope"},
     "atomic_survey": {"pattern": "glob", "globs": "glob", "files": "glob"},
     "atomic_read_many": {"files": "items", "paths": "items"},
 }
@@ -422,6 +424,9 @@ TOOLS = [
     {"type": "function", "function": {"name": "atomic_grep",
         "description": "Search the repo for a regex. Scope with `path` (file or dir) and `glob`. Returns file:line matches.",
         "parameters": {"type": "object", "properties": {"pattern": {"type": "string"}, "path": {"type": "string"}, "glob": {"type": "string"}, "contextAfter": {"type": "integer"}}, "required": ["pattern"]}}},
+    {"type": "function", "function": {"name": "atomic_callers",
+        "description": "Find real AST call sites of a function/callee name (not strings/comments). Use before adding a guard/filter call to an existing function: if it is already called where the bug manifests, fix the existing call or the function body instead of duplicating the guard. `scope` optionally limits files/dirs.",
+        "parameters": {"type": "object", "properties": {"name": {"type": "string"}, "scope": {"type": "string"}}, "required": ["name"]}}},
     {"type": "function", "function": {"name": "atomic_replace",
         "description": "Atomic GOVERNED edit: in `file`, replace the EXACT unique text `oldText` with `newText`. Pre-disk validated (invalid states are never written). ALWAYS include `proofOfIncorrectness` (>=20 chars) ON THE FIRST CALL whenever `newText` is shorter than `oldText` OR replaces existing logic — otherwise the edit is refused and you waste a round-trip. Example: replacing a function body → proofOfIncorrectness='replacing the naive impl with a correct RFC-4180 state machine'. Make minimal, faithful edits.",
         "parameters": {"type": "object", "properties": {"file": {"type": "string"}, "oldText": {"type": "string"}, "newText": {"type": "string"}, "proofOfIncorrectness": {"type": "string"}}, "required": ["file", "oldText", "newText"]}}},
@@ -441,6 +446,7 @@ DISPATCH = {
     # returns its FULL body in one call (like native Read) instead of a summary that forces escalating re-reads.
     "atomic_read": ("code_readcode", lambda a: {k: v for k, v in {"path": a.get("path", ""), "selector": a.get("selector"), "maxFullChars": a.get("maxFullChars") or (None if a.get("selector") else 24000)}.items() if v not in (None, "")}),
     "atomic_grep": ("atomic_grep", lambda a: {k: v for k, v in {"pattern": a.get("pattern", ""), "path": a.get("path"), "glob": a.get("glob"), "contextAfter": a.get("contextAfter")}.items() if v not in (None, "")}),
+    "atomic_callers": ("atomic_grep_calls", lambda a: {k: v for k, v in {"name": a.get("name", ""), "scope": a.get("scope")}.items() if v not in (None, "")}),
     "atomic_replace": ("atomic_replace_text", lambda a: {k: v for k, v in {"file": a.get("file", ""), "oldText": a.get("oldText", ""), "newText": a.get("newText", ""), "proofOfIncorrectness": a.get("proofOfIncorrectness")}.items() if v not in (None,)}),
     "atomic_create": ("atomic_create_file", lambda a: {k: v for k, v in {"file": a.get("file", ""), "content": a.get("content", ""), "overwrite": a.get("overwrite")}.items() if v not in (None,)}),
 }
@@ -549,6 +555,55 @@ def restore_deleted_comments(workdir, gate):
         try: open(os.path.join(workdir, f), "w", encoding="utf-8").write(c)
         except Exception: pass
     return False, full_lines, f"restore not green/no-shrink; reverted ({restored} tried)"
+
+
+def fuse_adjacent_none_filter_loops(workdir, gate):
+    """CLASS-ADJACENT-LOOP-NONE-FILTER-FUSION (F4): deterministic consolidation (doctrine §1b). When two adjacent
+    loops both `del D[k]` on a `v is None` predicate (over different sources into the SAME dict), they are redundant
+    -- fuse into ONE loop iterating list(D.items()). Generalist (regex over the structural dict-filter loop pattern;
+    any Python `for k,v in X.items(): if v is None...: del D[k]` pair). Returns (kept, new_lines, msg). Safe: gate
+    confirms; restores on non-green/non-shrink. Pre-tested: h2 4->2 (gold)."""
+    full = git_diff(workdir); full_lines = diff_lines(full)
+    if not full.strip():
+        return False, full_lines, "no diff"
+    changed = subprocess.run(["git", "diff", "HEAD", "--name-only"], cwd=workdir, capture_output=True, text=True).stdout.split()
+    pre = {f: open(os.path.join(workdir, f), encoding="utf-8").read() for f in changed if os.path.exists(os.path.join(workdir, f))}
+    pat = re.compile(
+        r"(?P<ind1>[ \t]+)for \(k, v\) in (?P<src1>[A-Za-z_][\w\.]*)\.items\(\):\n"
+        r"(?P<ind2>[ \t]+)if v is None(?P<cond1>[^\n]*):\n"
+        r"(?P<ind3>[ \t]+)del (?P<D>[A-Za-z_][\w]*)\[k\]\n"
+        r"(?:[ \t]*\n)*"
+        r"(?P<ind1b>[ \t]+)for \(k, v\) in (?P<src2>[A-Za-z_][\w\.]*)\.items\(\):\n"
+        r"(?P<ind2b>[ \t]+)if v is None(?P<cond2>[^\n]*):\n"
+        r"(?P<ind3b>[ \t]+)del (?P=D)\[k\]\n"
+    )
+    fused_any = False
+    for cf in changed:
+        if not cf.endswith(".py"):
+            continue
+        p = os.path.join(workdir, cf)
+        try:
+            src = open(p, encoding="utf-8").read()
+        except Exception:
+            continue
+        m = pat.search(src)
+        if not m:
+            continue
+        fused = (f"{m.group('ind1')}for (k, v) in list({m.group('D')}.items()):\n"
+                 f"{m.group('ind2')}if v is None:\n"
+                 f"{m.group('ind3')}del {m.group('D')}[k]\n")
+        open(p, "w", encoding="utf-8").write(src[:m.start()] + fused + src[m.end():])
+        fused_any = True
+    if not fused_any:
+        return False, full_lines, "no adjacent None-filter loop pair"
+    gp, _, _ = run_gate(workdir, gate)
+    after = diff_lines(git_diff(workdir))
+    if gp and after < full_lines:
+        return True, after, f"fused adjacent None-filter loops: {full_lines}->{after}"
+    for f, c in pre.items():
+        try: open(os.path.join(workdir, f), "w", encoding="utf-8").write(c)
+        except Exception: pass
+    return False, full_lines, "fusion not green/no-shrink; reverted"
 
 
 def main():
@@ -731,6 +786,17 @@ def main():
                 green_minimize_pre_files = {cf: open(os.path.join(workdir, cf), encoding="utf-8").read() for cf in green_minimize_pre_files}
                 green_minimize_f1b_stripped = True  # deterministic reduction happened -> DECLINE skips
             metrics["transcript"].append(f"s{step} F1d comment-restore: {_f1d_msg}")
+            # CLASS-ADJACENT-LOOP-NONE-FILTER-FUSION (F4): deterministic consolidation (§1b) -- fuse two adjacent
+            # None-filter loops over different sources into one list(D.items()) loop. Pre-tested h2 4->2 (gold).
+            try:
+                _f4_kept, _f4_lines, _f4_msg = fuse_adjacent_none_filter_loops(workdir, args.gate)
+            except Exception as _f4_e:
+                _f4_kept, _f4_lines, _f4_msg = False, green_minimize_start_lines, f"F4 error: {str(_f4_e)[:80]}"
+            if _f4_kept:
+                green_minimize_start_lines = _f4_lines
+                green_minimize_pre_files = {cf: open(os.path.join(workdir, cf), encoding="utf-8").read() for cf in green_minimize_pre_files}
+                green_minimize_f1b_stripped = True
+            metrics["transcript"].append(f"s{step} F4 loop-fusion: {_f4_msg}")
             # CLASS-OVERFIX-MULTIPATH-DETERMINISTIC (F2b): trial each diff hunk alone, keep the smallest one that
             # is green alone. atomic verbose multi-hunk fixes usually contain ONE hunk that alone suffices (the
             # others handle untested/redundant paths); measured e1 15->4, e3 10->5, d4 8->3. Deterministic -- does

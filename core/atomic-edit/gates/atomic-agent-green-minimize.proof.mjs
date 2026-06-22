@@ -148,6 +148,15 @@ record('CLASS-HISTORY-TOKEN-BLOAT (F3): stale tool-result contents are compacted
     windowKeep: source.includes('_f3_tool_idxs[:-6]'),
     compactMarker: source.includes('compacted by F3'),
   });
+record('CLASS-ADJACENT-LOOP-NONE-FILTER-FUSION (F4): deterministic fusion of two adjacent None-filter loops into one list(D.items()) loop (§1b consolidation)',
+  source.includes('def fuse_adjacent_none_filter_loops(workdir, gate):') &&
+  source.includes('F4 loop-fusion:') &&
+  source.includes('list({m.group'),
+  {
+    helper: source.includes('def fuse_adjacent_none_filter_loops(workdir, gate):'),
+    callTrace: source.includes('F4 loop-fusion:'),
+    fusedForm: source.includes('list({m.group'),
+  });
 const py = spawnSync('python3', ['-m', 'py_compile', agentPath], { cwd: repoRoot, encoding: 'utf8', timeout: 20000, maxBuffer: 1024 * 1024 });
 record('local_atomic_agent.py remains valid Python after green-minimize update', py.status === 0, { status: py.status, signal: py.signal, stderr: py.stderr });
 
