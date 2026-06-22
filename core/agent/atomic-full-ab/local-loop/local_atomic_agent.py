@@ -1465,6 +1465,16 @@ def main():
                     # record covered interval for line-range reads (CLASS-OVERLAPPING-REREAD)
                     if fn == "atomic_read" and (a.get("startLine") or a.get("endLine")) and "error" not in res[:60].lower():
                         _iv_record(a.get("path", ""), int(a.get("startLine") or 1), int(a.get("endLine") or (int(a.get("startLine") or 1) + 80)))
+                    # CLASS-SELECTOR-LINERANGE-DOUBLE-READ (WFB+2): a SELECTOR read also covers a line span — record it
+                    # in the interval cache so a later overlapping LINE-RANGE read of the same region is deduped
+                    # (pytest-5840 read _importconftest via selector L434-466 then re-read L434-470/L425-466 by line
+                    # because selector & line-range reads weren't recognized as the same region). Parse the line
+                    # numbers the engine rendered in the result; record min..max. Generalist (any numbered read).
+                    if fn == "atomic_read" and a.get("selector") and a.get("path") and "error" not in res[:60].lower():
+                        # the engine renders a "path:START-END" header for symbol reads (e.g. ".../file.py:746-807")
+                        _hdr = re.search(r":(\d{1,6})-(\d{1,6})\b", res[:200])
+                        if _hdr:
+                            _iv_record(a.get("path", ""), int(_hdr.group(1)), int(_hdr.group(2)))
                 after = git_diff(workdir)
                 if fn in ("atomic_replace", "atomic_create"):
                     if after != before:
