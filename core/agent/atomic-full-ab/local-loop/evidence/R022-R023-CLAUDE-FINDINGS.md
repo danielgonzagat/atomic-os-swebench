@@ -753,3 +753,20 @@ model with a RELIABLE baseline gap (DeepSeek one-shot = 0 edits EVERY time = cle
 is variance-driven, confounding the test. The clean weak-model lift (DeepSeek + weight, N-sampled resolution RATES) is the
 ONLY rigorous test — blocked on funds. The multi-sampling discipline (N≥3, rates not single runs) applies: I violated it
 on native Claude and the confound caught me. Loop worked: exposed my own confound by number, refused the noisy conclusion.
+
+## ★★★ SESSION META-SYNTHESIS (honest unifying frame for the weight-substrate arc)
+ROBUST (outcome-proven, official): (1) the deterministic substrate mechanics — retrieval, 6-operator bank, capture-N,
+necessity, concrete fidelity battery, proof-of-gain self-improve, compression — ALL LAWS HOLD on CPU (no LLM). (2) The
+substrate LIFTS the model by OUTCOME: gate-ON resolves pylint-7080/8898 where one-shot reliably fails (DeepSeek, official,
+earlier this session). So "atomic lifts the model" is outcome-true on these classes.
+CONFOUNDED (mechanism NOT isolated): WHY it lifts is entangled. The native-Claude confound proved exploration DEPTH alone
+flips pylint-7080 (deep one-shot=resolve, shallow=fail, no weight/gate). gate-ON gives BOTH test-feedback (enforcement)
+AND more steps (exploration) — so the gate-ON lift cannot yet be attributed to enforcement vs exploration. And weight-as-
+advice added ZERO isolable marginal value (overridden / within variance). 
+HONEST BOUND: the OUTCOME (substrate lifts) is proven; the MECHANISM (enforcement vs exploration vs knowledge) and the
+WEIGHT's marginal value are NOT isolated — all need the clean N-sampled DeepSeek decomposition (weight_lift_test.sh,
+ready, self-gated on funds). What is NOT honest to claim: "the weight lifts" (untested clean) or "the gate's enforcement
+(not its extra steps) lifts" (confounded). DIRECTIVE FIT: the directive's deepest realization of "weight" is the PROOF-
+GATE (enforcement — "incapaz de materializar estado não-provado"), which is the substrate's proven power; the corpus-
+retrieval weight is a candidate CONVERGENCE-ACCELERATOR whose value is the open, clean, fundable number. Three+ self-
+corrections this arc (weight-zero-value, exploration-confound, gate-mechanism-entanglement) — the loop composed on honesty.
