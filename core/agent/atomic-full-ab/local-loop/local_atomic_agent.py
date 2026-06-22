@@ -329,7 +329,8 @@ def _existing_fn_perception(workdir, before, after):
             continue
         callers, _ = atomic_call(workdir, "atomic_grep_calls", {"name": name})
         df = _def_file_of(defres)
-        body, _ = atomic_call(workdir, "atomic_read", {"path": df, "selector": name}) if df else ("", False)
+        # use the ENGINE tool name (code_readcode), not the agent alias — atomic_call dispatches engine tools
+        body, _ = atomic_call(workdir, "code_readcode", {"path": df, "selector": name}) if df else ("", False)
         note = (f"\n[root-check] Your edit ADDS a call to `{name}`, which ALREADY EXISTS in this codebase. "
                 f"If you are adding it as a new guard/filter, the real bug is very likely in `{name}`'s OWN body "
                 f"(a missing normalization/comparison/edge-case) or in an EXISTING call site — adding a second "
@@ -493,6 +494,55 @@ def trial_minimal_hunk(workdir, gate):
     return False, full_lines, "no single hunk green+smaller; restored full fix"
 
 
+def restore_deleted_comments(workdir, gate):
+    """CLASS-COMMENT-DELETION-REGRESSION (F1d, deterministic): symmetric twin of F1b. When the agent\'s
+    atomic_replace oldText spanned an ORIGINAL (HEAD) stand-alone comment line and DELETED it (the
+    line_rewrite_regression anti-pattern, §1b), restore it -- non-behavioral bytes the edit needlessly removed.
+    Returns (kept_bool, new_diff_lines, msg). Generalist (Python now). Safe: gate confirms; restores pre-state
+    if not green+smaller. Measured: g1/g2/g3 3->2 (gold) by restoring the deleted comment."""
+    full = git_diff(workdir); full_lines = diff_lines(full)
+    if not full.strip():
+        return False, full_lines, "no diff"
+    changed = subprocess.run(["git", "diff", "HEAD", "--name-only"], cwd=workdir, capture_output=True, text=True).stdout.split()
+    pre = {f: open(os.path.join(workdir, f), encoding="utf-8").read() for f in changed if os.path.exists(os.path.join(workdir, f))}
+    restored = 0
+    for cf in changed:
+        if not cf.endswith(".py"):
+            continue
+        p = os.path.join(workdir, cf)
+        try:
+            cur = open(p, encoding="utf-8").read().split("\n")
+            head = subprocess.run(["git", "show", "HEAD:" + cf], cwd=workdir, capture_output=True, text=True).stdout.split("\n")
+        except Exception:
+            continue
+        cur_set = set(cur)
+        deleted = []
+        for hi, ln in enumerate(head):
+            s = ln.strip()
+            if s.startswith("#") and not s.startswith("#!") and not s.startswith("# -*-") and ln not in cur_set:
+                deleted.append((hi, ln))
+        if not deleted:
+            continue
+        for hi, dc in deleted:
+            for succ in head[hi+1:]:
+                if succ.strip() and succ in cur_set:
+                    cur.insert(cur.index(succ), dc); restored += 1; break
+            else:
+                cur.append(dc); restored += 1
+        if restored:
+            open(p, "w", encoding="utf-8").write("\n".join(cur))
+    if restored == 0:
+        return False, full_lines, "no deleted original comments"
+    gp, _, _ = run_gate(workdir, gate)
+    after = diff_lines(git_diff(workdir))
+    if gp and after < full_lines:
+        return True, after, f"restored {restored} deleted original comment line(s): {full_lines}->{after}"
+    for f, c in pre.items():
+        try: open(os.path.join(workdir, f), "w", encoding="utf-8").write(c)
+        except Exception: pass
+    return False, full_lines, f"restore not green/no-shrink; reverted ({restored} tried)"
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--workdir", required=True)
@@ -535,7 +585,13 @@ def main():
     else:
         system = ("You are the Atomic-CLI coding agent. Solve the task by editing a real repository using "
                   "ONLY atomic tools, plus run_tests to verify. " + survey + lean + "Then run_tests; iterate until "
-                  "fully green, then STOP with a short summary and NO tool call. Paths are relative to the repo root.")
+                  "fully green, then STOP with a short summary and NO tool call. Paths are relative to the repo root. "
+                  # CLASS-HIDDEN-TEST-HUNT (R031, generalist): the acceptance test is supplied by the grader and is
+                  # NOT in this checkout — measured: pylint-7080 the model burned ~20 steps grepping for
+                  # 'test_ignore_path_recursive_current_dir' (a phantom) instead of fixing the code. Tell it.
+                  "IMPORTANT: the acceptance test is HIDDEN (supplied by the grader) and is NOT in this checkout — "
+                  "do NOT search for it by name or try to read it; you cannot. When run_tests is red, fix the "
+                  "SOURCE based on the issue and the failing assertion shown, not by hunting the test file.")
     user = f"# Repository files\n{tree}\n\n# Your task\n{task}\n\nBegin. Use atomic tools only."
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
@@ -650,6 +706,18 @@ def main():
                         try: open(os.path.join(workdir, _cf), "w", encoding="utf-8").write(_c)
                         except Exception: pass
                     metrics["transcript"].append(f"s{step} DETERMINISTIC comment-strip removed {_cstrip} but gate not green or no shrink; reverted")
+            # CLASS-COMMENT-DELETION-REGRESSION (F1d, deterministic): symmetric twin of F1b. Restore ORIGINAL (HEAD)
+            # stand-alone comment lines the agent\'s atomic_replace needlessly DELETED (oldText spanned the adjacent
+            # comment -> line_rewrite_regression anti-pattern, §1b). Non-behavioral bytes; gate confirms. g1/g2/g3 3->2.
+            try:
+                _f1d_kept, _f1d_lines, _f1d_msg = restore_deleted_comments(workdir, args.gate)
+            except Exception as _f1d_e:
+                _f1d_kept, _f1d_lines, _f1d_msg = False, green_minimize_start_lines, f"F1d error: {str(_f1d_e)[:80]}"
+            if _f1d_kept:
+                green_minimize_start_lines = _f1d_lines
+                green_minimize_pre_files = {cf: open(os.path.join(workdir, cf), encoding="utf-8").read() for cf in green_minimize_pre_files}
+                green_minimize_f1b_stripped = True  # deterministic reduction happened -> DECLINE skips
+            metrics["transcript"].append(f"s{step} F1d comment-restore: {_f1d_msg}")
             # CLASS-OVERFIX-MULTIPATH-DETERMINISTIC (F2b): trial each diff hunk alone, keep the smallest one that
             # is green alone. atomic verbose multi-hunk fixes usually contain ONE hunk that alone suffices (the
             # others handle untested/redundant paths); measured e1 15->4, e3 10->5, d4 8->3. Deterministic -- does

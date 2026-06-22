@@ -130,6 +130,15 @@ record('CLASS-OVERFIX-MULTIPATH-DETERMINISTIC (F2b): trial each diff hunk alone,
     callTrace: source.includes('F2b hunk-minimize:'),
     bounded: source.includes('cands[:4]'),
   });
+record('CLASS-COMMENT-DELETION-REGRESSION (F1d): deterministic restore of ORIGINAL comment lines the edit needlessly deleted (line_rewrite_regression twin of F1b)',
+  source.includes('def restore_deleted_comments(workdir, gate):') &&
+  source.includes('CLASS-COMMENT-DELETION-REGRESSION (F1d, deterministic): symmetric twin of F1b') &&
+  source.includes('F1d comment-restore:'),
+  {
+    helper: source.includes('def restore_deleted_comments(workdir, gate):'),
+    docstring: source.includes('CLASS-COMMENT-DELETION-REGRESSION (F1d, deterministic): symmetric twin of F1b'),
+    callTrace: source.includes('F1d comment-restore:'),
+  });
 const py = spawnSync('python3', ['-m', 'py_compile', agentPath], { cwd: repoRoot, encoding: 'utf8', timeout: 20000, maxBuffer: 1024 * 1024 });
 record('local_atomic_agent.py remains valid Python after green-minimize update', py.status === 0, { status: py.status, signal: py.signal, stderr: py.stderr });
 
