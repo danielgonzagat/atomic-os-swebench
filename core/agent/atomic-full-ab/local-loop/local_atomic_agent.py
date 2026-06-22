@@ -53,7 +53,15 @@ def deepseek(messages, tools):
             signal.setitimer(signal.ITIMER_REAL, total_timeout_s)
             with urllib.request.urlopen(req, timeout=timeout_s) as r:
                 d = json.loads(r.read())
-                return d["choices"][0]["message"], d.get("usage", {})
+            _m = d["choices"][0]["message"]
+            # CLASS-EMPTY-RESPONSE-RETRY (R056, generalist): DeepSeek sometimes returns a fully EMPTY message — no
+            # tool_calls, no content, no reasoning_content — on hard inputs (sympy-13877 A/B LOSS: 10 of 16 model
+            # turns were empty → 0 edits → lost to native). An empty turn wastes a step and never edits. Treat it as
+            # a transient failure and RETRY (within the attempt budget) instead of returning the dead turn.
+            if attempt < 4 and not (_m.get("tool_calls") or (_m.get("content") or "").strip()
+                                    or (_m.get("reasoning_content") or "").strip()):
+                time.sleep(2 * (attempt + 1)); continue
+            return _m, d.get("usage", {})
         except Exception as e:
             if isinstance(e, TimeoutError) or attempt == 4:
                 raise
