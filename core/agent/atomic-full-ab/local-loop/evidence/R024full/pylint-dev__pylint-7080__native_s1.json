@@ -1,0 +1,32 @@
+{
+  "arm": "codex-native-worker",
+  "base_commit": "3c5eca2ded3dd2b59ebaf23eb289453b5d2930f0",
+  "changed_files": [
+    "pylint/lint/expand_modules.py"
+  ],
+  "diff": "diff --git a/pylint/lint/expand_modules.py b/pylint/lint/expand_modules.py\nindex 5cacc0371..01a81c609 100644\n--- a/pylint/lint/expand_modules.py\n+++ b/pylint/lint/expand_modules.py\n@@ -53,10 +53,19 @@ def _is_ignored_file(\n     ignore_list_paths_re: list[Pattern[str]],\n ) -> bool:\n     basename = os.path.basename(element)\n+    ignore_paths = [element]\n+    try:\n+        ignore_paths.append(os.path.relpath(element))\n+    except ValueError:\n+        pass\n+    if os.path.isdir(element):\n+        ignore_paths += [f\"{path}{os.sep}\" for path in ignore_paths]\n     return (\n         basename in ignore_list\n         or _is_in_ignore_list_re(basename, ignore_list_re)\n-        or _is_in_ignore_list_re(element, ignore_list_paths_re)\n+        or any(\n+            _is_in_ignore_list_re(path, ignore_list_paths_re) for path in ignore_paths\n+        )\n     )\n \n \n",
+  "diff_deletions": 1,
+  "diff_insertions": 10,
+  "diff_lines": 11,
+  "numstat": "10\t1\tpylint/lint/expand_modules.py",
+  "orchestrator_gate": {
+    "command": "SWE_CONTAINER=pylint7080_warm_native SWE_P2P_SAMPLE=15 core/agent/atomic-full-ab/local-loop/swe_docker_gate.sh /tmp/swe/round/R024full/pylint-dev__pylint-7080_s1/native core/agent/atomic-full-ab/local-loop/tasks/SWE-pylint-dev__pylint-7080",
+    "exit_code": 0,
+    "fail": 0,
+    "pass": 16,
+    "pytest_summary": "16 passed, 1 warning in 2.07s",
+    "tests": 16
+  },
+  "status_short": [
+    "M pylint/lint/expand_modules.py"
+  ],
+  "summary": "Native Codex worker fixed recursive ignore-paths handling in expand_modules; external SWE gate passed 16/16. No project tests were run inside the worker per no-feedback protocol.",
+  "task": "/Users/danielpenin/atomic-os-swebench/core/agent/atomic-full-ab/local-loop/tasks/SWE-pylint-dev__pylint-7080/PROBLEM.md",
+  "workdir": "/tmp/swe/round/R024full/pylint-dev__pylint-7080_s1/native",
+  "worker_final": "Files changed: pylint/lint/expand_modules.py. Patch summary: _is_ignored_file() now checks ignore-paths against both the original path and the cwd-relative path, and for directories also checks a trailing-separator form. This lets recursive discovery respect anchored project-relative patterns like ^src/gen/.*$. Tests run: none per worker policy; only git diff --check. Approximate action/tool-call count: 24.",
+  "worker_id": "019eece2-58a5-7c93-b3a5-c95a3266b0bc",
+  "worker_nickname": "Helmholtz",
+  "worker_policy": "native tools only; no Atomic/MCP/semantic-edit/atomic-call; no project tests/SWE Docker grader; same source-only SWE task prompt from orchestrator",
+  "worker_reported_actions": "~24",
+  "worker_tests_run": false
+}

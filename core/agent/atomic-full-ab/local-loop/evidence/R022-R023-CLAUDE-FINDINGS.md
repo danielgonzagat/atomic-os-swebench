@@ -719,3 +719,21 @@ BOUNDS: (1) native Claude is strong-priored — the WEAK DeepSeek one-shot (base
 weight more readily; that target lift is still blocked on DeepSeek funds. (2) weight CONTENT validated correct vs gold.
 (3) the real next mechanism is weight+gate together (not weight-as-advice alone). The loop worked: tested free on native
 Claude, falsified weight-as-advice, learned the true mechanism = knowledge needs enforcement.
+
+## ★★★ ISOLATION SELF-CORRECTION — the WEIGHT added ZERO marginal value; the REACTIVE diagnostic lifted (not the weight)
+Isolated the weight's contribution: gate-only (same diagnostic feedback, NO weight) ALSO resolved (1, official). Full
+official decomposition (native Claude, pylint-7080): no-advice=0, weight-advice-only=0, 2-weights-advice-only=0,
+weight+diagnostic-gate=1, DIAGNOSTIC-GATE-NO-WEIGHT=1. So the WEIGHT contributed NOTHING — the lift was driven entirely
+by the reactive diagnostic feedback, with or without the weight. SELF-CORRECTION: I must NOT claim "weight+gate lifts"
+— the weight added zero marginal value here. Sharper, less flattering, honest: (1) proactive knowledge-as-ADVICE (the
+weight in the system prompt) is OVERRIDDEN by a strong model's priors (rationalized away 2×); (2) the SAME knowledge
+delivered REACTIVELY (after the model's own fix concretely FAILED + an investigative "trace the exact path" prompt) was
+accepted → gold normpath fix → resolved. The lifting force is REACTIVE FAILURE-CONFRONTATION, not the weight. CAVEAT on
+my own role: my "gate feedback" was diagnostic-RICH (I named the call chain to trace), more than a bare test-output gate
+— so even the "gate" credit is partly MY hand-holding, not an autonomous mechanism. HONEST OPEN QUESTIONS: (a) does an
+AUTONOMOUS bare gate (just the failing test output, model iterates, no "trace this" hint) lift the model? untested here;
+(b) does the weight help a WEAK model (DeepSeek one-shot, 0 edits, no strong prior to override it)? — the directive's
+actual target, still blocked on funds. What IS proven by number: weight-as-proactive-advice does NOT lift native Claude
+(0/3 arms); reactive confrontation does (2/2). The substrate's KNOWLEDGE was correct (normpath = gold) but ADVICE-delivery
+is the weak link — consistent with the directive's "proof enforces" over "advice", but the WEIGHT mechanism as built
+(prompt injection) is NOT the lifting force. Loop worked: isolated, self-corrected, did not credit the weight falsely.

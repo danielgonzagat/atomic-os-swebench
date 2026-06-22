@@ -1,0 +1,37 @@
+{
+  "arm": "codex-native-worker",
+  "worker_id": "019eed13-74fd-78d1-8a4b-f53aa32774f4",
+  "worker_nickname": "Schrodinger",
+  "task": "/Users/danielpenin/atomic-os-swebench/core/agent/atomic-full-ab/local-loop/tasks/SWE-pylint-dev__pylint-7080/PROBLEM.md",
+  "workdir": "/tmp/swe/round/R027gate/pylint/native",
+  "base_commit": "3c5eca2ded3dd2b59ebaf23eb289453b5d2930f0",
+  "worker_policy": "native Codex tools only; no Atomic/MCP/semantic-edit/atomic-call; no .gold inspection; no SWE Docker grader; project-local tests allowed",
+  "worker_tests_run": true,
+  "worker_reported_actions": "~40 tool invocations / ~55 shell-edit actions",
+  "worker_final": "Changed pylint/lint/pylinter.py and tests/lint/unittest_lint.py. Watched new local regression fail before fix; final local command reported 64 passed in 2.93s.",
+  "changed_files": [
+    "pylint/lint/pylinter.py",
+    "tests/lint/unittest_lint.py"
+  ],
+  "status_short": [
+    "M pylint/lint/pylinter.py",
+    "M tests/lint/unittest_lint.py"
+  ],
+  "numstat": "20\t5\tpylint/lint/pylinter.py\n20\t0\ttests/lint/unittest_lint.py",
+  "diff_insertions": 40,
+  "diff_deletions": 5,
+  "diff_lines": 45,
+  "runtime_diff_lines": 25,
+  "test_diff_lines": 20,
+  "diff": "diff --git a/pylint/lint/pylinter.py b/pylint/lint/pylinter.py\nindex e2bbf061e..811728526 100644\n--- a/pylint/lint/pylinter.py\n+++ b/pylint/lint/pylinter.py\n@@ -607,14 +607,29 @@ class PyLinter(\n                         continue\n \n                     if \"__init__.py\" in files:\n+                        if _is_ignored_file(\n+                            os.path.join(root, \"__init__.py\"),\n+                            self.config.ignore,\n+                            self.config.ignore_patterns,\n+                            self.config.ignore_paths,\n+                        ):\n+                            skip_subtrees.append(root)\n+                            continue\n                         skip_subtrees.append(root)\n                         yield root\n                     else:\n-                        yield from (\n-                            os.path.join(root, file)\n-                            for file in files\n-                            if file.endswith(\".py\")\n-                        )\n+                        for file in files:\n+                            if not file.endswith(\".py\"):\n+                                continue\n+                            file_path = os.path.join(root, file)\n+                            if _is_ignored_file(\n+                                file_path,\n+                                self.config.ignore,\n+                                self.config.ignore_patterns,\n+                                self.config.ignore_paths,\n+                            ):\n+                                continue\n+                            yield file_path\n             else:\n                 yield something\n \ndiff --git a/tests/lint/unittest_lint.py b/tests/lint/unittest_lint.py\nindex 3dbde39ce..12f4ccc0c 100644\n--- a/tests/lint/unittest_lint.py\n+++ b/tests/lint/unittest_lint.py\n@@ -912,6 +912,26 @@ def test_recursive_ignore(ignore_parameter, ignore_parameter_value) -> None:\n     assert module in linted_file_paths\n \n \n+def test_recursive_ignore_path_from_pyproject_package() -> None:\n+    with tempdir():\n+        Path(\"pyproject.toml\").write_text(\n+            \"\"\"\n+[tool.pylint.MASTER]\n+ignore-paths = [\"^src/gen/.*$\"]\n+\"\"\",\n+            encoding=\"utf-8\",\n+        )\n+        create_files([\"src/gen/__init__.py\", \"src/gen/generated.py\", \"src/keep.py\"])\n+        Path(\"src/gen/__init__.py\").write_text(\"import os\\n\", encoding=\"utf-8\")\n+        Path(\"src/gen/generated.py\").write_text(\"import sys\\n\", encoding=\"utf-8\")\n+        Path(\"src/keep.py\").write_text('\"\"\"Keep.\"\"\"\\nVALUE = 1\\n', encoding=\"utf-8\")\n+\n+        reporter = testutils.GenericTestReporter()\n+        lint.Run([\"--recursive=y\", \"src\"], reporter=reporter, exit=False)\n+\n+    assert reporter.messages == []\n+\n+\n def test_import_sibling_module_from_namespace(initialized_linter: PyLinter) -> None:\n     \"\"\"If the parent directory above `namespace` is on sys.path, ensure that\n     modules under `namespace` can import each other without raising `import-error`.\"\"\"\n",
+  "orchestrator_gate": {
+    "command": "SWE_CONTAINER=pylint7080_warm_native SWE_P2P_SAMPLE=15 core/agent/atomic-full-ab/local-loop/swe_docker_gate.sh /tmp/swe/round/R027gate/pylint/native core/agent/atomic-full-ab/local-loop/tasks/SWE-pylint-dev__pylint-7080",
+    "exit_code": 1,
+    "tests": 16,
+    "pass": 15,
+    "fail": 1,
+    "pytest_summary": "1 failed, 15 passed, 1 warning in 2.87s",
+    "failing_test": "tests/test_self.py::TestRunTC::test_ignore_path_recursive_current_dir"
+  },
+  "summary": "Native worker made material caller-side recursive discovery progress and local tests passed, but external SWE gate failed the hidden current-dir ignore-paths regression. No dominance."
+}

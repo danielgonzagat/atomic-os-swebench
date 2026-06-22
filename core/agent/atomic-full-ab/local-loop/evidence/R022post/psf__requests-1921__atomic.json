@@ -1,0 +1,291 @@
+{
+  "arm": "atomic-cli-deepseek-v4-pro",
+  "task": "/Users/danielpenin/atomic-os-swebench/core/agent/atomic-full-ab/local-loop/tasks/SWE-psf__requests-1921/PROBLEM.md",
+  "workdir": "/private/tmp/swe/round/R022post/psf__requests-1921/atomic",
+  "steps": 9,
+  "tool_calls": {
+    "atomic_survey": 1,
+    "atomic_read_many": 1,
+    "atomic_read": 7,
+    "atomic_replace": 1
+  },
+  "edits_applied": 1,
+  "invalid_states_prevented": 0,
+  "reads": 9,
+  "body_context_reads": 8,
+  "run_tests_calls": 0,
+  "tokens": 76382,
+  "gate_pass": null,
+  "diff_lines": 2,
+  "wall_s": 70.1,
+  "transcript": [
+    "s1 atomic_survey({\"glob\": \"requests/*.py\"}) -> requests/__init__.py: NullHandler@L73, emit@L74",
+    "s2 atomic_read_many({\"items\": [{\"path\": \"requests/structures.py\", \"selector\": \"CaseInsensitiveDict\"}, {\"path\":) -> code_readcode_batch returned 2/2 adaptive context item(s); 0 failed.",
+    "s3 TOPOLOGY-GUIDANCE injected (non-blocking)",
+    "s3 atomic_read({\"path\": \"requests/sessions.py\", \"startLine\": 34, \"endLine\": 80}) -> requests/sessions.py",
+    "s3 atomic_read({\"path\": \"requests/sessions.py\", \"startLine\": 260, \"endLine\": 340}) -> requests/sessions.py",
+    "s3 atomic_read({\"path\": \"requests/models.py\", \"startLine\": 390, \"endLine\": 420}) -> requests/models.py",
+    "s4 atomic_read({\"path\": \"requests/structures.py\", \"startLine\": 37, \"endLine\": 110}) -> requests/structures.py",
+    "s5 atomic_read({\"path\": \"requests/adapters.py\", \"startLine\": 258, \"endLine\": 280}) -> requests/adapters.py",
+    "s6 atomic_read({\"endLine\": 400, \"startLine\": 294, \"path\": \"requests/adapters.py\"}) -> {",
+    "s7 atomic_read({\"endLine\": 397, \"startLine\": 294, \"path\": \"requests/adapters.py\"}) -> requests/adapters.py",
+    "s8 SAY: Now I have full context. The issue: `session.headers['Accept-Encoding'] = None` sends `Accept-Encoding: None` instead of omitting the header. The root cause is that `prepare_headers` in `models.py` do",
+    "s8 atomic_replace({\"file\": \"requests/models.py\", \"oldText\": \"    def prepare_headers(self, headers):\\n      ) -> \u2705 Atomic edit applied",
+    "s9 SAY: The fix is applied. Here's what was done: **Problem**: `session.headers['Accept-Encoding'] = None` sent `Accept-Encoding: None` as a literal header instead of omitting the header entirely. **Root caus",
+    "s9 DONE (no tool call; one-shot fix submitted)"
+  ],
+  "reasoning_trace": [
+    {
+      "step": 1,
+      "reasoning": "Let me understand the problem:\n\n1. Setting a session header to `None` should effectively remove/disable that header (not send it).\n2. Currently, setting `session.headers['Accept-Encoding'] = None` results in the literal string \"None\" being sent as the header value.\n3. The expected behavior is that setting a header value to `None` should prevent that header from being sent.\n\nI need to find where headers are processed and fix this. Let me survey the codebase.",
+      "say": ""
+    },
+    {
+      "step": 2,
+      "reasoning": "Let me look at the key files. The issue is about session headers. When you set `session.headers['Accept-Encoding'] = None`, it sends \"None\" as the string. The fix should make it so that setting a header to `None` removes it (or doesn't send it).\n\nLet me look at:\n1. `requests/sessions.py` - the Session class\n2. `requests/structures.py` - the CaseInsensitiveDict which is used for headers\n3. `requests/models.py` - PreparedRequest.prepare_headers\n\nThe `session.headers` is likely a `CaseInsensitiveDict`. Let me check.",
+      "say": ""
+    },
+    {
+      "step": 3,
+      "reasoning": "Let me understand the issue:\n\n1. When setting a session header to `None` (e.g., `session.headers['Accept-Encoding'] = None`), the header value \"None\" (the string) gets sent instead of the header being omitted.\n2. The expected behavior is that setting a header to `None` should remove it from the session's default headers, effectively preventing it from being sent.\n\nLet me look at the relevant code more closely. The `session.headers` is a `CaseInsensitiveDict`. Let me look at how headers are merged in `prepare_request` and `merge_setting`, and also how `CaseInsensitiveDict.__setitem__` works.",
+      "say": ""
+    },
+    {
+      "step": 4,
+      "reasoning": "Let me analyze the issue:\n\nLooking at `merge_setting`:\n1. It takes `request_setting` and `session_setting`\n2. If session_setting is None, return request_setting\n3. If request_setting is None, return session_setting\n4. Bypass if not dictionaries\n5. Merge: start with session_setting, update with request_setting\n6. Remove keys that are set to None in request_setting\n\nThe problem is: when someone sets `session.headers['Accept-Encoding'] = None`, this sets the key in the session headers dict to `None`. Later, when `merge_setting` runs, the session headers contain `{'Accept-Encoding': None}`. The merge starts with session_setting (which has `Accept-Encoding: None`), then updates with request_setting (which doesn't have Accept-Encoding). Then it removes keys that are None **in request_setting**. But `Accept-Encoding` is None in session_setting, not request_setting. So the key remains with value `None`, which gets sent as the string \"None\".\n\nThere are two possible approaches:\n1. Fix `merge_setting` to also remove keys from session_setting that are None\n2. Fix `CaseInsensitiveDict.__setitem__` to delete the key when value is None (like del behavior)\n\nLooking at the issue description: \"Removing a default header of a session\" - the user expects that setting a header to `None` removes it. The docs say \"you can prevent sending a session header by setting the headers value to None in the method's arguments.\" This works for request headers (because `merge_setting` removes keys where `v is None` in `request_setting`), but not for session headers.\n\nThe most logical fix would be in `merge_setting` to also remove keys from the merged result that are None in the session_setting. Or better yet, fix `CaseInsensitiveDict.__setitem__` so that setting to None actually deletes the key.\n\nLet me look at `CaseInsensitiveDict.__setitem__` again:",
+      "say": ""
+    },
+    {
+      "step": 5,
+      "reasoning": "Let me understand the issue:\n\n1. When you set `session.headers['Accept-Encoding'] = None`, the value `None` gets sent as the header value (`Accept-Encoding: None`).\n2. The expected behavior is that setting a header to `None` should remove it from being sent.\n\nLooking at `merge_setting` in `sessions.py`:\n\n```python\ndef merge_setting(request_setting, session_setting, dict_class=OrderedDict):\n    if session_setting is None:\n        return request_setting\n\n    if request_setting is None:\n        return session_setting\n\n    # Bypass if not a dictionary (e.g. verify)\n    if not (\n            isinstance(session_setting, Mapping) and\n            isinstance(request_setting, Mapping)\n    ):\n        return request_setting\n\n    merged_setting = dict_class(to_key_val_list(session_setting))\n    merged_setting.update(to_key_val_list(request_setting))\n\n    # Remove keys that are set to None.\n    for (k, v) in request_setting.items():\n        if v is None:\n            del merged_setting[k]\n\n    return merged_setting\n```\n\nThe logic for removing None values only applies to `request_setting` - it removes keys from the merged dict where the request's value is None. But it does NOT handle the case where `session_setting` has None values.\n\nThe issue is about session default headers. When you do `session.headers['Accept-Encoding'] = None`, the session headers dict now has a key 'Accept-Encoding' with value None. When `merge_setting` is called, it merges session headers with request headers. The None values from session headers are not stripped, so they end up in the merged result.\n\nThe fix should also strip keys from `session_setting` whose values are None, OR the fix should be in `prepare_headers` in models.py to filter out None values.\n\nLet me think about the best approach:\n\n1. Fix in `merge_setting`: also remove keys from session_setting where value is None before merging. But `merge_setting` is used for headers, params, auth, etc. The None-removal behavior might be headers-specific.\n\n2. Fix in `prepare_headers` (models.py): filter out headers with None values.\n\n3. Fix in `CaseInsensitiveDict.__setitem__`: if value is None, delete the key instead of setting it.\n\nOption 3 seems to be the most elegant and correct. If setting a value to None is supposed to mean \"don't send this header\", then the CaseInsensitiveDict should treat `__setitem__` with None as a deletion. This way, all code that uses CaseInsensitiveDict for headers will automatically behave correctly.\n\nBut wait, the issue specifically says `session.headers['Accept-Encoding'] = None` results in `Accept-Encoding: None`. This is because `CaseInsensitiveDict.__setitem__` stores the key-value pair even when value is None. Then when `prepare_headers` iterates over headers, it includes the None value.\n\nLet me look at `prepare_headers`:\n\n```python\ndef prepare_headers(self, headers):\n    if headers:\n        self.headers = CaseInsensitiveDict((to_native_string(name), value) for name, value in headers.items())\n    else:\n        self.headers = CaseInsensitiveDict()\n```\n\nIt iterates over all headers and creates a new CaseInsensitiveDict. If we filter out None values here, it would work. But that only fixes it at prepare time, not for the session's stored headers dict.\n\nActually, the best fix is probably in `merge_setting`: it already has logic to remove keys set to None in request_setting, but it should also do the same for session_setting. Let me look at it again:\n\n```python\nmerged_setting = dict_class(to_key_val_list(session_setting))\nmerged_setting.update(to_key_val_list(request_setting))\n\n# Remove keys that are set to None.\nfor (k, v) in request_setting.items():\n    if v is None:\n        del merged_setting[k]\n```\n\nThe session_setting values are used first, then request_setting overwrites. If session has `{'Accept-Encoding': None}`, then `merged_setting` will contain that None value from the session. The loop only removes keys where `request_setting` has None, not `session_setting`.\n\nWe should also remove keys where `session_setting` has None. Or better yet, handle both in a unified way.\n\nLet me think about what makes sense. The `merge_setting` function already handles None removal for request settings. We should extend it to also handle None removal for session settings. \n\nActually, the simplest fix: after building merged_setting, also remove keys from session_setting that are None. Like:\n\n```python\n# Remove keys that are set to None from session.\nfor (k, v) in session_setting.items():\n    if v is None:\n        del merged_setting[k]\n```\n\nBut wait, if request_setting explicitly sets a value for a key that session_setting has as None, the request value should win. Let me trace through:\n\n1. `merged_setting = dict_class(to_key_val_list(session_setting))` \u2192 has `{'Accept-Encoding': None}`\n2. `merged_setting.update(to_key_val_list(request_setting))` \u2192 request doesn't have Accept-Encoding, so still None\n3. Loop removes keys from request_setting with None \u2192 no change (request doesn't have Accept-Encoding)\n4. We'd add: loop removes keys from session_setting with None \u2192 removes Accept-Encoding\n\nBut what if both session and request have the same key, session has None, request has a real value? Then:\n1. merged has None from session\n2. request overwrites with real value\n3. request has real value, not None \u2192 not removed\n4. session has None \u2192 we'd delete the key from merged, losing the request's real value!\n\nSo the order matters. The correct approach:\n\nAfter building the merged dict and removing request None values, also remove session None values, BUT only if the key wasn't overridden by request (i.e., only if the value in merged is still None, or more precisely, only if request_setting doesn't have that key).\n\nActually, simpler: just remove from session_setting before merging. Or, after merging, iterate and remove any key where the value is None:\n\n```python\n# Remove keys that are set to None.\nfor (k, v) in merged_setting.items():\n    if v is None:\n        del merged_setting[k]\n```\n\nWait, this would be the simplest and most correct approach. After merging both, just remove any key with None value. This handles both session and request None values uniformly. Let's look at the current code again:\n\n```python\n    # Remove keys that are set to None.\n    for (k, v) in request_setting.items():\n        if v is None:\n            del merged_setting[k]\n```\n\nThis only checks request_setting. But what if session_setting has a None that request_setting overrides with a real value? The current loop wouldn't delete it because request_setting has a real value. Good.\n\nWhat if we change it to iterate over merged_setting and delete keys with None values? If session has None and request overrides with real value, merged won't have None, so it won't be deleted. If session has None and request doesn't have the key, merged has None, it gets deleted. If request has None and session has real value or doesn't have the key, merged has None, it gets deleted. This seems correct.\n\nBut wait, there's a subtle issue. What if someone explicitly wants to send a header with value None (as the string \"None\")? That would be `session.headers['Accept-Encoding'] = 'None'` not `None`. So removing None values is actually desired behavior \u2014 None means \"don't send\".\n\nLet me also check: could this affect non-header settings like `params` or `auth`? The `merge_setting` is also used for params and auth. But for those, None values probably don't make sense either, so removing None should be fine.\n\nI think the simplest fix is to change the loop in `merge_setting` to iterate over `merged_setting` instead of `request_setting`. This way both session and request None values are removed.\n\nWait actually, I need to be careful. Let me re-read the merge_setting. It also has early returns:\n\n```python\nif session_setting is None:\n    return request_setting\n\nif request_setting is None:\n    return session_setting\n```\n\nIf request_setting is None, it returns session_setting as-is. If session_setting has None values, they'd still be present. Similarly, if session_setting is None, it returns request_setting as-is.\n\nSo we'd also need to handle None values in those early return paths. The cleanest approach would be:\n\nAfter the merged dict is created (including the early returns), filter out None values. Or better, filter at the end of the function.\n\nActually, the simplest and most comprehensive fix: in the `prepare_headers` method of `PreparedRequest` (models.py), filter out None values when constructing the CaseInsensitiveDict. This ensures that regardless of where None comes from, it's always filtered out right before sending.\n\nLet me look at `prepare_headers` again:\n\n```python\ndef prepare_headers(self, headers):\n    if headers:\n        self.headers = CaseInsensitiveDict((to_native_string(name), value) for name, value in headers.items())\n    else:\n        self.headers = CaseInsensitiveDict()\n```\n\nWe could change this to:\n```python\ndef prepare_headers(self, headers):\n    if headers:\n        self.headers = CaseInsensitiveDict((to_native_string(name), value) for name, value in headers.items() if value is not None)\n    else:\n        self.headers = CaseInsensitiveDict()\n```\n\nThis is a clean, minimal fix that ensures no None values ever get sent as headers. It's the last line of defense. The merge_setting already has logic to remove None from request but misses session \u2014 but fixing prepare_headers catches all cases.\n\nBut there's also `merge_setting` which has the same bug for other merged settings (params, auth). Though the issue is specifically about headers. Let me just fix `prepare_headers` since that's the minimal, correct change.\n\nActually, wait. The issue is that `session.headers['Accept-Encoding'] = None` results in `Accept-Encoding: None`. The `merge_setting` function is supposed to handle this (it removes request None values). But it doesn't remove session None values. So the fix should be in `merge_setting` to also remove session None values. AND/OR in `prepare_headers`.\n\nI think fixing `prepare_headers` is the most robust approach. It's the final step before headers go out, and filtering None there ensures no None values leak through regardless of the source.\n\nLet me also check: could there be issues with other places where headers are set? Let me search for where CaseInsensitiveDict is used with headers.\n\nActually, I think the fix in `prepare_headers` is clean and minimal. Let me do that.\n\nWait, but also `merge_setting` is the documented way settings are merged. The docs say \"you can prevent sending a session header by setting the headers value to None in the method's arguments.\" The merge_setting function already handles this for request headers (the method's arguments), but not for session headers. So fixing `merge_setting` to also handle session None values would fulfill the documented behavior for session headers too.\n\nI think the best fix is in `merge_setting` - change the None-removal loop to also check session_setting:\n\n```python\n# Remove keys that are set to None.\nfor (k, v) in request_setting.items():\n    if v is None:\n        del merged_setting[k]\n\n# Remove keys that are set to None from session.\nfor (k, v) in session_setting.items():\n    if v is None and k not in request_setting:\n        del merged_setting[k]\n```\n\nWait, but that's more complex. Let me think again...\n\nThe simplest approach: just iterate over merged_setting and remove None values:\n\n```python\n# Remove keys that are set to None.\nfor (k, v) in merged_setting.items():\n    if v is None:\n        del merged_setting[k]\n```\n\nBut this is problematic because if request explicitly sets a key to a real value and session has it as None, after merging, the value is the real value, so it won't be deleted. Good.\n\nIf session has a real value and request sets it to None, merged has None, it gets deleted. That's the correct behavior (as documented - setting to None in method args prevents sending).\n\nIf both have None, merged has None, it gets deleted. Correct.\n\nIf only session has None and request doesn't have the key, merged has None, it gets deleted. This is the fix we want.\n\nThis seems correct! But wait, I need to handle the early returns too:\n\n```python\nif session_setting is None:\n    return request_setting\n\nif request_setting is None:\n    return session_setting\n```\n\nIf session_setting is None, we return request_setting. If request_setting has None values, they won't be removed. Similarly for the other branch.\n\nBut for the case described in the issue, session_setting is not None (it has headers with None values), and request_setting could be anything. The issue is specifically about session.headers having None values.\n\nActually, let me re-examine. When `session.headers['Accept-Encoding'] = None`, then `self.headers` (session.headers) is a CaseInsensitiveDict with key 'accept-encoding' mapping to None.\n\nIn `prepare_request`:\n```python\nheaders=merge_setting(request.headers, self.headers, dict_class=CaseInsensitiveDict),\n```\n\n`request.headers` might be None or a dict. `self.headers` is the session's CaseInsensitiveDict with None value.\n\nIn `merge_setting`:\n- `session_setting` is the CaseInsensitiveDict (not None)\n- `request_setting` might be None\n\nIf `request_setting` is None:\n```python\nif request_setting is None:\n    return session_setting\n```\nIt returns session_setting as-is, including None values. This is a problem.\n\nIf `request_setting` is not None:\nThey get merged, and only request's None values are removed, not session's.\n\nSo the fix needs to handle both paths. The cleanest approach:\n\nChange `merge_setting` to filter None values from the final result. We can do this after the merge or in the early returns.\n\nI think the best minimal fix is in `prepare_headers` in models.py. It's the final step, and filtering there is a clean one-line change.\n\nBut actually, let me also check if there's an `add_headers` function in adapters.py that also adds headers.\n\nLet me check...",
+      "say": ""
+    },
+    {
+      "step": 6,
+      "reasoning": "Let me also look at the `send` method in adapters.py to see how headers are used:",
+      "say": ""
+    },
+    {
+      "step": 7,
+      "reasoning": "Let me read the send method properly:",
+      "say": ""
+    },
+    {
+      "step": 8,
+      "reasoning": "Now I can see the full picture. In the `send` method, `request.headers` is used directly. The headers are set in `prepare_headers` which is called from `prepare`. \n\nLooking at `prepare_headers`:\n\n```python\ndef prepare_headers(self, headers):\n    if headers:\n        self.headers = CaseInsensitiveDict((to_native_string(name), value) for name, value in headers.items())\n    else:\n        self.headers = CaseInsensitiveDict()\n```\n\nIt iterates over all items in `headers` and creates the dict. If `headers` contains a key with value `None`, it will be stored.\n\nThen in `send`, when chunked:\n```python\nfor header, value in request.headers.items():\n    low_conn.putheader(header, value)\n```\n\nThis sends `Accept-Encoding: None`.\n\nWhen not chunked:\n```python\nresp = conn.urlopen(\n    ...\n    headers=request.headers,\n    ...\n)\n```\n\nThis also sends the None value.\n\nSo the fix should be in `prepare_headers` to filter out None values. This is the single point where headers are set on the PreparedRequest, and filtering here ensures no None values ever leak through.\n\nLet me make the fix now.",
+      "say": "Now I have full context. The issue: `session.headers['Accept-Encoding'] = None` sends `Accept-Encoding: None` instead of omitting the header. \n\nThe root cause is that `prepare_headers` in `models.py` doesn't filter out `None` values. The `merge_setting` function only strips `None` from the *request* dict, not the *session* dict. The simplest, most robust fix is to filter `None` values at the final step in `prepare_headers` \u2014 this catches all sources (session defaults, request args, or both)."
+    },
+    {
+      "step": 9,
+      "reasoning": "The fix is applied. Let me verify the change is correct by re-reading the modified method.\n\nThe change adds `if value is not None` to the generator expression in `prepare_headers`. This filters out any header with a `None` value, so:\n\n- `session.headers['Accept-Encoding'] = None` \u2192 the session headers dict now has `'accept-encoding': ('Accept-Encoding', None)` \u2192 when merged and passed to `prepare_headers`, the `None` value is filtered out \u2192 the header is not sent.\n\nThis is the minimal, correct fix. It catches all sources of `None` header values: session defaults, request args, or merged combinations.\n\nI should also consider: could this break anything? The `prepare_headers` method only processes headers before sending. Filtering `None` values is the correct behavior because:\n1. The docs say setting a header to `None` should prevent sending it.\n2. There's no legitimate reason to send a header with value `None` (the string \"None\" would be `'None'`, not Python `None`).\n3. The `merge_setting` function already tries to strip `None` from request headers, so this is consistent.\n\nThe fix is complete.",
+      "say": "The fix is applied. Here's what was done:\n\n**Problem**: `session.headers['Accept-Encoding'] = None` sent `Accept-Encoding: None` as a literal header instead of omitting the header entirely.\n\n**Root cause**: In `prepare_headers` (models.py line 394), the generator expression iterated over all `headers.items()` and included entries with `value = None`, storing them in the `CaseInsensitiveDict`. Those `None` values then got serialized as the string `\"None\"` when sent over the wire.\n\n**Fix**: Added `if value is not None` to the generator in `prepare_headers`. This filters out any header whose value is `None` at the final step before headers are stored on the `PreparedRequest`. This is the single choke-point \u2014 it catches `None` values regardless of whether they came from session defaults, per-request args, or the merge of both."
+    }
+  ],
+  "final_diff": "diff --git a/requests/models.py b/requests/models.py\nindex cd232e68..ee4aa380 100644\n--- a/requests/models.py\n+++ b/requests/models.py\n@@ -391,7 +391,7 @@ class PreparedRequest(RequestEncodingMixin, RequestHooksMixin):\n         \"\"\"Prepares the given HTTP headers.\"\"\"\n \n         if headers:\n-            self.headers = CaseInsensitiveDict((to_native_string(name), value) for name, value in headers.items())\n+            self.headers = CaseInsensitiveDict((to_native_string(name), value) for name, value in headers.items() if value is not None)\n         else:\n             self.headers = CaseInsensitiveDict()\n \n",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are the Atomic-CLI coding agent. Solve the task by editing a real repository using ONLY atomic tools. Be efficient with calls: to understand the code, FIRST call atomic_survey(glob) once to outline the region, then atomic_read_many(items) to read the relevant files in ONE call \u2014 do NOT read files one at a time. Then make minimal faithful edits with atomic_replace / atomic_create (supply proofOfIncorrectness when you remove code). Prefer the smallest correct behavioral delta: preserve existing exports, comments, and call graph where possible; avoid rewriting unrelated helpers; when two touched functions need the same logic, implement one canonical helper and have wrappers delegate instead of duplicating state machines or parsers. You CANNOT run the project's tests \u2014 there is no run_tests tool. Implement the fix described in the issue carefully and completely, then STOP by replying with a short summary and NO tool call. Paths are relative to the repo root."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_ZtFJNETc3q0xQWAnLJJn7038",
+          "type": "function",
+          "function": {
+            "name": "atomic_survey",
+            "arguments": "{\"glob\": \"requests/*.py\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_ZtFJNETc3q0xQWAnLJJn7038",
+      "content": "requests/__init__.py: NullHandler@L73, emit@L74\nrequests/adapters.py: BaseAdapter@L35, __init__@L38, send@L41, close@L44, HTTPAdapter@L48, __init__@L73, __getstate__@L88, __setstate__@L92, init_poolmanager@L104, cert_verify@L121, build_response@L158, get_connection@L194, close@L226, request_url@L234, add_headers@L258, proxy_headers@L272, send@L294\nrequests/api.py: request@L17, get@L47, options@L58, head@L69, post@L80, put@L91, patch@L102, delete@L113\nrequests/auth.py: _basic_auth_str@L25, AuthBase@L31, __call__@L34, HTTPBasicAuth@L38, __init__@L40, __call__@L44, HTTPProxyAuth@L49, __call__@L51, HTTPDigestAuth@L56, __init__@L58, build_digest_header@L66, md5_utf8@L80, sha_utf8@L86, handle_401@L149, __call__@L184\nrequests/certs.py: where@L18\nrequests/compat.py\nrequests/cookies.py: MockRequest@L21, __init__@L33, get_type@L38, get_host@L41, get_origin_req_host@L44, get_full_url@L47, is_unverifiable@L61, has_header@L64, get_header@L67, add_header@L70, add_unredirected_header@L74, get_new_headers@L77, unverifiable@L81, origin_req_host@L85, host@L89, MockResponse@L93, __init__@L100, info@L107, getheaders@L110, extract_cookies_to_jar@L114, get_cookie_header@L131, remove_cookie_by_name@L138, CookieConflictError@L154, RequestsCookieJar@L159, get@L176, set@L185, iterkeys@L201, keys@L207, itervalues@L212, values@L218, iteritems@L223, items@L229, list_domains@L235, list_paths@L243, multiple_domains@L251, get_dict@L261, __getitem__@L271, __setitem__@L278, __delitem__@L285, set_cookie@L289, update@L294, _find@L302, _find_no_duplicates@L315, __getstate__@L333, __setstate__@L340, copy@L346, create_cookie@L353, morsel_to_cookie@L388, cookiejar_from_dict@L415, merge_cookies@L435\nrequests/exceptions.py: RequestException@L13, __init__@L17, HTTPError@L30, ConnectionError@L34, ProxyError@L38, SSLError@L42, Timeout@L46, URLRequired@L50, TooManyRedirects@L54, MissingSchema@L58, InvalidSchema@L62, InvalidURL@L66, ChunkedEncodingError@L70, ContentDecodingError@L74\nrequests/hooks.py: default_hooks@L20, dispatch_hook@L29\nrequests/models.py: RequestEncodingMixin@L48, path_url@L50, _encode_params@L71, _encode_files@L98, RequestHooksMixin@L157, register_hook@L158, deregister_hook@L169, Request@L181, __init__@L204, __repr__@L235, prepare@L238, PreparedRequest@L255, __init__@L274, prepare@L289, __repr__@L305, copy@L308, prepare_method@L318, prepare_url@L324, prepare_headers@L390, prepare_body@L398, prepare_content_length@L451, prepare_auth@L463, prepare_cookies@L485, prepare_hooks@L497, Response@L503, __init__@L521, __getstate__@L561, __setstate__@L572, __repr__@L579, __bool__@L582, __nonzero__@L586, __iter__@L590, ok@L595, is_redirect@L603, apparent_encoding@L610, iter_content@L614, generate@L625, iter_lines@L652, content@L678, text@L702, json@L739, links@L763, raise_for_status@L780, close@L794\nrequests/sessions.py: merge_setting@L34, merge_hooks@L65, SessionRedirectMixin@L81, resolve_redirects@L82, Session@L185, __init__@L203, __enter__@L254, __exit__@L257, prepare_request@L260, request@L299, get@L395, options@L405, head@L415, post@L425, put@L435, patch@L445, delete@L455, send@L464, get_adapter@L532, close@L542, mount@L547, __getstate__@L558, __setstate__@L561, session@L566\nrequests/status_codes.py\nrequests/structures.py: IteratorProxy@L16, __init__@L18, __iter__@L22, __len__@L25, read@L33, CaseInsensitiveDict@L37, __init__@L65, __setitem__@L71, __getitem__@L76, __delitem__@L79, __iter__@L82, __len__@L85, lower_items@L88, __eq__@L96, copy@L105, __repr__@L108, LookupDict@L112, __init__@L115, __repr__@L119, __getitem__@L122, get@L127\nrequests/utils.py: dict_to_sequence@L39, super_len@L48, get_netrc_auth@L68, guess_filename@L114, from_key_val_list@L121, to_key_val_list@L144, parse_list_header@L170, parse_dict_header@L201, unquote_header_value@L235, dict_from_cookiejar@L259, add_dict_to_cookiejar@L273, get_encodings_from_content@L285, get_encoding_from_headers@L300, stream_decode_response_unicode@L320, iter_slices@L338, get_unicode_from_response@L346, unquote_unreserved@L385, requote_uri@L407, address_in_network@L419, dotted_netmask@L432, is_ipv4_address@L441, is_valid_cidr@L449, get_environ_proxies@L469, default_user_agent@L517, default_headers@L548, parse_header_links@L556, guess_json_utf@L596, except_on_missing_scheme@L625, get_auth_from_url@L634, to_native_string@L647"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_JDJrdQqldmHU6yxQndGN2349",
+          "type": "function",
+          "function": {
+            "name": "atomic_read_many",
+            "arguments": "{\"items\": [{\"path\": \"requests/structures.py\", \"selector\": \"CaseInsensitiveDict\"}, {\"path\": \"requests/sessions.py\", \"selector\": \"Session\"}]}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_JDJrdQqldmHU6yxQndGN2349",
+      "content": "code_readcode_batch returned 2/2 adaptive context item(s); 0 failed."
+    },
+    {
+      "role": "user",
+      "content": "You have read enough to edit. Pick the smallest implementation topology \u2014 the canonical implementation location and any delegating wrappers, preferring ONE canonical implementation plus wrappers over duplicated logic when several exported functions need the same semantics \u2014 then make the smallest faithful edit(s) with atomic_replace/atomic_create in THIS turn. You may state your topology reasoning as content alongside the tool call."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_LR21LhyawiuzsSKkwXHW3643",
+          "type": "function",
+          "function": {
+            "name": "atomic_read",
+            "arguments": "{\"path\": \"requests/sessions.py\", \"startLine\": 34, \"endLine\": 80}"
+          }
+        },
+        {
+          "index": 1,
+          "id": "call_01_ryHw5ho5p5AoUQdNT9bm9469",
+          "type": "function",
+          "function": {
+            "name": "atomic_read",
+            "arguments": "{\"path\": \"requests/sessions.py\", \"startLine\": 260, \"endLine\": 340}"
+          }
+        },
+        {
+          "index": 2,
+          "id": "call_02_bg2xMpdxrBevIOPaK6sh6075",
+          "type": "function",
+          "function": {
+            "name": "atomic_read",
+            "arguments": "{\"path\": \"requests/models.py\", \"startLine\": 390, \"endLine\": 420}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_LR21LhyawiuzsSKkwXHW3643",
+      "content": "requests/sessions.py\ndef merge_setting(request_setting, session_setting, dict_class=OrderedDict):\n    \"\"\"\n    Determines appropriate setting for a given request, taking into account the\n    explicit setting on that request, and the setting in the session. If a\n    setting is a dictionary, they will be merged together using `dict_class`\n    \"\"\"\n\n    if session_setting is None:\n        return request_setting\n\n    if request_setting is None:\n        return session_setting\n\n    # Bypass if not a dictionary (e.g. verify)\n    if not (\n            isinstance(session_setting, Mapping) and\n            isinstance(request_setting, Mapping)\n    ):\n        return request_setting\n\n    merged_setting = dict_class(to_key_val_list(session_setting))\n    merged_setting.update(to_key_val_list(request_setting))\n\n    # Remove keys that are set to None.\n    for (k, v) in request_setting.items():\n        if v is None:\n            del merged_setting[k]\n\n    return merged_setting\n\n\ndef merge_hooks(request_hooks, session_hooks, dict_class=OrderedDict):\n    \"\"\"\n    Properly merges both requests and session hooks.\n\n    This is necessary because when request_hooks == {'response': []}, the\n    merge breaks Session hooks entirely.\n    \"\"\"\n    if session_hooks is None or session_hooks.get('response') == []:\n        return request_hooks\n\n    if request_hooks is None or request_hooks.get('response') == []:\n        return session_hooks\n\n    return merge_setting(request_hooks, session_hooks, dict_class)\n\n\n"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_ryHw5ho5p5AoUQdNT9bm9469",
+      "content": "requests/sessions.py\n    def prepare_request(self, request):\n        \"\"\"Constructs a :class:`PreparedRequest <PreparedRequest>` for\n        transmission and returns it. The :class:`PreparedRequest` has settings\n        merged from the :class:`Request <Request>` instance and those of the\n        :class:`Session`.\n\n        :param request: :class:`Request` instance to prepare with this\n            session's settings.\n        \"\"\"\n        cookies = request.cookies or {}\n\n        # Bootstrap CookieJar.\n        if not isinstance(cookies, cookielib.CookieJar):\n            cookies = cookiejar_from_dict(cookies)\n\n        # Merge with session cookies\n        merged_cookies = merge_cookies(\n            merge_cookies(RequestsCookieJar(), self.cookies), cookies)\n\n\n        # Set environment's basic authentication if not explicitly set.\n        auth = request.auth\n        if self.trust_env and not auth and not self.auth:\n            auth = get_netrc_auth(request.url)\n\n        p = PreparedRequest()\n        p.prepare(\n            method=request.method.upper(),\n            url=request.url,\n            files=request.files,\n            data=request.data,\n            headers=merge_setting(request.headers, self.headers, dict_class=CaseInsensitiveDict),\n            params=merge_setting(request.params, self.params),\n            auth=merge_setting(auth, self.auth),\n            cookies=merged_cookies,\n            hooks=merge_hooks(request.hooks, self.hooks),\n        )\n        return p\n\n    def request(self, method, url,\n        params=None,\n        data=None,\n        headers=None,\n        cookies=None,\n        files=None,\n        auth=None,\n        timeout=None,\n        allow_redirects=True,\n        proxies=None,\n        hooks=None,\n        stream=None,\n        verify=None,\n        cert=None):\n        \"\"\"Constructs a :class:`Request <Request>`, prepares it and sends it.\n        Returns :class:`Response <Response>` object.\n\n        :param method: method for the new :class:`Request` object.\n        :param url: URL for the new :class:`Request` object.\n        :param params: (optional) Dictionary or bytes to be sent in the query\n            string for the :class:`Request`.\n        :param data: (optional) Dictionary or bytes to send in the body of the\n            :class:`Request`.\n        :param headers: (optional) Dictionary of HTTP Headers to send with the\n            :class:`Request`.\n        :param cookies: (optional) Dict or CookieJar object to send with the\n            :class:`Request`.\n        :param files: (optional) Dictionary of 'filename': file-like-objects\n            for multipart encoding upload.\n        :param auth: (optional) Auth tuple or callable to enable\n            Basic/Digest/Custom HTTP Auth.\n        :param timeout: (optional) Float describing the timeout of the\n            request.\n        :param allow_redirects: (optional) Boolean. Set to True by default.\n        :param proxies: (optional) Dictionary mapping protocol to the URL of\n            the proxy.\n        :param stream: (optional) whether to immediately download the response\n            content. Defaults to ``False``.\n        :param verify: (optional) if ``True``, the SSL cert will be verified.\n            A CA_BUNDLE path can also be provided.\n        :param cert: (optional) if String, path to ssl client cert file (.pem).\n            If Tuple, ('cert', 'key') pair.\n"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_02_bg2xMpdxrBevIOPaK6sh6075",
+      "content": "requests/models.py\n    def prepare_headers(self, headers):\n        \"\"\"Prepares the given HTTP headers.\"\"\"\n\n        if headers:\n            self.headers = CaseInsensitiveDict((to_native_string(name), value) for name, value in headers.items())\n        else:\n            self.headers = CaseInsensitiveDict()\n\n    def prepare_body(self, data, files):\n        \"\"\"Prepares the given HTTP body data.\"\"\"\n\n        # Check if file, fo, generator, iterator.\n        # If not, run through normal process.\n\n        # Nottin' on you.\n        body = None\n        content_type = None\n        length = None\n\n        is_stream = all([\n            hasattr(data, '__iter__'),\n            not isinstance(data, basestring),\n            not isinstance(data, list),\n            not isinstance(data, dict)\n        ])\n\n        try:\n            length = super_len(data)\n        except (TypeError, AttributeError, UnsupportedOperation):\n            length = None\n\n"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_OGcSQSvewGKeMTQJFvjm8203",
+          "type": "function",
+          "function": {
+            "name": "atomic_read",
+            "arguments": "{\"path\": \"requests/structures.py\", \"startLine\": 37, \"endLine\": 110}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_OGcSQSvewGKeMTQJFvjm8203",
+      "content": "requests/structures.py\nclass CaseInsensitiveDict(collections.MutableMapping):\n    \"\"\"\n    A case-insensitive ``dict``-like object.\n\n    Implements all methods and operations of\n    ``collections.MutableMapping`` as well as dict's ``copy``. Also\n    provides ``lower_items``.\n\n    All keys are expected to be strings. The structure remembers the\n    case of the last key to be set, and ``iter(instance)``,\n    ``keys()``, ``items()``, ``iterkeys()``, and ``iteritems()``\n    will contain case-sensitive keys. However, querying and contains\n    testing is case insensitive:\n\n        cid = CaseInsensitiveDict()\n        cid['Accept'] = 'application/json'\n        cid['aCCEPT'] == 'application/json'  # True\n        list(cid) == ['Accept']  # True\n\n    For example, ``headers['content-encoding']`` will return the\n    value of a ``'Content-Encoding'`` response header, regardless\n    of how the header name was originally stored.\n\n    If the constructor, ``.update``, or equality comparison\n    operations are given keys that have equal ``.lower()``s, the\n    behavior is undefined.\n\n    \"\"\"\n    def __init__(self, data=None, **kwargs):\n        self._store = dict()\n        if data is None:\n            data = {}\n        self.update(data, **kwargs)\n\n    def __setitem__(self, key, value):\n        # Use the lowercased key for lookups, but store the actual\n        # key alongside the value.\n        self._store[key.lower()] = (key, value)\n\n    def __getitem__(self, key):\n        return self._store[key.lower()][1]\n\n    def __delitem__(self, key):\n        del self._store[key.lower()]\n\n    def __iter__(self):\n        return (casedkey for casedkey, mappedvalue in self._store.values())\n\n    def __len__(self):\n        return len(self._store)\n\n    def lower_items(self):\n        \"\"\"Like iteritems(), but with all lowercase keys.\"\"\"\n        return (\n            (lowerkey, keyval[1])\n            for (lowerkey, keyval)\n            in self._store.items()\n        )\n\n    def __eq__(self, other):\n        if isinstance(other, collections.Mapping):\n            other = CaseInsensitiveDict(other)\n        else:\n            return NotImplemented\n        # Compare insensitively\n        return dict(self.lower_items()) == dict(other.lower_items())\n\n    # Copy is required\n    def copy(self):\n        return CaseInsensitiveDict(self._store.values())\n\n    def __repr__(self):\n        return '%s(%r)' % (self.__class__.__name__, dict(self.items()))\n\n"
+    },
+    {
+      "role": "user",
+      "content": "You have read a lot without editing. You likely have enough context \u2014 make the edit now with atomic_replace/atomic_create, then run_tests."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_hqM2UcLcc2FZJrZ2f42m9212",
+          "type": "function",
+          "function": {
+            "name": "atomic_read",
+            "arguments": "{\"path\": \"requests/adapters.py\", \"startLine\": 258, \"endLine\": 280}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_hqM2UcLcc2FZJrZ2f42m9212",
+      "content": "requests/adapters.py\n    def add_headers(self, request, **kwargs):\n        \"\"\"Add any headers needed by the connection. As of v2.0 this does\n        nothing by default, but is left for overriding by users that subclass\n        the :class:`HTTPAdapter <requests.adapters.HTTPAdapter>`.\n\n        This should not be called from user code, and is only exposed for use\n        when subclassing the\n        :class:`HTTPAdapter <requests.adapters.HTTPAdapter>`.\n\n        :param request: The :class:`PreparedRequest <PreparedRequest>` to add headers to.\n        :param kwargs: The keyword arguments from the call to send().\n        \"\"\"\n        pass\n\n    def proxy_headers(self, proxy):\n        \"\"\"Returns a dictionary of the headers to add to any request sent\n        through a proxy. This works with urllib3 magic to ensure that they are\n        correctly sent to the proxy, rather than in a tunnelled request if\n        CONNECT is being used.\n\n        This should not be called from user code, and is only exposed for use\n        when subclassing the\n        :class:`HTTPAdapter <requests.adapters.HTTPAdapter>`.\n"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_gbBMOmTVd1RStuCip8876262",
+          "type": "function",
+          "function": {
+            "name": "atomic_read",
+            "arguments": "{\"endLine\": 400, \"file\": \"requests/adapters.py\", \"startLine\": 294}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_gbBMOmTVd1RStuCip8876262",
+      "content": "{\n  \"ok\": false,\n  \"error\": \"endLine 400 exceeds file line count 397\"\n}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_EZ6gQkzesVhNsj6uTINM5812",
+          "type": "function",
+          "function": {
+            "name": "atomic_read",
+            "arguments": "{\"endLine\": 397, \"file\": \"requests/adapters.py\", \"startLine\": 294}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_EZ6gQkzesVhNsj6uTINM5812",
+      "content": "requests/adapters.py\n    def send(self, request, stream=False, timeout=None, verify=True, cert=None, proxies=None):\n        \"\"\"Sends PreparedRequest object. Returns Response object.\n\n        :param request: The :class:`PreparedRequest <PreparedRequest>` being sent.\n        :param stream: (optional) Whether to stream the request content.\n        :param timeout: (optional) The timeout on the request.\n        :param verify: (optional) Whether to verify SSL certificates.\n        :param cert: (optional) Any user-provided SSL certificate to be trusted.\n        :param proxies: (optional) The proxies dictionary to apply to the request.\n        \"\"\"\n\n        conn = self.get_connection(request.url, proxies)\n\n        self.cert_verify(conn, request.url, verify, cert)\n        url = self.request_url(request, proxies)\n        self.add_headers(request)\n\n        chunked = not (request.body is None or 'Content-Length' in request.headers)\n\n        if stream:\n            timeout = TimeoutSauce(connect=timeout)\n        else:\n            timeout = TimeoutSauce(connect=timeout, read=timeout)\n\n        try:\n            if not chunked:\n                resp = conn.urlopen(\n                    method=request.method,\n                    url=url,\n                    body=request.body,\n                    headers=request.headers,\n                    redirect=False,\n                    assert_same_host=False,\n                    preload_content=False,\n                    decode_content=False,\n                    retries=self.max_retries,\n                    timeout=timeout\n                )\n\n            # Send the request.\n            else:\n                if hasattr(conn, 'proxy_pool'):\n                    conn = conn.proxy_pool\n\n                low_conn = conn._get_conn(timeout=timeout)\n\n                try:\n                    low_conn.putrequest(request.method,\n                                        url,\n                                        skip_accept_encoding=True)\n\n                    for header, value in request.headers.items():\n                        low_conn.putheader(header, value)\n\n                    low_conn.endheaders()\n\n                    for i in request.body:\n                        low_conn.send(hex(len(i))[2:].encode('utf-8'))\n                        low_conn.send(b'\\r\\n')\n                        low_conn.send(i)\n                        low_conn.send(b'\\r\\n')\n                    low_conn.send(b'0\\r\\n\\r\\n')\n\n                    r = low_conn.getresponse()\n                    resp = HTTPResponse.from_httplib(\n                        r,\n                        pool=conn,\n                        connection=low_conn,\n                        preload_content=False,\n                        decode_content=False\n                    )\n                except:\n                    # If we hit any problems here, clean up the connection.\n                    # Then, reraise so that we can handle the actual exception.\n                    low_conn.close()\n                    raise\n                else:\n                    # All is well, return the connection to the pool.\n                    conn._put_conn(low_conn)\n\n        except socket.error as sockerr:\n            raise ConnectionError(sockerr, request=request)\n\n        except MaxRetryError as e:\n            raise ConnectionError(e, request=request)\n\n        except _ProxyError as e:\n            raise ProxyError(e)\n\n        except (_SSLError, _HTTPError) as e:\n            if isinstance(e, _SSLError):\n                raise SSLError(e, request=request)\n            elif isinstance(e, TimeoutError):\n                raise Timeout(e, request=request)\n            else:\n                raise\n\n        r = self.build_response(request, resp)\n\n        if not stream:\n            r.content\n\n        return r\n"
+    },
+    {
+      "role": "assistant",
+      "content": "Now I have full context. The issue: `session.headers['Accept-Encoding'] = None` sends `Accept-Encoding: None` instead of omitting the header. \n\nThe root cause is that `prepare_headers` in `models.py` doesn't filter out `None` values. The `merge_setting` function only strips `None` from the *request* dict, not the *session* dict. The simplest, most robust fix is to filter `None` values at the final step in `prepare_headers` \u2014 this catches all sources (session defaults, request args, or both).",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_tTWWQ37Hb89YZrPmkTUQ6010",
+          "type": "function",
+          "function": {
+            "name": "atomic_replace",
+            "arguments": "{\"file\": \"requests/models.py\", \"oldText\": \"    def prepare_headers(self, headers):\\n        \\\"\\\"\\\"Prepares the given HTTP headers.\\\"\\\"\\\"\\n\\n        if headers:\\n            self.headers = CaseInsensitiveDict((to_native_string(name), value) for name, value in headers.items())\\n        else:\\n            self.headers = CaseInsensitiveDict()\", \"newText\": \"    def prepare_headers(self, headers):\\n        \\\"\\\"\\\"Prepares the given HTTP headers.\\\"\\\"\\\"\\n\\n        if headers:\\n            self.headers = CaseInsensitiveDict((to_native_string(name), value) for name, value in headers.items() if value is not None)\\n        else:\\n            self.headers = CaseInsensitiveDict()\", \"proofOfIncorrectness\": \"prepare_headers did not filter out header values of None, causing session.headers['X'] = None to send 'X: None' instead of omitting the header entirely\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_tTWWQ37Hb89YZrPmkTUQ6010",
+      "content": "\u2705 Atomic edit applied\n\nrequests/models.py\n\u001b[2m--- requests/models.py (atomic char-level)\u001b[0m\n  \n          if headers:\n              self.headers = CaseInsensitiveDict((to_native_string(name), value) for name, value in headers.items()\u001b[32m{+ if value is not None+}\u001b[0m)\n          else:\n              self.headers = CaseInsensitiveDict()\n\nValidation:\n- syntax: ok\n- typecheck: not-run\n- protected file: no\n- sha256: ok\n\nTrace metrics: expansion 0.93\u00d7 \u00b7 306 chars \u00b7 zeroCodeTrust 30 (unvalidated-text)\nTopology: text_span \u00b7 unclassified_code_edit \u00b7 preserved 2 \u00b7 modified 1 \u00b7 moved 0\nTrace: .atomic/traces/op_1782087976250_87236024.json\n{\n  \"ok\": true,\n  \"changed\": true,\n  \"file\": \"requests/models.py\",\n  \"target\": {\n    \"repoRoot\": \"/private/tmp/swe/round/R022post/psf__requests-1921/atomic\",\n    \"file\": \"requests/models.py\",\n    \"absPath\": \"/private/tmp/swe/round/R022post/psf__requests-1921/atomic/requests/models.py\"\n  },\n  \"validation\": {\n    \"language\": \"python\",\n    \"syntaxErrorsBefore\": 0,\n    \"syntaxErrorsAfter\": 0\n  },\n  \"intentionChars\": 306,\n  \"lineRewriteSurfaceChars\": 285,\n  \"expansionFactorAvoided\": 0.93,\n  \"bytesNet\": 21,\n  \"afterSha256\": \"a48e535ff4719dbe69c7ac075a5d8d8a08418bce6887093d7d9518fc311365be\",\n  \"op\": \"atomic_replace_text\",\n  \"operationId\": \"op_1782087976250_87236024\",\n  \"operation\": \"atomic_replace_text\",\n  \"validationSummary\": {\n    \"syntax\": \"ok\",\n    \"typecheck\": \"not-run\",\n    \"protectedFile\": \"no\",\n    \"sha256\": \"ok\"\n  },\n  \"tracePath\": \".atomic/traces/op_1782087976250_87236024.json\",\n  \"chainHash\": \"241001b15762df0686dc6c5f04f5709bbc056212556108cde4e2c1e3b21bf405\",\n  \"founder\": {\n    \"whatChanged\": \"Operation `atomic_replace_text` changed ~306 character(s) in `requests/models.py` (sub-line atomic edit, expansion 0.93\u00d7 \u2014 it did not rewrite surrounding code).\",\n    \"whatPreserved\": \"Everything outside the highlighted [-removed-]{+added+} span in that one file is byte-identical. No other file was touched by this operation.\",\n    \"howToValidate\": \"Read the atomicDiff above \u2014 it shows EXACTLY the changed characters, nothing else. Then exercise the affected behavior in the running product to confirm intent.\",\n    \"notProven\": \"Runtime/product behavior is NOT proven by this tool. Structural validity \u2260 correct behavior. Prove behavior by running the flow in the app.\",\n    \"nonTouched\": \"Single-file, single-span: every file other than `requests/models.py` is provably untouched by this operation. Policy/protected-file status requires the governance gate.\",\n    \"promiseClass\": \"unvalidated-text\",\n    \"zeroCodeTrust\": 30,\n    \"trustCeilingReason\": \"ceiling < 75: an edit tool proves structure + exact scope, not product behavior. Reaching 75 (validate by explanation) or 100 (validate by the product) requires running the changed flow \u2014 do that in the app, not here.\"\n  },\n  \"atomicDiff\": \"\\u001b[2m--- requests/models.py (atomic char-level)\\u001b[0m\\n  \\n          if headers:\\n              self.headers = CaseInsensitiveDict((to_native_string(name), value) for name, value in headers.items()\\u001b[32m{+ if value is not None+}\\u001b[0m)\\n          else:\\n              self.headers = CaseInsensitiveDict()\"\n}\n[post-edit view] the file now reads (around your change) \u2014 no need to re-read to verify:\n387:         url = requote_uri(urlunparse([scheme, netloc, path, None, query, fragment]))\n388:         self.url = url\n389: \n390:     def prepare_headers(self, headers):\n391:         \"\"\"Prepares the given HTTP headers.\"\"\"\n392: \n393:         if headers:\n394:             self.headers = CaseInsensitiveDict((to_native_string(name), value) for name, value in headers.items() if value is not None)\n395:         else:\n396:             self.headers = CaseInsensitiveDict()\n397: \n398:     def prepare_body(self, data, files):"
+    },
+    {
+      "role": "assistant",
+      "content": "The fix is applied. Here's what was done:\n\n**Problem**: `session.headers['Accept-Encoding'] = None` sent `Accept-Encoding: None` as a literal header instead of omitting the header entirely.\n\n**Root cause**: In `prepare_headers` (models.py line 394), the generator expression iterated over all `headers.items()` and included entries with `value = None`, storing them in the `CaseInsensitiveDict`. Those `None` values then got serialized as the string `\"None\"` when sent over the wire.\n\n**Fix**: Added `if value is not None` to the generator in `prepare_headers`. This filters out any header whose value is `None` at the final step before headers are stored on the `PreparedRequest`. This is the single choke-point \u2014 it catches `None` values regardless of whether they came from session defaults, per-request args, or the merge of both."
+    }
+  ]
+}

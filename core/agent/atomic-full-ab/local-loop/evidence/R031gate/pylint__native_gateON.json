@@ -1,0 +1,63 @@
+{
+  "kind": "codex_native_ab_arm_evidence",
+  "schema_version": 1,
+  "round": "R031gate",
+  "date": "2026-06-22",
+  "task": "SWE-pylint-dev__pylint-7080",
+  "base_commit": "3c5eca2ded3dd2b59ebaf23eb289453b5d2930f0",
+  "worker": {
+    "agent_id": "019eed53-895a-7041-9961-a42c9c9ed222",
+    "nickname": "Locke",
+    "mode": "native_codex_worker",
+    "atomic_tools_allowed": false,
+    "hidden_grader_allowed_in_worker": false
+  },
+  "workdir": "/private/tmp/swe/round/R031gate/pylint/native",
+  "changed_files": ["pylint/lint/expand_modules.py"],
+  "diff_stat": {
+    "files": 1,
+    "insertions": 4,
+    "deletions": 0,
+    "changed_lines": 4,
+    "runtime_changed_lines": 4,
+    "test_changed_lines": 0
+  },
+  "local_worker_validation": [
+    {
+      "command": "temporary repro with pylint --recursive=y src and ignore-paths = [\"^src/gen/.*$\"] before fix",
+      "result": "reproduced failure; exit 16; reported src/gen/__init__.py"
+    },
+    {
+      "command": "same temporary repro after fix",
+      "result": "exit 0; no lint output from src/gen"
+    },
+    {
+      "command": "/tmp/pylint7080-native-venv/bin/python -m compileall -q pylint/lint/expand_modules.py",
+      "result": "exit 0"
+    },
+    {
+      "command": "git diff --check",
+      "result": "exit 0"
+    }
+  ],
+  "external_gate": {
+    "command": "SWE_CONTAINER=pylint7080_warm_native SWE_P2P_SAMPLE=15 core/agent/atomic-full-ab/local-loop/swe_docker_gate.sh /private/tmp/swe/round/R031gate/pylint/native core/agent/atomic-full-ab/local-loop/tasks/SWE-pylint-dev__pylint-7080",
+    "exit_code": 1,
+    "tests": 16,
+    "pass": 15,
+    "fail": 1,
+    "failing_test": "tests/test_self.py::TestRunTC::test_ignore_path_recursive_current_dir",
+    "summary": "1 failed, 15 passed, 1 warning"
+  },
+  "semantic_result": {
+    "site": "pylint/lint/expand_modules.py::_is_ignored_file",
+    "topology": "canonical predicate / path-normalizer site, not caller-side file filtering",
+    "patch_summary": "Directory elements are also matched against ignore-paths with a trailing separator.",
+    "remaining_failure": "Still misses the hidden current-dir anchored path normalization semantics."
+  },
+  "verdict": {
+    "gate_pass": false,
+    "dominance": false,
+    "comparison_note": "Native found the better canonical predicate site and used a smaller runtime diff than Atomic R031, but the hidden gate still failed. This is a topology/perception advantage to absorb, not a correct solution."
+  }
+}
