@@ -21,11 +21,13 @@ The result JSON records EVERYTHING (loop manual step 3): gate pass, steps, per-t
 call counts, edits applied, invalid-states-prevented (governed refusals = a GOOD
 atomic property), reads, diff surface (lines), tokens, wall time, and a transcript.
 """
-import json, os, re, sys, time, argparse, subprocess, urllib.request
+import json, os, re, sys, time, argparse, subprocess, socket, urllib.request
 from pathlib import Path
 
 API_KEY = os.environ["DEEPSEEK_API_KEY"]
 MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-pro")
+DEEPSEEK_CALL_TIMEOUT_S = max(1.0, float(os.environ.get("DEEPSEEK_CALL_TIMEOUT_S", "120")))
+DEEPSEEK_TOTAL_TIMEOUT_S = max(DEEPSEEK_CALL_TIMEOUT_S, float(os.environ.get("DEEPSEEK_TOTAL_TIMEOUT_S", "240")))
 NODE = os.environ.get("ATOMIC_NODE_BIN", "node")
 ATOMIC_CALL = os.environ.get(
     "ATOMIC_CALL",
@@ -33,6 +35,14 @@ ATOMIC_CALL = os.environ.get(
 )
 
 # ── DeepSeek client (reasoning model: content may be empty when tool_calls present) ──
+class DeepSeekModelCallTimeout(TimeoutError):
+    pass
+
+
+def _is_timeout_error(error):
+    return isinstance(error, (TimeoutError, socket.timeout)) or "timed out" in str(error).lower()
+
+
 def deepseek(messages, tools):
     payload = {"model": MODEL, "messages": messages,
                "temperature": float(os.environ.get("DEEPSEEK_TEMP", "0")),
@@ -42,15 +52,31 @@ def deepseek(messages, tools):
     body = json.dumps(payload).encode()
     req = urllib.request.Request("https://api.deepseek.com/v1/chat/completions", data=body,
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {API_KEY}"})
+    started = time.monotonic()
     for attempt in range(5):
+        remaining_s = DEEPSEEK_TOTAL_TIMEOUT_S - (time.monotonic() - started)
+        if remaining_s <= 0:
+            raise DeepSeekModelCallTimeout(
+                f"model_call_timeout total>{DEEPSEEK_TOTAL_TIMEOUT_S:.1f}s attempts={attempt}"
+            )
+        timeout_s = max(1.0, min(DEEPSEEK_CALL_TIMEOUT_S, remaining_s))
         try:
-            with urllib.request.urlopen(req, timeout=300) as r:
+            with urllib.request.urlopen(req, timeout=timeout_s) as r:
                 d = json.loads(r.read())
                 return d["choices"][0]["message"], d.get("usage", {})
         except Exception as e:
             if attempt == 4:
+                if _is_timeout_error(e):
+                    raise DeepSeekModelCallTimeout(
+                        f"model_call_timeout total>{DEEPSEEK_TOTAL_TIMEOUT_S:.1f}s attempts={attempt + 1}"
+                    ) from e
                 raise
-            time.sleep(3 * (attempt + 1))
+            sleep_s = min(3 * (attempt + 1), max(0.0, DEEPSEEK_TOTAL_TIMEOUT_S - (time.monotonic() - started)))
+            if sleep_s <= 0:
+                raise DeepSeekModelCallTimeout(
+                    f"model_call_timeout total>{DEEPSEEK_TOTAL_TIMEOUT_S:.1f}s attempts={attempt + 1}"
+                ) from e
+            time.sleep(sleep_s)
 
 
 # ── atomic hands: dispatch one tool through atomic-call against the local workdir ──
@@ -399,7 +425,8 @@ def main():
     metrics = {"arm": "atomic-cli-deepseek-v4-pro", "task": args.task, "workdir": workdir,
                "steps": 0, "tool_calls": {}, "edits_applied": 0, "invalid_states_prevented": 0,
                "reads": 0, "body_context_reads": 0, "run_tests_calls": 0, "tokens": 0, "gate_pass": False,
-               "diff_lines": 0, "wall_s": 0.0, "transcript": [], "reasoning_trace": []}
+               "diff_lines": 0, "wall_s": 0.0, "capability_gap": None, "last_error_type": None,
+               "transcript": [], "reasoning_trace": []}
     t0 = time.time()
 
     survey = ("Be efficient with calls: to understand the code, FIRST call atomic_survey(glob) once to "
@@ -547,7 +574,13 @@ def main():
                 forced = True
         try:
             msg, usage = deepseek(messages, step_tools)
+        except DeepSeekModelCallTimeout as e:
+            metrics["capability_gap"] = "model_call_liveness_timeout"
+            metrics["last_error_type"] = type(e).__name__
+            metrics["transcript"].append(f"s{step} DEEPSEEK-MODEL-CALL-TIMEOUT {str(e)[:200]}")
+            break
         except Exception as e:
+            metrics["last_error_type"] = type(e).__name__
             metrics["transcript"].append(f"s{step} DEEPSEEK-ERROR {str(e)[:200]}")
             break
         metrics["tokens"] += int(usage.get("total_tokens", 0) or 0)
@@ -718,6 +751,23 @@ def main():
                         # perception instead of spending a round-trip re-reading what it just changed.
                         res = res + _post_edit_view(workdir, a.get("file", ""),
                                                     a.get("newText") or a.get("content", ""))
+                        # CLASS-OVERFIX-MULTIPATH (F2, generalist): detect when a FIX-phase edit adds a new
+                        # loop or touches multiple non-adjacent regions (multi-path over-fix). Measured root cause
+                        # of the minimality gap: DeepSeek fixes UNTESTED paths too (early-return + merge) -> 7-8 line
+                        # diffs vs native 2-line single-path. Deliver the over-fix signal as perception in the edit
+                        # receipt so the model self-corrects toward the smallest test-passing mutation. Generalist
+                        # (any lang with loops; diff-hunk count is lang-agnostic). Fix phase only.
+                        if not green_minimize_active:
+                            _al = sum(1 for _l in after.splitlines()
+                                      if _l.startswith("+") and not _l.startswith("+++")
+                                      and re.match(r"\+\s*(for|while)\s", _l))
+                            _hk = after.count("\n@@") + (1 if after.startswith("@@") else 0)
+                            if _al > 0 or _hk >= 2:
+                                res = (res + f"\n[over-fix check] this edit added {_al} new loop(s) (for/while) "
+                                       f"and touched {_hk} separate region(s). The failing tests likely exercise ONE "
+                                       f"path; if a strictly smaller single-path / single-region fix keeps the gate "
+                                       f"green, prefer it (the minimizer re-checks after run_tests).")
+                                metrics["transcript"].append(f"s{step} OVER-FIX signal: added_loops={_al} hunks={_hk}")
                     elif any(m in res.lower() for m in REFUSAL_MARKERS):
                         metrics["invalid_states_prevented"] += 1
                         if fn == "atomic_replace" and ("not found" in res.lower() or "not unique" in res.lower() or "not unique" in res.lower()):

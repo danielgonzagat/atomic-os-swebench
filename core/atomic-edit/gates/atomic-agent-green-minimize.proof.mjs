@@ -108,6 +108,17 @@ record('CLASS-DOCSTRING-SURFACE-MINIMALITY (F1b): deterministic strip of agent-A
     traceMarker: source.includes('DETERMINISTIC comment-strip'),
     pyScoped: source.includes('not _cf.endswith(".py")'),
   });
+record('CLASS-OVERFIX-MULTIPATH (F2): fix-phase edits that add a loop or touch multiple regions are flagged in the edit receipt (over-fix perception)',
+  source.includes('CLASS-OVERFIX-MULTIPATH (F2, generalist)') &&
+  source.includes('OVER-FIX signal: added_loops=') &&
+  source.includes('[over-fix check] this edit added') &&
+  source.includes('if not green_minimize_active:'),
+  {
+    marker: source.includes('CLASS-OVERFIX-MULTIPATH (F2, generalist)'),
+    trace: source.includes('OVER-FIX signal: added_loops='),
+    receipt: source.includes('[over-fix check] this edit added'),
+    fixPhaseOnly: source.includes('if not green_minimize_active:'),
+  });
 const py = spawnSync('python3', ['-m', 'py_compile', agentPath], { cwd: repoRoot, encoding: 'utf8', timeout: 20000, maxBuffer: 1024 * 1024 });
 record('local_atomic_agent.py remains valid Python after green-minimize update', py.status === 0, { status: py.status, signal: py.signal, stderr: py.stderr });
 
