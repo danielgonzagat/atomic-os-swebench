@@ -1462,6 +1462,17 @@ def main():
                         fb = _selector_fallback(workdir, a.get("path", ""), a.get("selector"))
                         if fb:
                             res = fb
+                    # CLASS-CALLERS-BLIND-TO-INHERITANCE (WFB+2): atomic_callers (call-graph) doesn't model class
+                    # base-list edges, so a base class with subclasses reports "0 callers" (sklearn _BaseRidgeCV → 0,
+                    # but RidgeCV/RidgeClassifierCV subclass it) → the model fell back to a manual regex grep. When
+                    # callers returns 0, auto-grep subclass declarations + bare usages so the model gets the edges
+                    # the symbol graph missed. Generalist (any OO language with `class X(Base)`).
+                    if fn == "atomic_callers" and re.search(r"\b0 (time|caller|use)", res):
+                        _nm = a.get("name") or a.get("symbol") or ""
+                        if _nm:
+                            _sub, _ = atomic_call(workdir, "atomic_grep", {"pattern": rf"(class\s+\w+\s*\([^)]*\b{re.escape(_nm)}\b|\b{re.escape(_nm)}\b)"})
+                            if _sub and "0" not in _sub[:30]:
+                                res = res + f"\n[inheritance check] atomic_callers misses class base-list edges; grep for `{_nm}` usages (incl subclass declarations):\n" + _sub[:1500]
                     # record covered interval for line-range reads (CLASS-OVERLAPPING-REREAD)
                     if fn == "atomic_read" and (a.get("startLine") or a.get("endLine")) and "error" not in res[:60].lower():
                         _iv_record(a.get("path", ""), int(a.get("startLine") or 1), int(a.get("endLine") or (int(a.get("startLine") or 1) + 80)))
