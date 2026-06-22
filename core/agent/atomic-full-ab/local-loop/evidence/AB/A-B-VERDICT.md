@@ -74,3 +74,17 @@ demolitions fixed sympy — they did not, on these runs.
   model-bound weakness. The neuro-symbolic tools lift DeepSeek to match Claude on most repos but not on sympy.
 - Honesty held throughout: every win/tie/LOSS named, over-claims self-corrected, own infra bug caught, model-bound residual
   recorded. 6 demolitions from real losses (R052,R053,R055,R056 deployed; R057 planned). No claim beyond the official numbers.
+
+## ★★★ CRITICAL CORRECTION — atomic's INTERNAL GATE was BROKEN in R3-R7 (my grep bug); gate-ON advantage was OFF
+Discovered: the sed-derived A/B scripts (R3-R7, all generated from the pylint-8898 template) kept the grep `sweb.*pylint.*<id>`
+— PYLINT, not the actual repo (sympy/sklearn). So `$IMG` was empty → no gate container → INFRA_FAIL on every internal run_tests.
+EVIDENCE: R5/R7 (sklearn, RESOLVED officially) had INFRA_FAIL 6/10 in the internal gate — the atomic resolved by EDITING BLIND
+(16-18 edits, NO gate feedback); the OFFICIAL harness (its own correct container) scored them 1. R3/R4/R6 (sympy) likewise had
+broken internal gates → the atomic flailed WITHOUT feedback. So the atomic's CORE ADVANTAGE — gate-ON (iterate on test feedback)
+— was OFF for R3-R7. Only R1 (original pylint-8898 script, CORRECT grep) had a working gate → R1 win is valid + reflects real
+gate-ON. IMPLICATION: the R3-R7 OUTCOMES (official scores: R5/R7 tie, R2/R3/R4/R6 tie/loss) are valid as numbers BUT reflect the
+atomic WITHOUT its gate-ON edge (blind editing). The atomic's TRUE capability (working gate-ON) on R3-R7 is UNTESTED — it may do
+BETTER with feedback (the gate could catch errors + steer to completion, possibly flipping ties/losses). This is ANOTHER self-
+caught infra bug (3rd: shared-container, then wrong-image-grep) — the doctrine's rigor: verify the harness before trusting the
+number. RE-RUNNING with FIXED grep (working gate): FIXED R4 (p16597fix) launched; R3/R6 + R5/R7 confirmation needed. The prior
+'sympy weakness' + 'atomic=native+rare-edge' verdict is now SUSPECT for R3-R7 (broken gate) — must re-validate with working gate.
