@@ -1346,7 +1346,7 @@ def main():
                 # CLASS-OVERLAPPING-REREAD (WFB WALL-1): suppress a line-range read already ≥85% covered by prior
                 # reads of the same unedited file. Counts as a redundant read (feeds the force-edit signal) but
                 # does NOT re-return content — the model has it above; this kills the overlapping-reread token tax.
-                _suppress_note = None
+                _suppress_note = None; _sf, _ss, _se = "", 0, 0
                 if fn == "atomic_read" and (a.get("startLine") or a.get("endLine")):
                     _sf = a.get("path", ""); _ss = int(a.get("startLine") or 1)
                     _se = int(a.get("endLine") or (_ss + 80))
