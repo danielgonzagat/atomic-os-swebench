@@ -719,6 +719,9 @@ def main():
     READ_HARD_CAP = 40             # absolute breadth cap (even pure new-target reads stop here — runaway guard)
     EDIT_TEST_NAMES = {"atomic_replace", "atomic_create", "run_tests"}
     MINIMIZE_NAMES = {"atomic_replace", "run_tests"}
+    GREEN_MINIMIZE_MAXSTEP_RESERVE = 3  # CLASS-GREEN-AT-MAXSTEP-NO-MINIMIZE: first green at max_steps still gets
+    # a tiny post-green-only budget for GREEN-MINIMIZE. The reserve is inaccessible unless green minimization is
+    # pending/active, so red/no-green runs still stop at max_steps and no gate is weakened.
     READ_FNS = {"atomic_survey", "atomic_read_many", "atomic_outline", "atomic_read", "atomic_grep", "atomic_callers"}
     def _read_target_key(_fn, _a):  # what this read is ABOUT — re-reading the same key = looping, new key = breadth
         return (_fn, str(_a.get("path") or _a.get("file") or _a.get("glob") or _a.get("name") or ""),
@@ -726,8 +729,13 @@ def main():
     def _redundant_reads():  # reads that did NOT surface a new target = the real paralysis signal
         return max(0, reads_since_edit - len(distinct_since_edit))
 
-    for step in range(1, args.max_steps + 1):
+    for step in range(1, args.max_steps + GREEN_MINIMIZE_MAXSTEP_RESERVE + 1):
+        _pending_green_minimize = (last_pass and not green_minimize_prompted and not NO_GATE)
+        if step > args.max_steps and not (green_minimize_active or _pending_green_minimize):
+            break
         metrics["steps"] = step
+        if step > args.max_steps:
+            metrics["transcript"].append(f"s{step} GREEN-AT-MAXSTEP reserve active (post-green minimization)")
         step_tools = active_tools
         if os.environ.get("ATOMIC_TOPOLOGY_TURN", "1") == "1" and metrics["edits_applied"] == 0 and metrics["body_context_reads"] > 0 and not pre_edit_topology_prompted:
             # CLASS-TOPOLOGY-WITHHOLD (R022, generalist): the old turn DEMANDED "text only, no tool call" and
@@ -1197,7 +1205,7 @@ def main():
             os.makedirs(_corpus_dir, exist_ok=True)
             _corpus_file = os.path.join(_corpus_dir, "repair-triples.jsonl")
             _triple = {"ts": int(time.time()),
-                "task": os.path.basename(args.task).replace("PROBLEM.md", "").replace("TASK.md", ""),
+                "task": os.path.basename(os.path.dirname(args.task)),
                 "diff_lines": metrics["diff_lines"],
                 "files_changed": len([l for l in d.splitlines() if l.startswith("diff --git ")]),
                 "diff_sha256": hashlib.sha256(d.encode()).hexdigest()[:16],
