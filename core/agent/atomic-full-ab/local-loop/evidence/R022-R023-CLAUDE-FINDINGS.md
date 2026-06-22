@@ -737,3 +737,19 @@ actual target, still blocked on funds. What IS proven by number: weight-as-proac
 (0/3 arms); reactive confrontation does (2/2). The substrate's KNOWLEDGE was correct (normpath = gold) but ADVICE-delivery
 is the weak link — consistent with the directive's "proof enforces" over "advice", but the WEIGHT mechanism as built
 (prompt injection) is NOT the lifting force. Loop worked: isolated, self-corrected, did not credit the weight falsely.
+
+## ★★★ CONFOUND EXPOSED — native-Claude lift results are EXPLORATION-VARIANCE noise, not weight/gate effects
+A 4th native arm (NO weight, NO gate, one-shot) found the GOLD normpath fix DIRECTLY and resolved (1, official) — but
+it explored 35 tool_calls vs the earlier arms' 6-13. Decomposition by EXPLORATION DEPTH (official, pylint-7080):
+shallow-one-shot-no-weight=0 (caller fix) | shallow+2-weights=0 (caller fix) | DEEP-one-shot-no-weight/gate=1 (gold) |
+shallow+reactive-diagnostic=1 (gold). CONCLUSION: native-Claude pylint-7080 resolution is driven by EXPLORATION DEPTH,
+NOT by the weight or the gate. This CONFOUNDS + INVALIDATES my single-run weight/gate claims: the "reactive feedback
+lifts" result was just forcing a SECOND, deeper look — which exploration variance ALONE also produces (the deep one-shot
+got there with no feedback). Single runs cannot isolate weight/gate effects; variance dominates. SELF-CORRECTION (2nd
+this thread): do NOT conclude "gate lifts / weight doesn't" from single runs — both arms' outcomes are within the noise
+band of exploration depth. ROBUST finding only: native Claude CAN resolve pylint-7080 one-shot (deep explore) and CAN
+fail (shallow) — weight/gate did not cleanly move this. IMPLICATION: the directive's weight-substrate thesis needs a
+model with a RELIABLE baseline gap (DeepSeek one-shot = 0 edits EVERY time = clean failing baseline); native Claude's gap
+is variance-driven, confounding the test. The clean weak-model lift (DeepSeek + weight, N-sampled resolution RATES) is the
+ONLY rigorous test — blocked on funds. The multi-sampling discipline (N≥3, rates not single runs) applies: I violated it
+on native Claude and the confound caught me. Loop worked: exposed my own confound by number, refused the noisy conclusion.
