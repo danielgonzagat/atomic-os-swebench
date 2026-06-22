@@ -610,3 +610,12 @@ step-capped (~30 steps/600s, too few for complex instances). → fresh gate-ON-R
 in this harness now. Gate-ON value stays PROVEN on pylint-7080/8898 (ran earlier when the env allowed long bg runs).
 DEFINITIVE: verdict complete on 2-instance gate-ON proof; 3rd+ datapoints need a stable long-run environment (user-
 side). Loop holds for that. Honest by-number arc fully recorded across findings + SOTA-EVIDENCE + master memory.
+
+## ★ INFRA DIAGNOSIS CORRECTED (2nd self-correction) — it was CO-SESSION CONTENTION, not harness-kill
+After the co-session (R057/R058) finished + freed Docker, a fresh BACKGROUND gate-ON pytest-10356 PROGRESSES (4
+steps/40s, full log shows ATOMIC s2,s3,s4...). So the earlier "harness kills long node+docker nohup tasks" claim
+was WRONG (FALSIFIED) — the real cause was the concurrent co-session contending Docker (gate calls hung/slow → 0
+edits). Now unblocked → 3rd gate-ON datapoint IS producible. Running pytest-10356 gate-ON (max-steps 70) → will
+validate the feedback-disambiguation prediction: does test feedback steer the model from get_unpacked_marks (wrong)
+toward store_mark (gold)? Auto-scores official. (2nd time this session I falsified my own infra/mechanism claim by
+testing it — honesty discipline.)
