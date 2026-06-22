@@ -588,3 +588,14 @@ INFRA-BLOCKED, not atomic-limited. The gate-ON VALUE is already PROVEN by number
 fail→gate-ON-resolve, official; pylint-8898 ~71% N>3) — earlier this session when the env/harness behaved. ACCEPTING
 the 2-instance gate-ON proof as the honest conclusion. The verdict stands: atomic gate-ON resolves hard instances
 where one-shot fails (proven); one-shot weak-on-hard (1/5); edit-economy/process-economy real but ≠ Pass@1.
+
+## ★ HONEST SELF-CORRECTION (mechanism check falsified part of my own finding)
+Checked the pytest-10356 one-shot transcript to validate my claim "the conclusion-latch may have LOCKED the wrong-
+location diagnosis." RESULT: conclusion-latch/convergence nudges fired 0× on pytest-10356 — they did NOT cause it.
+Further, the model's reasoning DID consider store_mark (the GOLD location) at steps 2,3,4,5,7 alongside get_unpacked_
+marks (steps 2-10) — it CONSIDERED THE RIGHT PLACE and CHOSE WRONG. So the true mechanism is NOT "commit-fast nudges
+locked an early-wrong diagnosis" (FALSIFIED) — it is "ONE-SHOT can't disambiguate two plausible fix-locations without
+test feedback." This (a) CORRECTS my over-claim (don't weaken the latch — it wasn't the culprit), and (b) STRENGTHENS
+the gate-ON conclusion: test feedback (get_unpacked_marks fix → test still red → try store_mark) is exactly what
+disambiguates. The broader finding stands (atomic one-shot fails hard via scope/wrong-location/completeness; gate-ON
+is the value) but the MECHANISM is feedback-absence, not my-nudges. Falsifiability discipline applied to my OWN finding.
