@@ -1057,6 +1057,8 @@ def main():
 
     last_pass = False
     last_green_diff = None   # CLASS-GREEN-THEN-BROKE: the best gate-green diff reached (restored at finalize if broken)
+    best_red_diff = None  # CLASS-RED-BEST-CANDIDATE-RESTORE: best gate-tested red diff by (fail_count, diff_surface)
+    best_red_score = None
     _scope_steer_fired = False   # CLASS-SCOPE-FIXATION-EDITCOUNT (R055b): one-shot scope-expansion nudge by edit count
     read_coverage = {}       # CLASS-OVERLAPPING-REREAD (WFB WALL-1): file -> list of (start,end) line ranges already returned
     suppress_counts = {}     # CLASS-COMPACTION-SUPPRESS-DEADLOCK (WFB+2): per-target suppression count — re-serve full on 2nd ask (F3 likely evicted it)
@@ -1658,6 +1660,14 @@ def main():
                         red_gate_anchor_reads = 0
                         red_gate_anchor_read_keys.clear()
                         red_gate_quick_checks = 0
+                        _red_diff = git_diff(workdir)
+                        if _red_diff.strip():
+                            _red_score = (nf_, diff_lines(_red_diff))
+                            if best_red_score is None or _red_score < best_red_score:
+                                best_red_score = _red_score
+                                best_red_diff = _red_diff
+                                metrics["transcript"].append(
+                                    f"s{step} RED-BEST candidate captured (fail={nf_}, diff_lines={_red_score[1]})")
                         _consec_red += 1
                         diagnostics = [
                             "[diagnose] The gate is red for your current non-empty diff. Do not read broadly or "
@@ -2077,6 +2087,23 @@ def main():
                         metrics["transcript"].append("GREEN-THEN-BROKE: restore did not re-green; recorded red honestly")
             except Exception as _e:
                 metrics["transcript"].append(f"GREEN-THEN-BROKE restore error: {str(_e)[:120]}")
+        # CLASS-RED-BEST-CANDIDATE-RESTORE: if no green was ever proven, still emit the best
+        # gate-tested red candidate instead of the latest repair churn. This never turns red green;
+        # it only improves the evidence patch surface for official scoring and diagnosis.
+        if not final_pass and best_red_diff and best_red_diff.strip():
+            try:
+                subprocess.run(["git", "checkout", "--", "."], cwd=workdir, capture_output=True)
+                subprocess.run(["git", "clean", "-fdq"], cwd=workdir, capture_output=True)
+                ap = subprocess.run(["git", "apply"], cwd=workdir, input=best_red_diff, capture_output=True, text=True)
+                if ap.returncode == 0:
+                    _best_fail = best_red_score[0] if best_red_score else "unknown"
+                    _best_lines = best_red_score[1] if best_red_score else diff_lines(best_red_diff)
+                    metrics["transcript"].append(
+                        f"RED-BEST-CANDIDATE: restored best red diff (fail={_best_fail}, diff_lines={_best_lines}); final remains RED")
+                else:
+                    metrics["transcript"].append("RED-BEST-CANDIDATE: restore failed; keeping latest red diff")
+            except Exception as _e:
+                metrics["transcript"].append(f"RED-BEST-CANDIDATE restore error: {str(_e)[:120]}")
         metrics["gate_pass"] = final_pass
     d = git_diff(workdir)
     metrics["diff_lines"] = diff_lines(d)

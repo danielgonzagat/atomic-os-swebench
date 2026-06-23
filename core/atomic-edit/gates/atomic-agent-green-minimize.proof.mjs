@@ -582,6 +582,27 @@ record('CLASS-RED-GATE-QUICKCHECK-REPAIR-BUDGET: under red gate, quick_check is 
     gatePrecedence: source.includes('Local snippets cannot override the red gate'),
     resets: (source.match(/red_gate_quick_checks = 0/g) || []).length,
   });
+record('CLASS-RED-BEST-CANDIDATE-RESTORE: when no green is reached, final output restores the best gate-tested red candidate by fail-count and diff surface without claiming green',
+  source.includes('CLASS-RED-BEST-CANDIDATE-RESTORE') &&
+  source.includes('best_red_diff = None') &&
+  source.includes('best_red_score = None') &&
+  source.includes('_red_score = (nf_, diff_lines(_red_diff))') &&
+  source.includes('if best_red_score is None or _red_score < best_red_score:') &&
+  source.includes('RED-BEST candidate captured') &&
+  source.includes('if not final_pass and best_red_diff and best_red_diff.strip():') &&
+  source.includes('RED-BEST-CANDIDATE: restored best red diff') &&
+  source.includes('final remains RED') &&
+  source.includes('metrics["gate_pass"] = final_pass'),
+  {
+    marker: source.includes('CLASS-RED-BEST-CANDIDATE-RESTORE'),
+    state: source.includes('best_red_diff = None') && source.includes('best_red_score = None'),
+    score: source.includes('_red_score = (nf_, diff_lines(_red_diff))'),
+    monotonicUpdate: source.includes('if best_red_score is None or _red_score < best_red_score:'),
+    captureTrace: source.includes('RED-BEST candidate captured'),
+    finalGuard: source.includes('if not final_pass and best_red_diff and best_red_diff.strip():'),
+    restoreTrace: source.includes('RED-BEST-CANDIDATE: restored best red diff'),
+    noFalseGreen: source.includes('final remains RED') && source.includes('metrics["gate_pass"] = final_pass'),
+  });
 const py = spawnSync('python3', ['-m', 'py_compile', agentPath], { cwd: repoRoot, encoding: 'utf8', timeout: 20000, maxBuffer: 1024 * 1024 });
 record('local_atomic_agent.py remains valid Python after green-minimize update', py.status === 0, { status: py.status, signal: py.signal, stderr: py.stderr });
 

@@ -2340,3 +2340,18 @@ Next exact step: implement/prove the red-gate quick_check budget, then run R078 
 - Active red-gate policy now allows bounded unique fresh repair reads and only one quick_check per failed diff before requiring an edit.
 
 Next exact step: run R078 Atomic-only on frozen Level 4 `sympy__sympy-20438` against observed `Cicero`, then official-score and compare. Do not rerun native.
+
+### Codex-paired track pointer update - 2026-06-23 R078 official red; quickcheck loop reduced, red-patch bloat exposed
+- R078 Atomic official result: patch applied, `completed=1`, `resolved=0`, F2P `0/2`, P2P `93/93`, `empty_patch=0`, `errors=0`; summary `atomic-gateon-R078.sympy20438_R078_atomic_gateON_x86_forced.json`.
+- R078 local metrics: `steps=80`, `edits=7`, `reads=48`, `body_reads=31`, `run_tests=6`, `quick_check=14`, `tokens=1,688,164`, `wall=1915.9s`.
+- Seq595 worked mechanically: red-gate quick_check was allowed once and refused afterward. But the final red patch bloated to `49` patch-file lines and did not improve official correctness.
+- New class: `CLASS-RED-BEST-CANDIDATE-RESTORE`; preserve the lowest-fail, smallest-surface red candidate and restore it if no green candidate is reached.
+
+Next exact step: implement/prove best-red-candidate restore, then run R079 Atomic-only on the same snapshot against frozen `Cicero`.
+
+### Codex-paired track pointer update - 2026-06-23 seq596 best-red candidate restore active
+- Sequence `596` promoted `CLASS-RED-BEST-CANDIDATE-RESTORE` via `atomic_expand_self`; candidate `real-self-expansion-candidate:814eceb61e5df51c75ddbb4b812e0b6cf88c3f3052aabd28d89395047fcf4be5`, receipt `8616d5d85bb8bcf82d0cd983a7a35e42175cd30ed6f0276bd0e31e330a937f7b`, archive entry `c2434b6b4abf1f96a89d8ad15b5121d1bbbb3525d200ceef81ed74744f91c02a`.
+- Active behavior: red candidates are scored by `(local_fail_count, diff_surface)` at every red `run_tests`; if the round ends red, the final patch restores the best gate-tested red candidate and explicitly leaves the result red (`final remains RED`). This closes the R078 red-patch-bloat wall without weakening correctness.
+- Fresh verification passed: marker RED before edit, Python compile, `atomic-agent-green-minimize.proof.mjs --json`, and `git diff --check`.
+
+Next exact step: run R079 Atomic-only on frozen Level 4 `sympy__sympy-20438` against observed `Cicero`. Do not rerun native.
