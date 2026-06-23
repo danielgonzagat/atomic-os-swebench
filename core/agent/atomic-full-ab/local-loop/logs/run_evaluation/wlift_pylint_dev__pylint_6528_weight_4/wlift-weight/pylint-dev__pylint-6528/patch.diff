@@ -1,0 +1,32 @@
+diff --git a/pylint/lint/expand_modules.py b/pylint/lint/expand_modules.py
+index b20cd873c..0a707420a 100644
+--- a/pylint/lint/expand_modules.py
++++ b/pylint/lint/expand_modules.py
+@@ -64,9 +64,26 @@ def expand_modules(
+         if (
+             basename in ignore_list
+             or _is_in_ignore_list_re(os.path.basename(something), ignore_list_re)
+-            or _is_in_ignore_list_re(something, ignore_list_paths_re)
++            or any(
++                pattern.search(something) for pattern in ignore_list_paths_re
++            )
+         ):
+             continue
++        # For a file discovered inside a recursively-expanded directory,
++        # also check that none of its parent directory components match
++        # the ignore patterns (the ignore-list / ignore-patterns match
++        # against basenames, and ignore-paths matches against full paths).
++        path_components = os.path.normpath(something).split(os.sep)
++        skip = False
++        for component in path_components[:-1]:
++            if component in ignore_list:
++                skip = True
++                break
++            if _is_in_ignore_list_re(component, ignore_list_re):
++                skip = True
++                break
++        if skip:
++            continue
+         module_path = get_python_path(something)
+         additional_search_path = [".", module_path] + path
+         if os.path.exists(something):

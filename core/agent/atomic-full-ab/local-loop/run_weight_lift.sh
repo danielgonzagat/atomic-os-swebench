@@ -8,7 +8,7 @@ set -uo pipefail
 HERE="/Users/danielpenin/atomic-os-swebench/core/agent/atomic-full-ab/local-loop"; cd "$HERE"
 ID="${1:-pylint-dev__pylint-7080}"; N="${2:-3}"
 DRIVER="$HERE/local_atomic_agent.py"
-WEIGHTS="$HERE/.corpus/weights.jsonl"
+WEIGHTS="${3:-$HERE/.corpus/weights.jsonl}"
 TD="$HERE/tasks/SWE-$ID"
 PRISTINE="/private/tmp/swe/suite/$ID/pristine"
 OUTDIR="$HERE/evidence/WLIFT"; mkdir -p "$OUTDIR"

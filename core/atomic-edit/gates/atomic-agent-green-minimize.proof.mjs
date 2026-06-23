@@ -99,16 +99,18 @@ record('CLASS-GREEN-MINIMIZE-NOSHRINK (F1): a non-shrinking minimize edit is rej
     shrinkGuard: source.includes('minimized_lines < green_minimize_start_lines'),
     rejectMarker: source.includes('GREEN-MINIMIZE REJECTED (did not shrink'),
   });
-record('CLASS-GREEN-MINIMIZE-DECLINE-COST (F1c): DECLINE forced re-prompt is skipped only after comment-only deterministic reduction',
+record('CLASS-GREEN-MINIMIZE-DECLINE-COST (F1c): DECLINE forced re-prompt is skipped only after comment-only deterministic reduction on non-helper surfaces',
   source.includes('green_minimize_comment_surface_reduced = False') &&
   source.includes('green_minimize_comment_surface_reduced = True  # F1c: comment-only deterministic reduction happened') &&
-  source.includes('and not green_minimize_comment_surface_reduced') &&
+  source.includes('green_minimize_comment_reduction_satisfies_decline = green_minimize_comment_surface_reduced and not green_minimize_helper_surface') &&
+  source.includes('and not green_minimize_comment_reduction_satisfies_decline') &&
   !/if _f2b_kept:[\s\S]{0,360}green_minimize_comment_surface_reduced = True/.test(source) &&
   !/if _f4_kept:[\s\S]{0,300}green_minimize_comment_surface_reduced = True/.test(source),
   {
     init: source.includes('green_minimize_comment_surface_reduced = False'),
     setOnCommentReduction: source.includes('green_minimize_comment_surface_reduced = True  # F1c: comment-only deterministic reduction happened'),
-    guardSkip: source.includes('and not green_minimize_comment_surface_reduced'),
+    nonHelperOnly: source.includes('green_minimize_comment_reduction_satisfies_decline = green_minimize_comment_surface_reduced and not green_minimize_helper_surface'),
+    guardSkip: source.includes('and not green_minimize_comment_reduction_satisfies_decline'),
     f2bDoesNotSkip: !/if _f2b_kept:[\s\S]{0,360}green_minimize_comment_surface_reduced = True/.test(source),
     f4DoesNotSkip: !/if _f4_kept:[\s\S]{0,300}green_minimize_comment_surface_reduced = True/.test(source),
   });
@@ -260,6 +262,17 @@ record('CLASS-GREEN-MINIMIZE-HELPER-STATE-MACHINE-SURFACE: helper/state-machine 
     trace: source.includes('GREEN-MINIMIZE helper/state-machine surface detected'),
     boundedLimit: source.includes('green_minimize_refusal_limit = 2 if green_minimize_helper_surface else 1'),
     prompt: source.includes('Try ONE helper-collapse atomic_replace'),
+  });
+record('CLASS-GREEN-MINIMIZE-HELPER-REFUSAL-SURVIVES-COMMENT-STRIP: helper/state-machine green diffs still refuse zero-edit STOP after deterministic comment stripping',
+  source.includes('CLASS-GREEN-MINIMIZE-HELPER-REFUSAL-SURVIVES-COMMENT-STRIP') &&
+  source.includes('green_minimize_comment_reduction_satisfies_decline = green_minimize_comment_surface_reduced and not green_minimize_helper_surface') &&
+  source.includes('and not green_minimize_comment_reduction_satisfies_decline') &&
+  source.includes('GREEN-MINIMIZE refused-stop -> re-prompt'),
+  {
+    marker: source.includes('CLASS-GREEN-MINIMIZE-HELPER-REFUSAL-SURVIVES-COMMENT-STRIP'),
+    nonHelperOnly: source.includes('green_minimize_comment_reduction_satisfies_decline = green_minimize_comment_surface_reduced and not green_minimize_helper_surface'),
+    refusalGuard: source.includes('and not green_minimize_comment_reduction_satisfies_decline'),
+    refusalTrace: source.includes('GREEN-MINIMIZE refused-stop -> re-prompt'),
   });
 record('CLASS-GREEN-MINIMIZE-INTRA-HUNK-SIBLING-REVERT (F2c): trial-revert line replacement pairs inside a green hunk and keep only smaller gate-green states',
   source.includes('def trial_revert_intra_hunk_line_pairs(workdir, gate):') &&

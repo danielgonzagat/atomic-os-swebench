@@ -1458,7 +1458,11 @@ def main():
                 messages.append({"role": "user", "content": "Now implement that topology with the smallest faithful atomic edit(s)" + _topo_tail})
                 continue
             green_minimize_refusal_limit = 2 if green_minimize_helper_surface else 1
-            if green_minimize_active and green_minimize_edits == 0 and green_minimize_refusals < green_minimize_refusal_limit and not green_minimize_comment_surface_reduced:
+            # CLASS-GREEN-MINIMIZE-HELPER-REFUSAL-SURVIVES-COMMENT-STRIP: stripping comments can satisfy
+            # the decline-cost fast path only for non-helper surfaces. A green diff that still adds a helper/
+            # state-machine loop must attempt the bounded helper-collapse pass before STOP/DONE is accepted.
+            green_minimize_comment_reduction_satisfies_decline = green_minimize_comment_surface_reduced and not green_minimize_helper_surface
+            if green_minimize_active and green_minimize_edits == 0 and green_minimize_refusals < green_minimize_refusal_limit and not green_minimize_comment_reduction_satisfies_decline:
                 green_minimize_refusals += 1
                 metrics["transcript"].append(f"s{step} GREEN-MINIMIZE refused-stop -> re-prompt {green_minimize_refusals}/{green_minimize_refusal_limit} (a smaller equivalent exists)")
                 helper_clause = (

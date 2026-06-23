@@ -1,0 +1,97 @@
+diff --git a/sympy/core/relational.py b/sympy/core/relational.py
+index e2e0b7fbcc..1a8ea3c73a 100644
+--- a/sympy/core/relational.py
++++ b/sympy/core/relational.py
+@@ -311,11 +311,14 @@ def _eval_simplify(self, **kwargs):
+             v = None
+             if dif.is_comparable:
+                 v = dif.n(2)
+-            elif dif.equals(0):  # XXX this is expensive
++            elif hasattr(dif, 'equals') and dif.equals(0):  # XXX this is expensive
+                 v = S.Zero
+             if v is not None:
+                 r = r.func._eval_relation(v, S.Zero)
+             r = r.canonical
++            from sympy.sets.sets import Set
++            if isinstance(dif, Set):
++                return r
+             # If there is only one symbol in the expression,
+             # try to write it on a simplified form
+             free = list(filter(lambda x: x.is_real is not False, r.free_symbols))
+@@ -562,6 +565,9 @@ def _eval_simplify(self, **kwargs):
+         e = super()._eval_simplify(**kwargs)
+         if not isinstance(e, Equality):
+             return e
++        from sympy.sets.sets import Set
++        if isinstance(self.lhs, Set) or isinstance(self.rhs, Set):
++            return e
+         free = self.free_symbols
+         if len(free) == 1:
+             try:
+diff --git a/sympy/sets/handlers/comparison.py b/sympy/sets/handlers/comparison.py
+index 6f7a19fccf..97c2163f63 100644
+--- a/sympy/sets/handlers/comparison.py
++++ b/sympy/sets/handlers/comparison.py
+@@ -40,6 +40,11 @@ def all_in_both():
+     return tfn[fuzzy_and(all_in_both())]
+ 
+ 
++@dispatch(ProductSet, FiniteSet) # type:ignore
++def _eval_is_eq(lhs, rhs): # noqa: F811
++    return fuzzy_and((lhs.is_subset(rhs), rhs.is_subset(lhs)))
++
++
+ @dispatch(ProductSet, ProductSet) # type:ignore
+ def _eval_is_eq(lhs, rhs): # noqa: F811
+     if len(lhs.sets) != len(rhs.sets):
+@@ -49,6 +54,16 @@ def _eval_is_eq(lhs, rhs): # noqa: F811
+     return tfn[fuzzy_and(map(fuzzy_bool, eqs))]
+ 
+ 
++@dispatch(ProductSet, Interval) # type:ignore
++def _eval_is_eq(lhs, rhs): # noqa: F811
++    return False
++
++
++@dispatch(Interval, ProductSet) # type:ignore
++def _eval_is_eq(lhs, rhs): # noqa: F811
++    return False
++
++
+ @dispatch(Set, Basic) # type:ignore
+ def _eval_is_eq(lhs, rhs): # noqa: F811
+     return False
+diff --git a/sympy/sets/sets.py b/sympy/sets/sets.py
+index 3c4aa86e36..a7a8423380 100644
+--- a/sympy/sets/sets.py
++++ b/sympy/sets/sets.py
+@@ -793,7 +793,7 @@ def _contains(self, element):
+ 
+         Passes operation on to constituent sets
+         """
+-        if element.is_Symbol:
++        if getattr(element, 'is_Symbol', False):
+             return None
+ 
+         if not isinstance(element, Tuple) or len(element) != len(self.sets):
+@@ -865,6 +865,20 @@ def __len__(self):
+     def __bool__(self):
+         return all([bool(s) for s in self.sets])
+ 
++    def _eval_is_subset(self, other):
++        if other.is_ProductSet and len(other.sets) == len(self.sets):
++            return fuzzy_and(s.is_subset(o)
++                            for s, o in zip(self.sets, other.sets))
++        if self.is_iterable:
++            return fuzzy_and(other._contains(e) for e in self)
++        return None
++
++    def _eval_is_superset(self, other):
++        if other.is_ProductSet and len(other.sets) == len(self.sets):
++            return fuzzy_and(o.is_subset(s)
++                            for s, o in zip(self.sets, other.sets))
++        return None
++
+ 
+ class Interval(Set, EvalfMixin):
+     """
