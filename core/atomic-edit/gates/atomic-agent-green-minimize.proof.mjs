@@ -622,6 +622,23 @@ record('CLASS-RED-BEST-CANDIDATE-NONTRIVIAL-SEMANTIC: best-red restore never cap
     finalSkipTrace: source.includes('RED-BEST-CANDIDATE: skipped semantic-empty best red diff'),
     restoreStillRed: source.includes('RED-BEST-CANDIDATE: restored best red diff'),
   });
+record('CLASS-RED-BEST-CANDIDATE-BASELINE-GAIN: best-red restore only preserves red candidates that strictly reduce failures versus the task fail floor',
+  source.includes('CLASS-RED-BEST-CANDIDATE-BASELINE-GAIN') &&
+  source.includes('def task_fail_floor(task_file):') &&
+  source.includes('baseline_fail_floor = task_fail_floor(args.task)') &&
+  source.includes('if baseline_fail_floor is None or nf_ < baseline_fail_floor:') &&
+  source.includes('RED-BEST candidate skipped (no baseline failure gain') &&
+  source.includes('best_red_score[0] >= baseline_fail_floor') &&
+  source.includes('RED-BEST-CANDIDATE: skipped non-improving best red diff'),
+  {
+    marker: source.includes('CLASS-RED-BEST-CANDIDATE-BASELINE-GAIN'),
+    helper: source.includes('def task_fail_floor(task_file):'),
+    baselineState: source.includes('baseline_fail_floor = task_fail_floor(args.task)'),
+    captureGuard: source.includes('if baseline_fail_floor is None or nf_ < baseline_fail_floor:'),
+    captureSkipTrace: source.includes('RED-BEST candidate skipped (no baseline failure gain'),
+    finalGuard: source.includes('best_red_score[0] >= baseline_fail_floor'),
+    finalSkipTrace: source.includes('RED-BEST-CANDIDATE: skipped non-improving best red diff'),
+  });
 const py = spawnSync('python3', ['-m', 'py_compile', agentPath], { cwd: repoRoot, encoding: 'utf8', timeout: 20000, maxBuffer: 1024 * 1024 });
 record('local_atomic_agent.py remains valid Python after green-minimize update', py.status === 0, { status: py.status, signal: py.signal, stderr: py.stderr });
 

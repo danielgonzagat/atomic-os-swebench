@@ -2415,6 +2415,17 @@ Next exact step: run R080 Atomic-only on the same frozen `sympy__sympy-20438` sn
 
 Next exact step: run R081 Atomic-only on the same frozen `sympy__sympy-20438` snapshot against observed `Cicero`, with seq599 active. Do not rerun native.
 
+### Codex-paired track pointer update - 2026-06-23 R081 official red; seq600 baseline-gain best-red guard active
+- Active Level 4 frozen task remains SWE-Bench Verified `sympy__sympy-20438`, base `33b47e4bd60e2302e42616141e76285038b724d6`; frozen native baseline remains observed `Cicero`.
+- R081 Atomic local metrics: `gate_pass=false`, `round_invalid=false`, `steps=80`, `edits=4`, `reads=48`, `body_reads=28`, `run_tests=4`, `quick_check=20`, `invalid_states_prevented=11`, `diff_lines=7`, `tokens=1,301,618`, `wall=1118.5s`.
+- R081 official result: patch applied, `resolved=false`, F2P `0/2` (`test_Eq`, `test_issue_19378`), P2P `89/93` with regressions `test_Complement`, `test_product_basic`, `test_boundary_ProductSet_line`, `test_DisjointUnion`; summary `atomic-gateON-R081.R081_sympy20438_atomic.json`, report `logs/run_evaluation/R081_sympy20438_atomic/atomic-gateON-R081/sympy__sympy-20438/report.json`.
+- Root cause mined: seq599 blocked semantic-empty no-ops, but best-red restore still captured a semantic non-empty candidate with local `fail=5` while the clean task fail floor from `meta.json` is `2` (`FAIL_TO_PASS`). That candidate was behaviorally worse than no-patch and reintroduced the same official P2P regressions as R079.
+- Sequence `600` promoted `CLASS-RED-BEST-CANDIDATE-BASELINE-GAIN`: candidate `real-self-expansion-candidate:20195c991b709d836c87be8c24e1f8efa3276a868a5bd118d215049c2bc4f64a`, receipt `408b6e284114747200bdca2a2c6bfbbff716c5b55d572dcf95daa45b6efd56f2`, archive entry `e65c7ec70102e0199f9ef2a060b8f94a6eddc23370af44a3507e1d81fc5873b7`.
+- Active behavior: `task_fail_floor(PROBLEM.md)` reads sibling `meta.json` and returns `len(FAIL_TO_PASS)` when available. Best-red capture now requires `semantic_diff_lines > 0` and, when a floor exists, `nf_ < baseline_fail_floor`; final restore repeats the same non-improving guard.
+- Fresh verification: TDD RED one-off check failed before implementation; after `atomic_expand_self`, `py_compile`, `atomic-agent-green-minimize.proof.mjs --json` (`44/44`), synthetic `task_fail_floor` check, and `git diff --check` passed.
+
+Next exact step: run R082 Atomic-only on the same frozen `sympy__sympy-20438` snapshot against observed `Cicero`, with seq600 active. Do not rerun native.
+
 
 ### Claude WLIFT-2 pylint-6528 — NON-CIRCULAR cross-instance lift = ZERO; strong generalization claim REFUTED by number
 - date: 2026-06-23. The decisive non-circular test: PATH-NORMALIZATION-BEFORE-MATCH + CROSS-FILE-ROOT-CAUSE weights (learned from pylint-7080) applied to the UNSEEN pylint-6528 (same class: --ignore/--ignore-paths/--ignore-patterns not respected in --recursive mode; a DIFFERENT manifestation than pylint-7080). Pulled the pylint-6528 eval image. Same model deepseek-v4-pro one-shot NO_GATE, weight=only variable, N=3 official.
@@ -2433,3 +2444,13 @@ Next exact step (real loop work, my representation to fix): READ-ONLY diagnose W
 - HONEST STANDING: weight-substrate cross-instance generalization remains UNPROVEN (WLIFT-2 = 0). WLIFT-1 (+3/3) was circular. The substrate today is memorization-flavored. The path to the real thesis is concrete (better retrieval ranking + proven-capture of the missing operator class), not a model change.
 
 Next exact step (decision point for the user / next session): EITHER (a) resolve pylint-6528 gate-ON, capture its true class (predicate-not-invoked-in-branch) as a weight, then test that weight on a 3rd unseen instance of that class (the legitimate proven-capture path); OR (b) improve retrieval to rank operators by root-cause-shape fit, not just trigger+proof_n. Both are MY-representation work. Model locked DeepSeek V4 Pro. Do not declare generalization until an UNSEEN-instance lift shows by number.
+
+
+### Claude R080 pylint-6528 gate-ON — RIGHT approach, did NOT resolve (proven-capture path blocked on this instance)
+- date: 2026-06-23. Goal: resolve pylint-6528 gate-ON to capture its TRUE class (predicate-not-invoked-in-recursive-branch) for the weight bank.
+- Atomic receipt: steps=70, edits=8, run_tests=3, diff_lines=40, tokens=1.22M, gate_pass=FALSE. File: pylint/lint/pylinter.py.
+- Official: resolved=0. BUT the approach was CORRECT by shape: the agent extended `_discover_files(files_or_modules, ignore_list=(), ignore_list_re=(), ignore_paths_re=())` to thread the ignore filters into recursive discovery — exactly the gold's target (gold test drives `_discover_files`). It reached the right fix-SHAPE but did not complete a passing implementation in 70 steps.
+- HONEST: pylint-6528 is genuinely hard (~1/3 one-shot in WLIFT-2; gate-ON failed this sample in 70 steps). So there is NO clean proven gate-ON resolution to capture the true class from. The one-shot arms DID resolve it 1/3 (WLIFT base_1, weight_1 diffs exist) but those are single noisy samples, not a robust capture.
+- DECISION POINT (weight-substrate track): cross-instance generalization is UNPROVEN (WLIFT-2=0), the diagnosis is concrete (retrieval mis-rank + missing 'predicate-not-invoked' operator = my representation), and the proven-capture path is blocked on pylint-6528 (can't reliably resolve it). The next move is RESEARCH-DIRECTION, not mechanical continuation: (a) improve retrieval to rank operators by root-cause-shape fit (not trigger+proof_n); (b) capture the predicate-not-invoked operator from a DIFFERENT instance of that class that the agent CAN resolve; (c) accept that the substrate is currently memorization-flavored and report it. Pausing heavy autonomous experimentation here to surface the direction for the user rather than auto-committing to a multi-round re-formalization.
+
+Next exact step: USER-STEER on direction (improve retrieval ranking vs find a resolvable instance of the predicate-not-invoked class vs re-formalize operators). Standing honest state: weight substrate lifts on-source (circular, WLIFT-1 +3/3) but NOT cross-instance (WLIFT-2 0); the gap is my weight/retrieval representation, by number. Model locked DeepSeek V4 Pro.

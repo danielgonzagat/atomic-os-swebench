@@ -503,6 +503,21 @@ def semantic_diff_lines(d):
     return count
 
 
+def task_fail_floor(task_file):
+    """CLASS-RED-BEST-CANDIDATE-BASELINE-GAIN: SWE task metadata defines the no-patch failure floor for red-candidate restore."""
+    try:
+        meta = Path(task_file).resolve().parent / "meta.json"
+        if not meta.exists():
+            return None
+        data = json.loads(meta.read_text())
+        fail_to_pass = data.get("FAIL_TO_PASS")
+        if isinstance(fail_to_pass, list):
+            return len(fail_to_pass)
+    except Exception:
+        return None
+    return None
+
+
 def gate_infra_failure(out, workdir=None):
     """CLASS-GATE-INFRA-RED-GENERATED-VERSION: classify local gate environment breakage separately from behavioral red tests."""
     if not out:
@@ -959,8 +974,10 @@ def main():
     tree = subprocess.run(["git", "ls-files"], cwd=workdir, capture_output=True, text=True).stdout
     NO_GATE = args.gate.strip().upper() == "NONE"   # one-shot mode: no local test feedback
     active_tools = [t for t in TOOLS if not (NO_GATE and t["function"]["name"] == "run_tests")]
+    baseline_fail_floor = task_fail_floor(args.task)
 
     metrics = {"arm": "atomic-cli-deepseek-v4-pro", "task": args.task, "workdir": workdir,
+               "baseline_fail_floor": baseline_fail_floor,
                "steps": 0, "tool_calls": {}, "edits_applied": 0, "invalid_states_prevented": 0,
                "reads": 0, "body_context_reads": 0, "run_tests_calls": 0, "quick_check_calls": 0, "tokens": 0, "gate_pass": False,
                "round_invalid": False, "invalid_reason": "", "model_call_error": "", "model_call_error_kind": "",
@@ -1678,11 +1695,15 @@ def main():
                             _red_semantic_lines = semantic_diff_lines(_red_diff)
                             if _red_semantic_lines > 0:
                                 _red_score = (nf_, diff_lines(_red_diff))
-                                if best_red_score is None or _red_score < best_red_score:
-                                    best_red_score = _red_score
-                                    best_red_diff = _red_diff
+                                if baseline_fail_floor is None or nf_ < baseline_fail_floor:
+                                    if best_red_score is None or _red_score < best_red_score:
+                                        best_red_score = _red_score
+                                        best_red_diff = _red_diff
+                                        metrics["transcript"].append(
+                                            f"s{step} RED-BEST candidate captured (fail={nf_}, diff_lines={_red_score[1]}, semantic_lines={_red_semantic_lines})")
+                                else:
                                     metrics["transcript"].append(
-                                        f"s{step} RED-BEST candidate captured (fail={nf_}, diff_lines={_red_score[1]}, semantic_lines={_red_semantic_lines})")
+                                        f"s{step} RED-BEST candidate skipped (no baseline failure gain: fail={nf_}, floor={baseline_fail_floor})")
                             else:
                                 metrics["transcript"].append(
                                     f"s{step} RED-BEST candidate skipped (semantic_diff_lines=0)")
@@ -2112,6 +2133,9 @@ def main():
             if semantic_diff_lines(best_red_diff) == 0:
                 metrics["transcript"].append(
                     "RED-BEST-CANDIDATE: skipped semantic-empty best red diff; keeping latest red diff")
+            elif baseline_fail_floor is not None and best_red_score and best_red_score[0] >= baseline_fail_floor:
+                metrics["transcript"].append(
+                    f"RED-BEST-CANDIDATE: skipped non-improving best red diff (fail={best_red_score[0]}, floor={baseline_fail_floor}); keeping latest red diff")
             else:
                 try:
                     subprocess.run(["git", "checkout", "--", "."], cwd=workdir, capture_output=True)

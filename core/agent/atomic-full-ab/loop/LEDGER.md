@@ -2378,3 +2378,14 @@ Next exact step: run R080 Atomic-only on the same frozen `sympy__sympy-20438` sn
 - Fresh verification: `py_compile`, `atomic-agent-green-minimize.proof.mjs --json` (`43/43`), and `git diff --check` passed.
 
 Next exact step: run R081 Atomic-only on the same frozen `sympy__sympy-20438` snapshot against observed `Cicero`, with seq599 active. Do not rerun native.
+
+### Codex-paired track pointer update - 2026-06-23 R081 official red; seq600 baseline-gain best-red guard active
+- Active Level 4 frozen task remains SWE-Bench Verified `sympy__sympy-20438`, base `33b47e4bd60e2302e42616141e76285038b724d6`; frozen native baseline remains observed `Cicero`.
+- R081 Atomic local metrics: `gate_pass=false`, `round_invalid=false`, `steps=80`, `edits=4`, `reads=48`, `body_reads=28`, `run_tests=4`, `quick_check=20`, `invalid_states_prevented=11`, `diff_lines=7`, `tokens=1,301,618`, `wall=1118.5s`.
+- R081 official result: patch applied, `resolved=false`, F2P `0/2` (`test_Eq`, `test_issue_19378`), P2P `89/93` with regressions `test_Complement`, `test_product_basic`, `test_boundary_ProductSet_line`, `test_DisjointUnion`; summary `atomic-gateON-R081.R081_sympy20438_atomic.json`, report `logs/run_evaluation/R081_sympy20438_atomic/atomic-gateON-R081/sympy__sympy-20438/report.json`.
+- Root cause mined: seq599 blocked semantic-empty no-ops, but best-red restore still captured a semantic non-empty candidate with local `fail=5` while the clean task fail floor from `meta.json` is `2` (`FAIL_TO_PASS`). That candidate was behaviorally worse than no-patch and reintroduced the same official P2P regressions as R079.
+- Sequence `600` promoted `CLASS-RED-BEST-CANDIDATE-BASELINE-GAIN`: candidate `real-self-expansion-candidate:20195c991b709d836c87be8c24e1f8efa3276a868a5bd118d215049c2bc4f64a`, receipt `408b6e284114747200bdca2a2c6bfbbff716c5b55d572dcf95daa45b6efd56f2`, archive entry `e65c7ec70102e0199f9ef2a060b8f94a6eddc23370af44a3507e1d81fc5873b7`.
+- Active behavior: `task_fail_floor(PROBLEM.md)` reads sibling `meta.json` and returns `len(FAIL_TO_PASS)` when available. Best-red capture now requires `semantic_diff_lines > 0` and, when a floor exists, `nf_ < baseline_fail_floor`; final restore repeats the same non-improving guard.
+- Fresh verification: TDD RED one-off check failed before implementation; after `atomic_expand_self`, `py_compile`, `atomic-agent-green-minimize.proof.mjs --json` (`44/44`), synthetic `task_fail_floor` check, and `git diff --check` passed.
+
+Next exact step: run R082 Atomic-only on the same frozen `sympy__sympy-20438` snapshot against observed `Cicero`, with seq600 active. Do not rerun native.
