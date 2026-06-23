@@ -640,7 +640,7 @@ record('CLASS-RED-GATE-CROSS-FILE-STACK-EDIT-RESERVE: red gate fail-floor output
   source.includes('red-gate cross-file read target required') &&
   source.includes('red-gate cross-file stack target') &&
   source.includes('nf_ <= baseline_fail_floor') &&
-  source.includes('[scope] The failing stack points at scoped source file(s)'),
+  source.includes('[scope] The red repair scope includes scoped source file(s)'),
   {
     marker: source.includes('CLASS-RED-GATE-CROSS-FILE-STACK-EDIT-RESERVE'),
     state: source.includes('red_scope_target_files = set()'),
@@ -650,7 +650,7 @@ record('CLASS-RED-GATE-CROSS-FILE-STACK-EDIT-RESERVE: red gate fail-floor output
     capture: source.includes('RED-SCOPE target captured') && source.includes('nf_ <= baseline_fail_floor'),
     readGuard: source.includes('red-gate cross-file read target required'),
     editGuard: source.includes('red-gate cross-file stack target'),
-    feedback: source.includes('[scope] The failing stack points at scoped source file(s)'),
+    feedback: source.includes('[scope] The red repair scope includes scoped source file(s)'),
   });
 record('CLASS-RED-GATE-STACK-SCOPE-INCLUDES-CHANGED-FRAMES: when the red stack includes an already edited causal frame, stack scope includes that changed frame instead of forcing only external helper frames',
   source.includes('CLASS-RED-GATE-STACK-SCOPE-INCLUDES-CHANGED-FRAMES') &&
@@ -658,17 +658,34 @@ record('CLASS-RED-GATE-STACK-SCOPE-INCLUDES-CHANGED-FRAMES: when the red stack i
   source.includes('_changed_in_stack = [f for f in _stack_files if _scope_match_file(f, changed_files)]') &&
   source.includes('_external_stack_files = [f for f in _stack_files if not _scope_match_file(f, changed_files)]') &&
   source.includes('return (_changed_in_stack + _external_stack_files)[:4]') &&
-  source.includes('_stack_scope_files = _stack_scope_targets(_stack_files, _changed_now)') &&
+  source.includes('_stack_scope_files = _red_scope_targets(_stack_files, _changed_now, nf_, baseline_fail_floor)') &&
   source.includes('stack={\',\'.join(_stack_files) or \'none\'}') &&
-  source.includes('work outside the failing stack') &&
-  source.includes('Do not spend the repair turn outside the failing stack'),
+  source.includes('work outside the red repair scope') &&
+  source.includes('Do not spend the repair turn outside the red repair scope'),
   {
     marker: source.includes('CLASS-RED-GATE-STACK-SCOPE-INCLUDES-CHANGED-FRAMES'),
     helper: source.includes('def _stack_scope_targets(stack_files, changed_files):'),
     changedFirst: source.includes('_changed_in_stack = [f for f in _stack_files if _scope_match_file(f, changed_files)]') && source.includes('return (_changed_in_stack + _external_stack_files)[:4]'),
-    captureUsesHelper: source.includes('_stack_scope_files = _stack_scope_targets(_stack_files, _changed_now)'),
-    editScope: source.includes('work outside the failing stack'),
-    feedback: source.includes('Do not spend the repair turn outside the failing stack'),
+    captureUsesHelper: source.includes('_stack_scope_files = _red_scope_targets(_stack_files, _changed_now, nf_, baseline_fail_floor)'),
+    editScope: source.includes('work outside the red repair scope'),
+    feedback: source.includes('Do not spend the repair turn outside the red repair scope'),
+  });
+record('CLASS-RED-SCOPE-MIXED-FAILURE-CHANGED-FILE-REPAIR: non-improving mixed red repair scope includes already changed source files in addition to exception stack targets',
+  source.includes('CLASS-RED-SCOPE-MIXED-FAILURE-CHANGED-FILE-REPAIR') &&
+  source.includes('def _red_scope_targets(stack_files, changed_files, fail_count, baseline_floor):') &&
+  source.includes('_stack_targets = _stack_scope_targets(stack_files, changed_files)') &&
+  source.includes('baseline_floor is not None and int(fail_count) >= int(baseline_floor)') &&
+  source.includes('return (_stack_targets + _changed_sources)[:4]') &&
+  source.includes('_stack_scope_files = _red_scope_targets(_stack_files, _changed_now, nf_, baseline_fail_floor)') &&
+  source.includes('already changed source files') &&
+  source.includes('The red repair scope includes scoped source file(s)'),
+  {
+    marker: source.includes('CLASS-RED-SCOPE-MIXED-FAILURE-CHANGED-FILE-REPAIR'),
+    helper: source.includes('def _red_scope_targets(stack_files, changed_files, fail_count, baseline_floor):'),
+    nonImprovingGate: source.includes('baseline_floor is not None and int(fail_count) >= int(baseline_floor)'),
+    changedIncluded: source.includes('return (_stack_targets + _changed_sources)[:4]'),
+    captureUsesHelper: source.includes('_stack_scope_files = _red_scope_targets(_stack_files, _changed_now, nf_, baseline_fail_floor)'),
+    honestScopeText: source.includes('The red repair scope includes scoped source file(s)') && source.includes('already changed source files'),
   });
 record('CLASS-RED-BEST-CANDIDATE-RESTORE: when no green is reached, final output restores the best gate-tested red candidate by fail-count and diff surface without claiming green',
   source.includes('CLASS-RED-BEST-CANDIDATE-RESTORE') &&
@@ -726,6 +743,25 @@ record('CLASS-RED-BEST-CANDIDATE-BASELINE-GAIN: best-red restore only preserves 
     captureSkipTrace: source.includes('RED-BEST candidate skipped (no baseline failure gain'),
     finalGuard: source.includes('best_red_score[0] >= baseline_fail_floor'),
     finalSkipTrace: source.includes('RED-BEST-CANDIDATE: skipped non-improving best red diff'),
+  });
+record('CLASS-CATASTROPHIC-RED-ROLLBACK-IMMEDIATE: red candidates that worsen the frozen fail floor are restored clean immediately instead of being refined for the rest of the round',
+  source.includes('CLASS-CATASTROPHIC-RED-ROLLBACK-IMMEDIATE') &&
+  source.includes('nf_ > baseline_fail_floor') &&
+  source.includes('CATASTROPHIC-RED rollback clean') &&
+  source.includes('[red-rollback] Candidate worsened acceptance beyond the frozen fail floor') &&
+  source.includes('clean baseline restored') &&
+  source.includes('red_gate_fix_required = False') &&
+  source.includes('red_scope_target_files = set()') &&
+  source.includes('post_edit_gate_required = False') &&
+  source.includes('messages.append({"role": "tool", "tool_call_id": c["id"], "content": res})') &&
+  source.includes('continue'),
+  {
+    marker: source.includes('CLASS-CATASTROPHIC-RED-ROLLBACK-IMMEDIATE'),
+    worseThanFloorGuard: source.includes('nf_ > baseline_fail_floor'),
+    cleanRestoreTrace: source.includes('CATASTROPHIC-RED rollback clean') && source.includes('clean baseline restored'),
+    latchClear: source.includes('red_gate_fix_required = False') && source.includes('post_edit_gate_required = False'),
+    scopeClear: source.includes('red_scope_target_files = set()'),
+    immediateReturn: source.includes('messages.append({"role": "tool", "tool_call_id": c["id"], "content": res})') && source.includes('continue'),
   });
 record('CLASS-NONIMPROVING-RED-RESTORE-CLEAN: non-improving red churn restores the clean baseline before receipt export instead of preserving latest dirty diff',
   source.includes('CLASS-NONIMPROVING-RED-RESTORE-CLEAN') &&

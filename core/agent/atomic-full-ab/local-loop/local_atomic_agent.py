@@ -1221,6 +1221,8 @@ def main():
     # actionable source files at/below the fail floor, the next repair read/edit is scoped to stack files.
     # CLASS-RED-GATE-STACK-SCOPE-INCLUDES-CHANGED-FRAMES: stack scope must include already edited stack frames too,
     # because the causal frame can be in the current diff while lower helper frames are external.
+    # CLASS-RED-SCOPE-MIXED-FAILURE-CHANGED-FILE-REPAIR: mixed red gates can contain an exception stack plus
+    # assertion regressions caused by the current diff; non-improving repair scope includes changed source files.
     red_gate_quick_checks = 0  # CLASS-RED-GATE-QUICKCHECK-REPAIR-BUDGET: local quick_check is bounded per failed diff.
     post_edit_gate_required = False  # CLASS-POST-EDIT-RUN-TESTS-MANDATORY: after an accepted edit in gate-on
     post_edit_quick_checks = 0  # mode, quick_check is only a bounded self-check; run_tests is mandatory.
@@ -1344,6 +1346,26 @@ def main():
         _changed_in_stack = [f for f in _stack_files if _scope_match_file(f, changed_files)]
         _external_stack_files = [f for f in _stack_files if not _scope_match_file(f, changed_files)]
         return (_changed_in_stack + _external_stack_files)[:4]
+
+    def _red_scope_targets(stack_files, changed_files, fail_count, baseline_floor):
+        _stack_targets = _stack_scope_targets(stack_files, changed_files)
+        _changed_sources = []
+        for _f in sorted(set(changed_files or set())):
+            _r = _rel_candidate_file(_f)
+            if not _r:
+                continue
+            _parts = _r.split("/")
+            if "tests" in _parts or _r.startswith("test_") or "/test_" in _r:
+                continue
+            if not _scope_match_file(_r, _stack_targets):
+                _changed_sources.append(_r)
+        try:
+            _non_improving = baseline_floor is not None and int(fail_count) >= int(baseline_floor)
+        except Exception:
+            _non_improving = False
+        if _non_improving and _changed_sources:
+            return (_stack_targets + _changed_sources)[:4]
+        return _stack_targets
 
     for step in range(1, args.max_steps + GREEN_MINIMIZE_MAXSTEP_RESERVE + RED_SCOPE_EDIT_RESERVE_STEPS + POST_EDIT_GATE_RESERVE_STEPS + 1):
         _pending_green_minimize = (last_pass and not green_minimize_prompted and not NO_GATE)
@@ -1811,10 +1833,10 @@ def main():
                 _rk = _read_target_key(fn, a)
                 _red_read_limit = RED_SCOPE_TARGET_READ_LIMIT if red_scope_target_files else RED_GATE_ANCHOR_READ_LIMIT
                 if red_scope_target_files and not _scope_read_matches_target(fn, a, red_scope_target_files):
-                    res = ("READING DISABLED — red-gate cross-file read target required. "
-                           f"The failing stack points at scoped source file(s): {', '.join(sorted(red_scope_target_files))}. "
-                           "Use at most one targeted atomic_read/atomic_grep with path/file set to one stack target, "
-                           "then edit a stack target.")
+                    res = ("READING DISABLED — red-gate scoped repair target required. "
+                           f"The red repair scope includes scoped source file(s): {', '.join(sorted(red_scope_target_files))}. "
+                           "Use at most one targeted atomic_read/atomic_grep with path/file set to one scoped source target, "
+                           "then edit a scoped repair target.")
                     metrics["invalid_states_prevented"] += 1
                     metrics["transcript"].append(f"s{step} {fn} REFUSED (red-gate cross-file read target required)")
                     messages.append({"role": "tool", "tool_call_id": c["id"], "content": res})
@@ -1850,9 +1872,9 @@ def main():
                     f"s{step} quick_check ALLOWED (red-gate quickcheck {red_gate_quick_checks}/{RED_GATE_QUICK_CHECK_LIMIT})")
 
             if red_gate_fix_required and red_scope_target_files and fn in ("atomic_replace", "atomic_create") and not _scope_match_file(a.get("file") or a.get("path"), red_scope_target_files):
-                res = ("EDIT DISABLED — red-gate cross-file stack target "
-                       f"{', '.join(sorted(red_scope_target_files))} must be edited before work outside the failing stack. "
-                       "The failing stack has scoped source frames; make the next atomic edit in one of those stack files.")
+                res = ("EDIT DISABLED — red-gate scoped repair target "
+                       f"{', '.join(sorted(red_scope_target_files))} must be edited before work outside the red repair scope. "
+                       "The red repair scope has source frames or already changed source files; make the next atomic edit in one of those scoped files.")
                 metrics["invalid_states_prevented"] += 1
                 metrics["transcript"].append(f"s{step} {fn} REFUSED (red-gate cross-file stack target)")
                 messages.append({"role": "tool", "tool_call_id": c["id"], "content": res})
@@ -1940,7 +1962,7 @@ def main():
                         _stack_files = _stack_trace_files(gate_out)
                         _scope_red_count = _consec_red + 1
                         _scope_due = ((baseline_fail_floor is not None and nf_ <= baseline_fail_floor) or _scope_red_count >= 3)
-                        _stack_scope_files = _stack_scope_targets(_stack_files, _changed_now)
+                        _stack_scope_files = _red_scope_targets(_stack_files, _changed_now, nf_, baseline_fail_floor)
                         if _scope_due and _stack_scope_files:
                             red_scope_target_files = set(_stack_scope_files)
                             metrics["transcript"].append(
@@ -1964,6 +1986,34 @@ def main():
                             else:
                                 metrics["transcript"].append(
                                     f"s{step} RED-BEST candidate skipped (semantic_diff_lines=0)")
+                        # CLASS-CATASTROPHIC-RED-ROLLBACK-IMMEDIATE: if a candidate worsens the frozen
+                        # fail floor, the current bytes are objectively negative. Restore clean immediately
+                        # instead of spending the remaining round refining a regression proven worse than baseline.
+                        if baseline_fail_floor is not None and nf_ > baseline_fail_floor:
+                            try:
+                                subprocess.run(["git", "checkout", "--", "."], cwd=workdir, capture_output=True)
+                                subprocess.run(["git", "clean", "-fdq"], cwd=workdir, capture_output=True)
+                            except Exception as _e:
+                                metrics["transcript"].append(f"s{step} CATASTROPHIC-RED rollback error: {str(_e)[:120]}")
+                            red_gate_fix_required = False
+                            red_gate_fix_reason = ""
+                            red_gate_anchor_reads = 0
+                            red_gate_anchor_read_keys.clear()
+                            red_gate_quick_checks = 0
+                            red_scope_target_files = set()
+                            post_edit_gate_required = False
+                            post_edit_quick_checks = 0
+                            _consec_red = 0
+                            metrics["invalid_states_prevented"] += 1
+                            res += ("\n\n[red-rollback] Candidate worsened acceptance beyond the frozen fail floor "
+                                    f"(fail={nf_}, floor={baseline_fail_floor}); clean baseline restored. "
+                                    "Do not refine or reapply that candidate. Make a different atomic edit, then quick_check and run_tests.")
+                            metrics["transcript"].append(
+                                f"s{step} CATASTROPHIC-RED rollback clean (fail={nf_}, floor={baseline_fail_floor})")
+                            reads_since_edit = 0; distinct_since_edit.clear()
+                            metrics["transcript"].append(f"s{step} run_tests -> {res.splitlines()[0][:120]}")
+                            messages.append({"role": "tool", "tool_call_id": c["id"], "content": res})
+                            continue
                         _consec_red += 1
                         diagnostics = [
                             "[diagnose] The gate is red for your current non-empty diff. Do not read broadly or "
@@ -1995,10 +2045,11 @@ def main():
                         # candidate became too permissive and erased a required error path. Surface that topology.
                         if red_scope_target_files:
                             diagnostics.insert(0,
-                                "[scope] The failing stack points at scoped source file(s): "
+                                "[scope] The red repair scope includes scoped source file(s): "
                                 + ", ".join(sorted(red_scope_target_files))
-                                + ". Use at most ONE targeted read of a listed stack file, then make the next edit in a listed stack file. "
-                                "Do not spend the repair turn outside the failing stack.")
+                                + ". It may include exception stack files and, for mixed non-improving red failures, already changed source files. "
+                                "Use at most ONE targeted read of a listed scoped file, then make the next edit in a listed scoped file. "
+                                "Do not spend the repair turn outside the red repair scope.")
                         if "DID NOT RAISE" in gate_out:
                             diagnostics.append(
                                 "[diagnose] A failing test says DID NOT RAISE: your edit is too permissive "
