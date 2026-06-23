@@ -1336,7 +1336,8 @@ def main():
     # survive clean rollback. A later non-improving red scope must not forget an earlier changed/stack file just
     # because rollback removed its bytes; include that causal memory before hard-scoping repair tools.
     weight_scope_seed_files = set()  # CLASS-WEIGHT-MULTILOCUS-RED-SCOPE-SEED: source files read under a matched
-    # proof-carrying weight before the first edit are causal multi-locus evidence. If a fail-floor red gate later
+    # proof-carrying weight before the first edit are causal multi-locus evidence. CLASS-WEIGHT-LATE-CAUSAL-READ-SCOPE-SEED:
+    # after the first edit, hint-matching source reads remain causal evidence too; if a fail-floor red gate later
     # narrows to only the symptom file, these seeds re-enter red_scope_memory_files so repair can touch every locus
     # the learned strategy already caused the agent to inspect.
     weight_scope_hint_files = set()
@@ -1527,8 +1528,9 @@ def main():
         return any((t in _hint) or any(t in hw or hw in t for hw in _hint_words) for t in _tokens)
 
     def _remember_weight_scope_read(fn, a):
-        if not matched_weight_lockout_classes or metrics["edits_applied"] != 0:
+        if not matched_weight_lockout_classes:
             return
+        _pre_first_edit = metrics["edits_applied"] == 0
         _paths = []
         if fn in ("atomic_read", "atomic_outline"):
             _paths.append(a.get("path") or a.get("file"))
@@ -1544,8 +1546,10 @@ def main():
             _r = _scope_source_file(_p)
             if not _r:
                 continue
-            weight_scope_seed_files.add(_r)
-            if _weight_hint_matches_file(_r):
+            _hint_match = _weight_hint_matches_file(_r)
+            if _pre_first_edit or _hint_match:
+                weight_scope_seed_files.add(_r)
+            if _hint_match:
                 weight_scope_hint_files.add(_r)
 
     for step in range(1, args.max_steps + GREEN_MINIMIZE_MAXSTEP_RESERVE + RED_SCOPE_EDIT_RESERVE_STEPS + POST_EDIT_GATE_RESERVE_STEPS + 1):

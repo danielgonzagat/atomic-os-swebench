@@ -459,7 +459,7 @@ record('CLASS-WEIGHT-MULTILOCUS-RED-SCOPE-SEED: matched-weight source files read
   source.includes('weight_scope_seed_files = set()') &&
   source.includes('weight_scope_hint_files = set()') &&
   source.includes('def _remember_weight_scope_read(fn, a):') &&
-  source.includes('metrics["edits_applied"] != 0') &&
+  source.includes('_pre_first_edit = metrics["edits_applied"] == 0') &&
   source.includes('_weight_hint_matches_file(_r)') &&
   source.includes('_remember_weight_scope_read(fn, a)') &&
   source.includes('_weight_seed_scope = set(weight_scope_hint_files or weight_scope_seed_files)') &&
@@ -469,12 +469,27 @@ record('CLASS-WEIGHT-MULTILOCUS-RED-SCOPE-SEED: matched-weight source files read
   {
     marker: source.includes('CLASS-WEIGHT-MULTILOCUS-RED-SCOPE-SEED'),
     state: source.includes('weight_scope_seed_files = set()') && source.includes('weight_scope_hint_files = set()'),
-    captureHelper: source.includes('def _remember_weight_scope_read(fn, a):') && source.includes('metrics["edits_applied"] != 0'),
+    captureHelper: source.includes('def _remember_weight_scope_read(fn, a):') && source.includes('_pre_first_edit = metrics["edits_applied"] == 0'),
     hintFilter: source.includes('_weight_hint_matches_file(_r)'),
     readHook: source.includes('_remember_weight_scope_read(fn, a)'),
     redScopeSeed: source.includes('_weight_seed_scope = set(weight_scope_hint_files or weight_scope_seed_files)') && source.includes('red_scope_memory_files.update(_weight_seed_scope)'),
     trace: source.includes('WEIGHT-MULTILOCUS red scope seeded'),
     scopeIntegration: source.includes('_stack_scope_files = _red_scope_targets(_stack_files, _changed_now, nf_, baseline_fail_floor, red_scope_memory_files)'),
+  });
+
+record('CLASS-WEIGHT-LATE-CAUSAL-READ-SCOPE-SEED: hint-matching causal source reads discovered after the first edit remain red-scope seeds for matched learned weights',
+  source.includes('CLASS-WEIGHT-LATE-CAUSAL-READ-SCOPE-SEED') &&
+  source.includes('_pre_first_edit = metrics["edits_applied"] == 0') &&
+  source.includes('_hint_match = _weight_hint_matches_file(_r)') &&
+  source.includes('if _pre_first_edit or _hint_match:') &&
+  source.includes('weight_scope_seed_files.add(_r)') &&
+  source.includes('weight_scope_hint_files.add(_r)') &&
+  source.includes('_weight_seed_scope = set(weight_scope_hint_files or weight_scope_seed_files)'),
+  {
+    marker: source.includes('CLASS-WEIGHT-LATE-CAUSAL-READ-SCOPE-SEED'),
+    preEditBaseline: source.includes('_pre_first_edit = metrics["edits_applied"] == 0'),
+    lateHintCapture: source.includes('_hint_match = _weight_hint_matches_file(_r)') && source.includes('if _pre_first_edit or _hint_match:'),
+    redScopeBridge: source.includes('_weight_seed_scope = set(weight_scope_hint_files or weight_scope_seed_files)'),
   });
 record('CLASS-WEIGHT-LOCKOUT-EXECUTABLE-OR-STRONG: learned weights are advisory unless executable or repeatedly proven, preventing weak-weight read starvation',
   source.includes('CLASS-WEIGHT-LOCKOUT-EXECUTABLE-OR-STRONG') &&
