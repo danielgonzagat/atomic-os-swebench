@@ -1329,11 +1329,35 @@ def main():
     try:
         _wf = os.environ.get("ATOMIC_WEIGHTS_FILE")
         if _wf and os.path.exists(_wf):
-            _weights = [json.loads(l) for l in open(_wf) if l.strip()]
-            _matched = [w for w in _weights if not w.get("trigger") or re.search(w["trigger"], task, re.I)]
+            try:
+                import weights_admit
+            except ImportError:
+                sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+                import weights_admit
+            _weights = weights_admit.load(_wf)
+            task_vsa = weights_admit.encode_vsa_text(task)
+            _matched = []
+            for w in _weights:
+                trig_match = bool(not w.get("trigger") or re.search(w["trigger"], task, re.I))
+                w_vsa = w.get("vsa")
+                sim = 0.0
+                if w_vsa:
+                    sim = weights_admit.vsa_similarity(task_vsa, w_vsa)
+                
+                # Match weights if either trigger matches OR VSA similarity >= 0.15
+                if trig_match or sim >= 0.15:
+                    w["__sim"] = sim
+                    w["__trig_match"] = trig_match
+                    _matched.append(w)
+            
             if _matched:
+                # Sort by VSA similarity descending
+                _matched.sort(key=lambda x: x.get("__sim", 0.0), reverse=True)
                 matched_weight_classes = [w["class"] for w in _matched[:5]]
-                matched_weight_hints = [f"- [{w['class']}] (proven on {w.get('proof_n',1)} resolution(s)): {w['strategy']}" for w in _matched[:5]]
+                matched_weight_hints = []
+                for w in _matched[:5]:
+                    match_info = f"VSA sim={w['__sim']:.3f}" if not w["__trig_match"] else "regex"
+                    matched_weight_hints.append(f"- [{w['class']}] (proven on {w.get('proof_n',1)} resolution(s), match via {match_info}): {w['strategy']}")
                 # CLASS-WEIGHT-LOCKOUT-EXECUTABLE-OR-STRONG: retrieval always informs the model, but only
                 # executable macros or repeatedly proven classes may withhold reads. R075 showed weak generic
                 # weights can otherwise starve anchor reads and produce zero edits.
@@ -1344,7 +1368,8 @@ def main():
                         _proof_n = 1
                     if _w.get("class") == "PATH-NORMALIZATION-BEFORE-MATCH" or _proof_n >= 2:
                         matched_weight_lockout_classes.append(_w["class"])
-                        matched_weight_lockout_hints.append(f"- [{_w['class']}] (proven on {_w.get('proof_n',1)} resolution(s)): {_w['strategy']}")
+                        match_info = f"VSA sim={_w['__sim']:.3f}" if not _w["__trig_match"] else "regex"
+                        matched_weight_lockout_hints.append(f"- [{_w['class']}] (proven on {_w.get('proof_n',1)} resolution(s), match via {match_info}): {_w['strategy']}")
                 _wtxt = "\n".join(matched_weight_hints)
                 system += ("\n\nLEARNED RESOLUTION STRATEGIES (atomic weights — generalized operators captured from "
                            "PROVEN resolutions of this class; apply the matching one):\n" + _wtxt)
