@@ -1332,6 +1332,9 @@ def main():
     # because the causal frame can be in the current diff while lower helper frames are external.
     # CLASS-RED-SCOPE-MIXED-FAILURE-CHANGED-FILE-REPAIR: mixed red gates can contain an exception stack plus
     # assertion regressions caused by the current diff; non-improving repair scope includes changed source files.
+    red_scope_memory_files = set()  # CLASS-RED-SCOPE-CAUSAL-MEMORY-SURVIVES-ROLLBACK: causal red-scope files
+    # survive clean rollback. A later non-improving red scope must not forget an earlier changed/stack file just
+    # because rollback removed its bytes; include that causal memory before hard-scoping repair tools.
     red_gate_quick_checks = 0  # CLASS-RED-GATE-QUICKCHECK-REPAIR-BUDGET: local quick_check is bounded per failed diff.
     post_edit_gate_required = False  # CLASS-POST-EDIT-RUN-TESTS-MANDATORY: after an accepted edit in gate-on
     post_edit_quick_checks = 0  # mode, quick_check is only a bounded self-check; run_tests is mandatory.
@@ -1459,7 +1462,7 @@ def main():
         _external_stack_files = [f for f in _stack_files if not _scope_match_file(f, changed_files)]
         return (_changed_in_stack + _external_stack_files)[:4]
 
-    def _red_scope_targets(stack_files, changed_files, fail_count, baseline_floor):
+    def _red_scope_targets(stack_files, changed_files, fail_count, baseline_floor, memory_files=None):
         _stack_targets = _stack_scope_targets(stack_files, changed_files)
         _changed_sources = []
         for _f in sorted(set(changed_files or set())):
@@ -1471,12 +1474,27 @@ def main():
                 continue
             if not _scope_match_file(_r, _stack_targets):
                 _changed_sources.append(_r)
+        _memory_sources = []
+        for _f in sorted(set(memory_files or set())):
+            _r = _rel_candidate_file(_f)
+            if not _r:
+                continue
+            _parts = _r.split("/")
+            if "tests" in _parts or _r.startswith("test_") or "/test_" in _r:
+                continue
+            if not _scope_match_file(_r, _stack_targets) and not _scope_match_file(_r, _changed_sources):
+                _memory_sources.append(_r)
         try:
             _non_improving = baseline_floor is not None and int(fail_count) >= int(baseline_floor)
         except Exception:
             _non_improving = False
-        if _non_improving and _changed_sources:
-            return (_stack_targets + _changed_sources)[:4]
+        if _non_improving:
+            _combined = _stack_targets + _changed_sources
+            for _f in _memory_sources:
+                if not _scope_match_file(_f, _combined):
+                    _combined.append(_f)
+            if _combined:
+                return _combined[:4]
         return _stack_targets
 
     for step in range(1, args.max_steps + GREEN_MINIMIZE_MAXSTEP_RESERVE + RED_SCOPE_EDIT_RESERVE_STEPS + POST_EDIT_GATE_RESERVE_STEPS + 1):
@@ -2095,6 +2113,7 @@ def main():
                         deadlock_break = True
                     elif last_pass:
                         _consec_red = 0
+                        red_scope_memory_files = set()
                     elif metrics["edits_applied"] >= 1:
                         red_gate_fix_required = True
                         red_gate_fix_reason = f"pass={np_} fail={nf_}"
@@ -2105,7 +2124,9 @@ def main():
                         _stack_files = _stack_trace_files(gate_out)
                         _scope_red_count = _consec_red + 1
                         _scope_due = ((baseline_fail_floor is not None and nf_ <= baseline_fail_floor) or _scope_red_count >= 3)
-                        _stack_scope_files = _red_scope_targets(_stack_files, _changed_now, nf_, baseline_fail_floor)
+                        _stack_scope_files = _red_scope_targets(_stack_files, _changed_now, nf_, baseline_fail_floor, red_scope_memory_files)
+                        if _stack_scope_files:
+                            red_scope_memory_files.update(_stack_scope_files)
                         if _scope_due and _stack_scope_files:
                             red_scope_target_files = set(_stack_scope_files)
                             metrics["transcript"].append(
@@ -2144,6 +2165,9 @@ def main():
                             red_gate_anchor_read_keys.clear()
                             red_gate_quick_checks = 0
                             red_scope_target_files = set()
+                            if red_scope_memory_files:
+                                metrics["transcript"].append(
+                                    f"s{step} RED-SCOPE causal memory preserved after rollback (targets={','.join(sorted(red_scope_memory_files))})")
                             post_edit_gate_required = False
                             post_edit_quick_checks = 0
                             post_rollback_edit_required = True

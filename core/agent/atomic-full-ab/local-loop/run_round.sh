@@ -11,6 +11,12 @@ source /tmp/.atomic_creds.sh 2>/dev/null || true
 export DEEPSEEK_MODEL=deepseek-v4-pro
 export DEEPSEEK_TIMEOUT="${DEEPSEEK_TIMEOUT:-120}"
 export DEEPSEEK_TOTAL_TIMEOUT="${DEEPSEEK_TOTAL_TIMEOUT:-180}"
+# CLASS-ROUND-WEIGHTS-ENABLED-BY-DEFAULT: the canonical Atomic A/B loop must run with
+# the proof-carrying learned-weight bank connected. Respect explicit caller overrides:
+# an already-set ATOMIC_WEIGHTS_FILE can point elsewhere or be intentionally empty.
+if [ -z "${ATOMIC_WEIGHTS_FILE+x}" ] && [ -s "$HERE/.corpus/weights.jsonl" ]; then
+  export ATOMIC_WEIGHTS_FILE="$HERE/.corpus/weights.jsonl"
+fi
 
 TD="$HERE/tasks/SWE-$ID"
 PRISTINE="/private/tmp/swe/suite/$ID/pristine"

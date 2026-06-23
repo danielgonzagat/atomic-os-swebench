@@ -17,8 +17,10 @@ const sourceDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
 const repoRoot = path.resolve(sourceDir, '../..');
 const agentPath = path.join(repoRoot, 'core/agent/atomic-full-ab/local-loop/local_atomic_agent.py');
 const gatePath = path.join(repoRoot, 'core/agent/atomic-full-ab/local-loop/swe_docker_gate.sh');
+const runRoundPath = path.join(repoRoot, 'core/agent/atomic-full-ab/local-loop/run_round.sh');
 const source = fs.readFileSync(agentPath, 'utf8');
 const gateSource = fs.readFileSync(gatePath, 'utf8');
+const runRoundSource = fs.readFileSync(runRoundPath, 'utf8');
 const results = [];
 
 function record(name, ok, detail = {}) {
@@ -457,6 +459,17 @@ record('CLASS-WEIGHT-LOCKOUT-EXECUTABLE-OR-STRONG: learned weights are advisory 
     toolSelectionGate: source.includes('elif matched_weight_lockout_classes and metrics["edits_applied"] == 0 and reads_since_edit >= WEIGHT_FORCE_EDIT_AFTER:'),
     dispatchRefusalGate: source.includes('if fn in READ_FNS and matched_weight_lockout_classes and metrics["edits_applied"] == 0 and reads_since_edit >= WEIGHT_FORCE_EDIT_AFTER:'),
   });
+record('CLASS-ROUND-WEIGHTS-ENABLED-BY-DEFAULT: canonical Atomic A/B rounds connect the learned-weight bank unless the caller explicitly overrides it',
+  runRoundSource.includes('CLASS-ROUND-WEIGHTS-ENABLED-BY-DEFAULT') &&
+  runRoundSource.includes('ATOMIC_WEIGHTS_FILE+x') &&
+  runRoundSource.includes('.corpus/weights.jsonl') &&
+  runRoundSource.includes('export ATOMIC_WEIGHTS_FILE="$HERE/.corpus/weights.jsonl"'),
+  {
+    marker: runRoundSource.includes('CLASS-ROUND-WEIGHTS-ENABLED-BY-DEFAULT'),
+    respectsOverride: runRoundSource.includes('ATOMIC_WEIGHTS_FILE+x'),
+    canonicalBank: runRoundSource.includes('.corpus/weights.jsonl'),
+    exportsBank: runRoundSource.includes('export ATOMIC_WEIGHTS_FILE="$HERE/.corpus/weights.jsonl"'),
+  });
 record('CLASS-OUT-RECEIPT-PARENT-MKDIR: round evidence output creates its parent directory before writing the final metrics receipt',
   source.includes('out_path = Path(args.out)') &&
   source.includes('out_path.parent.mkdir(parents=True, exist_ok=True)') &&
@@ -673,7 +686,7 @@ record('CLASS-RED-GATE-STACK-SCOPE-INCLUDES-CHANGED-FRAMES: when the red stack i
   source.includes('_changed_in_stack = [f for f in _stack_files if _scope_match_file(f, changed_files)]') &&
   source.includes('_external_stack_files = [f for f in _stack_files if not _scope_match_file(f, changed_files)]') &&
   source.includes('return (_changed_in_stack + _external_stack_files)[:4]') &&
-  source.includes('_stack_scope_files = _red_scope_targets(_stack_files, _changed_now, nf_, baseline_fail_floor)') &&
+  source.includes('_stack_scope_files = _red_scope_targets(_stack_files, _changed_now, nf_, baseline_fail_floor, red_scope_memory_files)') &&
   source.includes('stack={\',\'.join(_stack_files) or \'none\'}') &&
   source.includes('work outside the red repair scope') &&
   source.includes('Do not spend the repair turn outside the red repair scope'),
@@ -681,26 +694,45 @@ record('CLASS-RED-GATE-STACK-SCOPE-INCLUDES-CHANGED-FRAMES: when the red stack i
     marker: source.includes('CLASS-RED-GATE-STACK-SCOPE-INCLUDES-CHANGED-FRAMES'),
     helper: source.includes('def _stack_scope_targets(stack_files, changed_files):'),
     changedFirst: source.includes('_changed_in_stack = [f for f in _stack_files if _scope_match_file(f, changed_files)]') && source.includes('return (_changed_in_stack + _external_stack_files)[:4]'),
-    captureUsesHelper: source.includes('_stack_scope_files = _red_scope_targets(_stack_files, _changed_now, nf_, baseline_fail_floor)'),
+    captureUsesHelper: source.includes('_stack_scope_files = _red_scope_targets(_stack_files, _changed_now, nf_, baseline_fail_floor, red_scope_memory_files)'),
     editScope: source.includes('work outside the red repair scope'),
     feedback: source.includes('Do not spend the repair turn outside the red repair scope'),
   });
 record('CLASS-RED-SCOPE-MIXED-FAILURE-CHANGED-FILE-REPAIR: non-improving mixed red repair scope includes already changed source files in addition to exception stack targets',
   source.includes('CLASS-RED-SCOPE-MIXED-FAILURE-CHANGED-FILE-REPAIR') &&
-  source.includes('def _red_scope_targets(stack_files, changed_files, fail_count, baseline_floor):') &&
+  source.includes('def _red_scope_targets(stack_files, changed_files, fail_count, baseline_floor, memory_files=None):') &&
   source.includes('_stack_targets = _stack_scope_targets(stack_files, changed_files)') &&
   source.includes('baseline_floor is not None and int(fail_count) >= int(baseline_floor)') &&
-  source.includes('return (_stack_targets + _changed_sources)[:4]') &&
-  source.includes('_stack_scope_files = _red_scope_targets(_stack_files, _changed_now, nf_, baseline_fail_floor)') &&
+  source.includes('_combined = _stack_targets + _changed_sources') &&
+  source.includes('_stack_scope_files = _red_scope_targets(_stack_files, _changed_now, nf_, baseline_fail_floor, red_scope_memory_files)') &&
   source.includes('already changed source files') &&
   source.includes('The red repair scope includes scoped source file(s)'),
   {
     marker: source.includes('CLASS-RED-SCOPE-MIXED-FAILURE-CHANGED-FILE-REPAIR'),
-    helper: source.includes('def _red_scope_targets(stack_files, changed_files, fail_count, baseline_floor):'),
+    helper: source.includes('def _red_scope_targets(stack_files, changed_files, fail_count, baseline_floor, memory_files=None):'),
     nonImprovingGate: source.includes('baseline_floor is not None and int(fail_count) >= int(baseline_floor)'),
-    changedIncluded: source.includes('return (_stack_targets + _changed_sources)[:4]'),
-    captureUsesHelper: source.includes('_stack_scope_files = _red_scope_targets(_stack_files, _changed_now, nf_, baseline_fail_floor)'),
+    changedIncluded: source.includes('_combined = _stack_targets + _changed_sources'),
+    captureUsesHelper: source.includes('_stack_scope_files = _red_scope_targets(_stack_files, _changed_now, nf_, baseline_fail_floor, red_scope_memory_files)'),
     honestScopeText: source.includes('The red repair scope includes scoped source file(s)') && source.includes('already changed source files'),
+  });
+record('CLASS-RED-SCOPE-CAUSAL-MEMORY-SURVIVES-ROLLBACK: non-improving red scope includes causal scope memory preserved across clean rollback',
+  source.includes('CLASS-RED-SCOPE-CAUSAL-MEMORY-SURVIVES-ROLLBACK') &&
+  source.includes('red_scope_memory_files = set()') &&
+  source.includes('def _red_scope_targets(stack_files, changed_files, fail_count, baseline_floor, memory_files=None):') &&
+  source.includes('_memory_sources = []') &&
+  source.includes('_stack_scope_files = _red_scope_targets(_stack_files, _changed_now, nf_, baseline_fail_floor, red_scope_memory_files)') &&
+  source.includes('red_scope_memory_files.update(_stack_scope_files)') &&
+  source.includes('RED-SCOPE causal memory preserved after rollback') &&
+  source.includes('if _non_improving:') &&
+  source.includes('return _combined[:4]'),
+  {
+    marker: source.includes('CLASS-RED-SCOPE-CAUSAL-MEMORY-SURVIVES-ROLLBACK'),
+    state: source.includes('red_scope_memory_files = set()'),
+    helperSignature: source.includes('memory_files=None'),
+    helperCombines: source.includes('_memory_sources = []') && source.includes('if _non_improving:') && source.includes('return _combined[:4]'),
+    captureUsesMemory: source.includes('_red_scope_targets(_stack_files, _changed_now, nf_, baseline_fail_floor, red_scope_memory_files)'),
+    memoryUpdated: source.includes('red_scope_memory_files.update(_stack_scope_files)'),
+    rollbackTrace: source.includes('RED-SCOPE causal memory preserved after rollback'),
   });
 record('CLASS-RED-BEST-CANDIDATE-RESTORE: when no green is reached, final output restores the best gate-tested red candidate by fail-count and diff surface without claiming green',
   source.includes('CLASS-RED-BEST-CANDIDATE-RESTORE') &&
