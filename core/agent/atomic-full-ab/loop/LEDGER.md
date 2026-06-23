@@ -2630,3 +2630,4 @@ Next exact step: run R100 Atomic-only on the same frozen `sympy__sympy-20438` sn
 - Dominance remains `0/2`; no complexity escalation. R100 loses correctness and exists as representation fuel.
 
 Next exact step: run R101 Atomic-only on the same frozen `sympy__sympy-20438` snapshot against observed `Cicero`, with seq622 active plus default learned-weight wiring and `SET-REPRESENTATION-EQUALITY-VIA-SUBSET-DISPATCH`. Do not rerun native. Measure whether weighted pre-edit multi-locus reads seed red-scope early enough to keep both the relational simplifier and subset-dispatch handler available before plateau churn.
+
