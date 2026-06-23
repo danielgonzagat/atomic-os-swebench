@@ -18,9 +18,11 @@ const repoRoot = path.resolve(sourceDir, '../..');
 const agentPath = path.join(repoRoot, 'core/agent/atomic-full-ab/local-loop/local_atomic_agent.py');
 const gatePath = path.join(repoRoot, 'core/agent/atomic-full-ab/local-loop/swe_docker_gate.sh');
 const runRoundPath = path.join(repoRoot, 'core/agent/atomic-full-ab/local-loop/run_round.sh');
+const weightsAdmitPath = path.join(repoRoot, 'core/agent/atomic-full-ab/local-loop/weights_admit.py');
 const source = fs.readFileSync(agentPath, 'utf8');
 const gateSource = fs.readFileSync(gatePath, 'utf8');
 const runRoundSource = fs.readFileSync(runRoundPath, 'utf8');
+const weightsAdmitSource = fs.readFileSync(weightsAdmitPath, 'utf8');
 const results = [];
 
 function record(name, ok, detail = {}) {
@@ -420,6 +422,33 @@ record('CLASS-WEIGHT-MACRO-PATH-NORMALIZATION: executable learned weight materia
     trace: source.includes('WEIGHT-MACRO PATH-NORMALIZATION attempt'),
     gate: source.includes('WEIGHT-MACRO run_tests'),
     fullScan: source.includes('for rel in files:') && !source.includes('for rel in files[:500]:'),
+  });
+const weightsSelftest = spawnSync('python3', [weightsAdmitPath, '--selftest'], { cwd: repoRoot, encoding: 'utf8', timeout: 20000, maxBuffer: 1024 * 1024 });
+record('CLASS-ACT-FIRST-CLASS-WEIGHT-SCHEMA: learned weights are admitted, loaded, self-improved, and merged as proof-carrying ACT envelopes',
+  weightsAdmitSource.includes('ACT_FIELDS = ("preconditions", "transformation", "effects", "cost", "receipt", "fidelity_battery")') &&
+  weightsAdmitSource.includes('def build_act(operator):') &&
+  weightsAdmitSource.includes('def ensure_act(operator):') &&
+  weightsAdmitSource.includes('return normalize_weights([json.loads(l) for l in open(path)])') &&
+  weightsAdmitSource.includes('operator["act"] = build_act(operator)') &&
+  weightsAdmitSource.includes('"op": "apply_learned_resolution_operator"') &&
+  weightsAdmitSource.includes('"kind": "act-receipt-v1"') &&
+  weightsAdmitSource.includes('ACT load/admit schema') &&
+  weightsAdmitSource.includes('ACT self-update/merge schema') &&
+  source.includes('_transformation = _act.get("transformation")') &&
+  source.includes('_exspec = _w.get("executable") or _transformation.get("executable")') &&
+  weightsSelftest.status === 0 &&
+  weightsSelftest.stdout.includes('ACT load/admit schema (loaded, absorbed, created): True') &&
+  weightsSelftest.stdout.includes('ACT self-update/merge schema: True') &&
+  weightsSelftest.stdout.includes('ALL LAWS HOLD: True'),
+  {
+    actFields: weightsAdmitSource.includes('ACT_FIELDS = ("preconditions", "transformation", "effects", "cost", "receipt", "fidelity_battery")'),
+    builder: weightsAdmitSource.includes('def build_act(operator):') && weightsAdmitSource.includes('def ensure_act(operator):'),
+    loadNormalizes: weightsAdmitSource.includes('return normalize_weights([json.loads(l) for l in open(path)])'),
+    receipt: weightsAdmitSource.includes('"kind": "act-receipt-v1"'),
+    nestedExecutableConsumer: source.includes('_exspec = _w.get("executable") or _transformation.get("executable")'),
+    selftestStatus: weightsSelftest.status,
+    selftestStdout: weightsSelftest.stdout.slice(0, 400),
+    selftestStderr: weightsSelftest.stderr.slice(0, 400),
   });
 record('CLASS-WEIGHT-LOCKOUT-REFUSAL-ULTIMATUM: matched-weight lockout carries the concrete proven strategy, counts refused stale reads, and escalates to edit-only',
   source.includes('CLASS-WEIGHT-LOCKOUT-REFUSAL-ULTIMATUM') &&
