@@ -778,6 +778,23 @@ record('CLASS-CATASTROPHIC-RED-ROLLBACK-IMMEDIATE: red candidates that worsen th
     scopeClear: source.includes('red_scope_target_files = set()'),
     immediateReturn: source.includes('messages.append({"role": "tool", "tool_call_id": c["id"], "content": res})') && source.includes('continue'),
   });
+record('CLASS-CATASTROPHIC-RED-POST-ROLLBACK-EDIT-LOCKOUT: after catastrophic clean rollback, only a new edit can proceed',
+  source.includes('post_rollback_edit_required = False') &&
+  source.includes('post_rollback_edit_required = True') &&
+  source.includes('POST-ROLLBACK-EDIT tools withheld') &&
+  source.includes('STOP refused (post-rollback edit required)') &&
+  source.includes('if post_rollback_edit_required and fn not in {"atomic_replace", "atomic_create"}:') &&
+  source.includes('REFUSED (post-rollback edit required)') &&
+  source.includes('Reading/testing is disabled until a different atomic edit lands'),
+  {
+    state: source.includes('post_rollback_edit_required = False'),
+    armed: source.includes('post_rollback_edit_required = True'),
+    toolSelection: source.includes('POST-ROLLBACK-EDIT tools withheld'),
+    stopRefusal: source.includes('STOP refused (post-rollback edit required)'),
+    dispatchGuard: source.includes('if post_rollback_edit_required and fn not in {"atomic_replace", "atomic_create"}:'),
+    dispatchTrace: source.includes('REFUSED (post-rollback edit required)'),
+    rollbackMessage: source.includes('Reading/testing is disabled until a different atomic edit lands'),
+  });
 record('CLASS-NONIMPROVING-RED-RESTORE-CLEAN: non-improving red churn restores the clean baseline before receipt export instead of preserving latest dirty diff',
   source.includes('CLASS-NONIMPROVING-RED-RESTORE-CLEAN') &&
   source.includes('def _restore_clean_nonimproving_red(reason):') &&

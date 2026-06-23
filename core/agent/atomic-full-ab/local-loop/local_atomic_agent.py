@@ -1335,6 +1335,9 @@ def main():
     red_gate_quick_checks = 0  # CLASS-RED-GATE-QUICKCHECK-REPAIR-BUDGET: local quick_check is bounded per failed diff.
     post_edit_gate_required = False  # CLASS-POST-EDIT-RUN-TESTS-MANDATORY: after an accepted edit in gate-on
     post_edit_quick_checks = 0  # mode, quick_check is only a bounded self-check; run_tests is mandatory.
+    post_rollback_edit_required = False  # CLASS-CATASTROPHIC-RED-POST-ROLLBACK-EDIT-LOCKOUT: after a
+    # catastrophic clean rollback, the old bytes are gone and more reading/testing empty diff is guaranteed loss;
+    # expose only edit tools until a different atomic edit lands.
     pre_edit_topology_prompted = False
     pre_edit_topology_active = False
     # CLASS-S2-A: bound analysis paralysis. A model that over-reads (DeepSeek read 38× / 0 edits on
@@ -1631,6 +1634,10 @@ def main():
         elif green_minimize_active:
             allowed = {"run_tests"} if green_minimize_edits >= 1 else MINIMIZE_NAMES
             step_tools = [t for t in active_tools if t["function"]["name"] in allowed]
+        elif post_rollback_edit_required:
+            step_tools = [t for t in active_tools if t["function"]["name"] in {"atomic_replace", "atomic_create"}]
+            metrics["transcript"].append(
+                f"s{step} POST-ROLLBACK-EDIT tools withheld (catastrophic rollback restored clean baseline; new edit required)")
         elif red_gate_fix_required:
             _red_fix_allowed = RED_FIX_NAMES if red_gate_quick_checks < RED_GATE_QUICK_CHECK_LIMIT else (RED_FIX_NAMES - {"quick_check"})
             _red_read_limit = RED_SCOPE_TARGET_READ_LIMIT if red_scope_target_files else RED_GATE_ANCHOR_READ_LIMIT
@@ -1808,6 +1815,13 @@ def main():
                     "atomic_replace.")})
                 continue
             empties += 1
+            if post_rollback_edit_required:
+                metrics["invalid_states_prevented"] += 1
+                metrics["transcript"].append(f"s{step} STOP refused (post-rollback edit required)")
+                messages.append({"role": "user", "content": (
+                    "STOP is invalid: the last candidate was catastrophically red and was rolled back to a clean baseline. "
+                    "The workspace has no patch to submit. Make a DIFFERENT atomic_replace/atomic_create now; only after bytes change may you quick_check and run_tests.")})
+                continue
             if post_edit_gate_required and not NO_GATE:
                 metrics["invalid_states_prevented"] += 1
                 metrics["transcript"].append(f"s{step} STOP refused (post-edit run_tests required)")
@@ -1923,6 +1937,15 @@ def main():
             if green_minimize_active and fn == "atomic_create":
                 res = "FILE CREATION DISABLED — post-green minimization may only shrink an accepted diff with atomic_replace."
                 metrics["transcript"].append(f"s{step} {fn} REFUSED (green-minimize create disabled)")
+                messages.append({"role": "tool", "tool_call_id": c["id"], "content": res})
+                continue
+
+            if post_rollback_edit_required and fn not in {"atomic_replace", "atomic_create"}:
+                res = ("TOOL DISABLED — catastrophic red rollback restored the clean baseline. "
+                       "Reading, quick_check, and run_tests on empty diff cannot improve the submission. "
+                       "Make a DIFFERENT atomic_replace/atomic_create first; then quick_check and run_tests.")
+                metrics["invalid_states_prevented"] += 1
+                metrics["transcript"].append(f"s{step} {fn} REFUSED (post-rollback edit required)")
                 messages.append({"role": "tool", "tool_call_id": c["id"], "content": res})
                 continue
 
@@ -2123,11 +2146,12 @@ def main():
                             red_scope_target_files = set()
                             post_edit_gate_required = False
                             post_edit_quick_checks = 0
+                            post_rollback_edit_required = True
                             _consec_red = 0
                             metrics["invalid_states_prevented"] += 1
                             res += ("\n\n[red-rollback] Candidate worsened acceptance beyond the frozen fail floor "
                                     f"(fail={nf_}, floor={baseline_fail_floor}); clean baseline restored. "
-                                    "Do not refine or reapply that candidate. Make a different atomic edit, then quick_check and run_tests.")
+                                    "Do not refine or reapply that candidate. Reading/testing is disabled until a different atomic edit lands.")
                             metrics["transcript"].append(
                                 f"s{step} CATASTROPHIC-RED rollback clean (fail={nf_}, floor={baseline_fail_floor})")
                             reads_since_edit = 0; distinct_since_edit.clear()
@@ -2369,6 +2393,7 @@ def main():
                         forced = False
                         force_refused = 0  # an edit landed → spin broken
                         force_no_edit_commit = False
+                        post_rollback_edit_required = False
                         red_gate_fix_required = False
                         red_gate_fix_reason = ""
                         red_gate_anchor_reads = 0
