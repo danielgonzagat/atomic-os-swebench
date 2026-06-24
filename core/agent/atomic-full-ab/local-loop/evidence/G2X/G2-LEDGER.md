@@ -38,3 +38,20 @@
 - CROSS-MODEL LIFT of the substrate: NOT demonstrated by number. Mechanism (Phase 1 autoclass) built+validated (precision
   1.0, removes the model-PARTITION dependence); the LIFT it should produce is unproven/unmeasured. The measurable-lift
   blocker is the Goldilocks-instance problem (need base 0<x<8) crossed with the K>=3-only-in-hard-repos constraint.
+
+## VSA-RUNG PRE-SIGNAL (2026-06-23, CPU-only, no Docker) — positive, but it's the LOCUS signal
+Tested whether the Codex-built VSA layer (encode_vsa_text/bundle/similarity in weights_admit.py) discriminates classes
+on golds. VSA-over-LOCUS-text (file-basename + edited function names) on compiler.py/sql K=5: leave-one-out vs 12 decoys =
+DISCRIMINATION 4/5 (member sim 0.37-0.57 vs decoy 0.18-0.29). This is FAR better than the pure-AST/structure rung (0/5,
+falsified) — but for the SAME reason the morpheme+file key works: VSA discriminates because it encodes the LOCUS vocabulary,
+NOT pure structure. So: (a) confirms (again) the class signal lives in the locus; (b) VSA is a FUZZY re-encoding of the same
+signal the discrete morpheme+file key already captures at precision 1.0. VSA's potential ADDED value = generalizing to
+near-miss members the exact key would miss — UNTESTED. So the VSA rung is worth testing ONLY over the locus (not pure
+structure), and its marginal value over the exact key is the open question, not a given.
+
+## G2-003 (RUNNING) — FIXED model v4-pro, MECHANICAL operator, Goldilocks-selected django-11490 (1-line gold)
+- Docker recovered by aggressive VM-kill (ENOSPC hang; soft restart failed, killing com.docker.virtualization + stale socket worked).
+- Goldilocks selection: scanned all 34 K>=3 django clusters by gold-size; django-11490 (compiler.py/sql K=5, gold=1 line/1 file)
+  is the smallest-gold = best bet to land base in the measurable band (0<base<8), unlike django-11885 (130-line gold, floored).
+- operator: MECHANICAL {compiler.py,'sql'} (canonical_act=true, no model label), captured from 12965/14007/15563, held-out 11490.
+- gold feasibility PASSED (django-11490 gold resolved 1/1, image builds). v4-pro base+weight arms running. Number pending.
