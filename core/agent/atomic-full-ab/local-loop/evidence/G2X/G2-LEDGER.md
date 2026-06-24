@@ -99,3 +99,22 @@ transform recurrence + (b) weak model fails one-shot + (c) learnable-from-K — 
 (b)→hard/novel→no recurrence. The intersection = model-UNKNOWN-but-SYSTEMATIC = project-specific non-obvious conventions =
 needs a harvested real corpus (authoring it = circular = the strong model relocated into the loop). Cross-model lift is
 UNTESTED on the right instrument, not falsified. Refused to fabricate a circular synthetic lift (anti-facade > stop-hook).
+
+## ELEVAÇÃO-001 (the NEW metric, measured 2026-06-24) — NULL
+- v4-pro + full accumulated substrate (9 canonical ACTs, sha 545010c) vs v4-pro base, distinct held-out sympy tasks, official.
+- sympy-13877: base 1/4, substrate 1/4, delta 0 (substrate FIRED but did NOT lift). sympy-16597: base 0/4, substrate 0/4
+  (substrate SILENT — no trigger). TOTAL base 1/8, substrate 1/8, ELEVATION=0. VERDICT: NULL (no elevation).
+- By number: the current substrate (9 instance-derived ACTs injected as hints) produces ZERO elevation on distinct tasks —
+  even where it fires it does not lift (same WHERE-not-HOW boundary). The accumulating VSA corpus adds nothing across distinct bugs.
+
+## SYNTHESIS — where the substrate's transferable value ACTUALLY lives (by number, all angles)
+Three independent metrics (G2 re-occurrence, fix-shape search, Elevação) all NULL, all for ONE reason: the corpus operators
+are INSTANCE-DERIVED (capture a specific gold's WHERE/locus), not GENERAL strategy, so they don't transfer to distinct bugs.
+BUT the substrate's REAL transferable value is NOT the VSA corpus — it's the ~30 general-strategy GUARDS baked into the DRIVER
+(local_atomic_agent.py: plateau-abandon, scope-fixation, red-gate-stack-scope, force-edit, etc.), which DO transfer across
+tasks and lift DeepSeek to PARITY with native Claude (the 12-round A/B = 1 win/9 ties/2 losses). That general-strategy layer
+is the honest substrate Elevation — and it's already there. The VSA/corpus layer (instance operators) adds no marginal
+Elevation on distinct tasks. For the corpus to elevate, it must capture GENERAL strategies as transferable operators — but
+those already live in the driver. The conexionist finetuning is now FIXED (70e3f7c) but finetuning instance-operators that
+don't transfer won't create Elevation. OPEN CONSTRUCTION: capture general (task-transferable) strategy INTO the corpus as
+finetunable operators, distinct from instance-WHERE operators — the genuine unsolved next step for measurable Elevation.
