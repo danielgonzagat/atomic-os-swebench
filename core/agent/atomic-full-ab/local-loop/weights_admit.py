@@ -85,22 +85,29 @@ def vsa_similarity(v1, v2):
     return dot / len(v1)
 
 
-def reinforce_success(operator, success_signal):
-    """Reinforce the operator VSA vector with a successful signal (acerto -> reforça)."""
+def reinforce_success(operator, success_signal, lr=1.0):
+    """Reinforce the operator VSA vector with a successful signal (acerto -> reforça).
+
+    FINETUNING FIX: the prior single bipolar `vsa_bundle([op, sig])` sign-thresholds to +/-1, which SATURATES —
+    bundling the signal once did NOT increase similarity (selftest measured reinforce 0.619->0.619 = a NO-OP that
+    only passed the gate because it was >=). Real finetuning must ACCUMULATE evidence: the operator vsa becomes a
+    real-valued memory trace; each success ADDS the signal (with learning rate), so repeated reinforcement of the
+    same class STRICTLY increases similarity and the weights actually learn from use. Monotonic in evidence, no
+    gradient. (admit() still seeds the prototype via bipolar vsa_bundle; reinforce/correct finetune it real-valued.)"""
     if "vsa" not in operator:
         ensure_act(operator)
     sig_vec = encode_vsa_text(success_signal)
-    operator["vsa"] = vsa_bundle([operator["vsa"], sig_vec])
+    operator["vsa"] = [v + lr * s for v, s in zip(operator["vsa"], sig_vec)]
     ensure_act(operator, force_vsa_update=False)
 
 
-def correct_error(operator, error_signal):
-    """Correct/subtract the error signal from the operator VSA vector (erro -> corrige)."""
+def correct_error(operator, error_signal, lr=1.0):
+    """Correct/subtract the error signal from the operator VSA vector (erro -> corrige). Symmetric real-valued
+    accumulation: each error SUBTRACTS the signal, so similarity to the error pattern strictly decreases with use."""
     if "vsa" not in operator:
         ensure_act(operator)
     err_vec = encode_vsa_text(error_signal)
-    neg_err_vec = [-x for x in err_vec]
-    operator["vsa"] = vsa_bundle([operator["vsa"], neg_err_vec])
+    operator["vsa"] = [v - lr * e for v, e in zip(operator["vsa"], err_vec)]
     ensure_act(operator, force_vsa_update=False)
 
 
@@ -432,19 +439,24 @@ if __name__ == "__main__":
         sim_dissimilar = vsa_similarity(v1, v3)
         vsa_algebra_ok = (sim_similar > 0.3) and (sim_dissimilar < 0.2)
         
-        # Test reinforcement learning: acerto / erro
+        # Test reinforcement learning: acerto / erro — STRICT (a no-op reinforce must FAIL the gate, never fake-green).
         op_vsa_orig = list(op["vsa"])
         reinforce_success(op, "files not excluded by filter recursively")
         sim_reinf = vsa_similarity(op["vsa"], encode_vsa_text("files not excluded by filter recursively"))
         sim_reinf_orig = vsa_similarity(op_vsa_orig, encode_vsa_text("files not excluded by filter recursively"))
-        reinforce_ok = sim_reinf >= sim_reinf_orig
-        
-        correct_error(op, "wrong class pattern matched by mistake")
-        sim_err = vsa_similarity(op["vsa"], encode_vsa_text("wrong class pattern matched by mistake"))
+        reinforce_ok = sim_reinf > sim_reinf_orig          # STRICT: reinforcement must actually increase similarity
+        # CUMULATIVE: a second reinforcement of the SAME class must increase similarity AGAIN (real finetuning, not one-shot)
+        reinforce_success(op, "files not excluded by filter recursively")
+        sim_reinf2 = vsa_similarity(op["vsa"], encode_vsa_text("files not excluded by filter recursively"))
+        cumulative_ok = sim_reinf2 > sim_reinf
+
+        op_for_err = dict(op); op_for_err["vsa"] = list(op_vsa_orig)
+        correct_error(op_for_err, "wrong class pattern matched by mistake")
+        sim_err = vsa_similarity(op_for_err["vsa"], encode_vsa_text("wrong class pattern matched by mistake"))
         sim_err_orig = vsa_similarity(op_vsa_orig, encode_vsa_text("wrong class pattern matched by mistake"))
-        correct_ok = sim_err <= sim_err_orig
-        
-        vsa_learning_ok = reinforce_ok and correct_ok
+        correct_ok = sim_err < sim_err_orig                # STRICT: correction must actually decrease similarity
+
+        vsa_learning_ok = reinforce_ok and cumulative_ok and correct_ok
         print("VSA algebra and trigram random projection:   ", vsa_algebra_ok, f"(similar={sim_similar:.3f}, dissimilar={sim_dissimilar:.3f})")
         print("VSA learns from usage (success/error loops): ", vsa_learning_ok, f"(reinforce: {sim_reinf_orig:.3f}->{sim_reinf:.3f}, correct: {sim_err_orig:.3f}->{sim_err:.3f})")
         
