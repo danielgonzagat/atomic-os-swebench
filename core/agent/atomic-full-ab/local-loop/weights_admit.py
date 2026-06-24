@@ -111,6 +111,40 @@ def correct_error(operator, error_signal, lr=1.0):
     ensure_act(operator, force_vsa_update=False)
 
 
+# --- TRAVA: the first-class BLOCK primitive (the doctrine's Apêndice-A `papel: TRAVA`) -----------------------
+# The decisive reframe (proven by number this session): FIXES don't recur (0 fix-classes in SWE-bench-Verified) but
+# ERRORS do. So the substrate's transferable value is not suggesting unique fixes — it is (a) BLOCKING a move already
+# proven wrong, and (b) suggesting its opposite. A trava is an operator carrying the VSA of a proven-wrong error
+# pattern (fed by the disproof-corpus). When a candidate move's VSA is close enough to the trava's error pattern, the
+# trava BLOCKS it. Because errors recur across DISTINCT bugs, the trava generalizes where instance-WHERE operators do
+# not. The VSA match is finetuned by correct_error/reinforce (now real, cumulative), so the trava sharpens with use.
+def make_trava(error_pattern, opposite_suggestion="", threshold=0.35):
+    """Capture a proven-wrong pattern as a recoverable, finetunable TRAVA operator."""
+    return {"role": "TRAVA",
+            "vsa": encode_vsa_text(error_pattern),
+            "error_pattern": error_pattern,
+            "suggest_opposite": opposite_suggestion,
+            "threshold": float(threshold),
+            "hits": 0}
+
+
+def trava_blocks(trava, candidate_signal):
+    """Does this trava BLOCK the candidate move? (VSA-similarity of the candidate to the proven-wrong pattern >=
+    threshold). Generalizes across distinct bugs because it matches the ERROR shape, not a specific fix. Returns
+    (blocked: bool, similarity: float, opposite: str)."""
+    sim = vsa_similarity(trava["vsa"], encode_vsa_text(candidate_signal))
+    blocked = sim >= trava.get("threshold", 0.35)
+    return blocked, sim, trava.get("suggest_opposite", "")
+
+
+def trava_reinforce(trava, recurring_error_signal, lr=1.0):
+    """The error recurred (on a DISTINCT bug) → sharpen the trava so it blocks this pattern more strongly. Uses the
+    fixed cumulative reinforce: repeated exposure strictly increases the trava's similarity to the error shape."""
+    reinforce_success(trava, recurring_error_signal, lr=lr)
+    trava["hits"] = trava.get("hits", 0) + 1
+    return trava
+
+
 ACT_FIELDS = ("preconditions", "transformation", "effects", "cost", "receipt", "fidelity_battery")
 
 
@@ -457,8 +491,26 @@ if __name__ == "__main__":
         correct_ok = sim_err < sim_err_orig                # STRICT: correction must actually decrease similarity
 
         vsa_learning_ok = reinforce_ok and cumulative_ok and correct_ok
+
+        # TRAVA primitive: a proven-wrong error pattern BLOCKS a matching move + suggests the opposite, and
+        # GENERALIZES (blocks a surface-distinct re-occurrence of the same error shape), and SHARPENS with use.
+        trava = make_trava("edited the symptom site instead of the upstream root cause",
+                           opposite_suggestion="trace to the upstream decision function and fix the root", threshold=0.30)
+        # blocks the same error on a DISTINCT-surface bug (error recurs even though the fix is unique):
+        blk_recur, sim_recur, opp = trava_blocks(trava, "patched the symptom location not the upstream cause")
+        # does NOT block an unrelated, correct-shaped move:
+        blk_ok, sim_ok, _ = trava_blocks(trava, "added a dispatch handler in the registry module")
+        trava_generalizes = blk_recur and (not blk_ok) and bool(opp)
+        # sharpens with use (recurring error → stronger block):
+        trava_reinforce(trava, "patched the symptom location not the upstream cause")
+        _, sim_after, _ = trava_blocks(trava, "patched the symptom location not the upstream cause")
+        trava_sharpens = sim_after > sim_recur
+        trava_ok = trava_generalizes and trava_sharpens
+        print("TRAVA blocks proven-wrong + generalizes + sharpens:", trava_ok,
+              f"(recur_sim={sim_recur:.2f} block={blk_recur}, distinct_sim={sim_ok:.2f} block={blk_ok}, after_reinforce={sim_after:.2f})")
+
         print("VSA algebra and trigram random projection:   ", vsa_algebra_ok, f"(similar={sim_similar:.3f}, dissimilar={sim_dissimilar:.3f})")
         print("VSA learns from usage (success/error loops): ", vsa_learning_ok, f"(reinforce: {sim_reinf_orig:.3f}->{sim_reinf:.3f}, correct: {sim_err_orig:.3f}->{sim_err:.3f})")
         
-        print("ALL LAWS HOLD:", absorbed and created and ok_short and (not ok_long) and (not ok_break) and ok_keep and fid_ok and merged_ok and act_load_ok and act_absorb_ok and act_created_ok and act_update_ok and act_merge_ok and vsa_algebra_ok and vsa_learning_ok)
+        print("ALL LAWS HOLD:", absorbed and created and ok_short and (not ok_long) and (not ok_break) and ok_keep and fid_ok and merged_ok and act_load_ok and act_absorb_ok and act_created_ok and act_update_ok and act_merge_ok and vsa_algebra_ok and vsa_learning_ok and trava_ok)
 
