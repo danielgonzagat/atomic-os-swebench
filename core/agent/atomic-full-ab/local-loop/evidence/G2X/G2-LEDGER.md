@@ -71,3 +71,21 @@ structure), and its marginal value over the exact key is the open question, not 
   K cluster-mates' gold AST-diffs into a parameterized edit shape, inject it (the HOW). Phase 0 (commit 661378f) persists
   raw_diff + edited_units → this rung is now buildable. Whether a generic anti-unified template helps or is too generic is the
   open question — the next G2.
+
+## CONFIRMING NUMBER (2026-06-23) — SWE-bench-Verified has ~ZERO fix-class re-occurrences
+Searched all 500 golds for fix-SHAPE duplicates (added lines normalized: identifiers->V, strings->S, numbers->N, keeping
+keyword/operator skeleton — so the SAME transformation matches regardless of surface names). Result: fix-shape classes with
+K>=3 = **0**; cross-repo fix-shape K>=2 = just 1 (likely coincidental). So SWE-bench-Verified is, by number, a DISTINCT-BUG
+benchmark with no recurring fix-classes. This DEFINITIVELY confirms: the cross-model lift thesis (lift on an ALREADY-LEARNED
+class = a re-occurrence) is NOT measurable on this instrument — there are no held-out re-occurrences to lift. The 3 G2 nulls
+are structurally guaranteed, not representation failures. To test the thesis on real data needs a DIFFERENT corpus (one with
+recurring bug-classes) or a synthetic re-occurrence harness (with circularity guards). This is a human/design decision on the
+next instrument — a legitimate stop point per the doctrine ("sinal que exija humano").
+
+## SESSION G2 ARC — COMPLETE + HONEST (by number)
+- Substrate MECHANISM: built + validated (autoclass precision 1.0 removes model-partition dependence; pure-AST rung falsified
+  0/5; VSA-locus 4/5 = fuzzy re-encoding of locus). REAL, committed.
+- Cross-model LIFT: G2-001 +1/8 null, G2-002 0/0 floor, G2-003 1/8->0/8 measurable ZERO-lift (operator delivers WHERE not HOW).
+  3 attempts, none shows lift — AND proven structurally unmeasurable on SWE-bench (0 fix re-occurrences).
+- VERDICT: thesis UNTESTED on the right instrument, not falsified. SWE-bench held-out = wrong instrument (distinct bugs).
+  Next instrument = re-occurrence (real recurring-bug corpus, or synthetic w/ circularity guards) = a deliberate fresh build.
