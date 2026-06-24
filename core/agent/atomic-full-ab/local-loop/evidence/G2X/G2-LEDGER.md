@@ -118,3 +118,29 @@ Elevation on distinct tasks. For the corpus to elevate, it must capture GENERAL 
 those already live in the driver. The conexionist finetuning is now FIXED (70e3f7c) but finetuning instance-operators that
 don't transfer won't create Elevation. OPEN CONSTRUCTION: capture general (task-transferable) strategy INTO the corpus as
 finetunable operators, distinct from instance-WHERE operators — the genuine unsolved next step for measurable Elevation.
+
+## TRAVA GENERALIZATION = LEXICAL not SEMANTIC (2026-06-24, CPU-only by number) — the precise next requirement
+Built the TRAVA primitive (make_trava/trava_blocks/trava_reinforce, selftest ALL LAWS HOLD). Tested whether it
+GENERALIZES to surface-variant errors (same MEANING, different words) that the exact-string seq601-624 guards miss:
+4 semantic variants of known error-classes vs 3 correct moves. RESULT: surface-variants CAUGHT 1/4 (the one sharing
+words; the other 3 at sim 0.08-0.19 < 0.30 threshold), false-positives 0/3 (precise). VERDICT: weak generalization.
+WHY (by number): the VSA encoding is character-TRIGRAM random projection → captures LEXICAL/surface similarity, NOT
+SEMANTIC. "edited the symptom site" vs "modified the call-site where the error showed up" are the SAME error
+semantically but share few trigrams → low VSA sim. So errors recur SEMANTICALLY (same kind of mistake, different
+words/context) but trigram-VSA only matches LEXICAL re-occurrence.
+THE PRECISE NEXT REQUIREMENT (honest, by number): for travas to catch semantic error re-occurrences (the doctrine's
+bet — "os erros recorrem"), the conexionist CONTENT needs SEMANTIC encoding (embeddings), not trigram-VSA. And semantic
+encoding likely needs a model/embedding — which is the honest frontier (§5: "um problema genuinamente novo ainda exige
+generalização de algum modelo"). So: trava MECHANISM sound + precise; trava GENERALIZATION bounded by the lexical VSA;
+the missing conexionist layer is SEMANTIC representation. This is the same boundary as the pure-AST falsification, now
+for travas: surface/structure encoding doesn't carry the meaning; semantic generalization needs semantic representation.
+
+## COMPLETE SESSION SYNTHESIS (every angle, by number)
+1. G2/re-occurrence: FIXES don't recur (0 fix-classes K>=3) → operator gives WHERE not HOW → 3 G2 nulls (structural).
+2. Elevation (instance-operators): NULL (substrate fires but doesn't lift; instance-WHERE doesn't transfer).
+3. Trava mechanism (the reframe): BUILT + proven precise, BUT generalizes only LEXICALLY (1/4 semantic) — trigram-VSA.
+4. Conexionist finetuning: FIXED (reinforce real+cumulative, 70e3f7c).
+NET: the substrate's transferable value = blocking recurring ERRORS + suggesting what worked; the MECHANISM is built;
+the missing piece is SEMANTIC representation of the conexionist content (so a trava/suggestion matches by MEANING, not
+words). Elevation remains UNPROVEN; the next real construction is semantic encoding (likely model-backed embeddings),
+not more lexical-VSA. No number was fabricated; every null/weak result recorded.
