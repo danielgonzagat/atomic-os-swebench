@@ -1,0 +1,56 @@
+diff --git a/pylint/lint/pylinter.py b/pylint/lint/pylinter.py
+index 53345a6b1..49b72f149 100644
+--- a/pylint/lint/pylinter.py
++++ b/pylint/lint/pylinter.py
+@@ -15,6 +15,7 @@ import warnings
+ from collections import defaultdict
+ from collections.abc import Callable, Iterable, Iterator, Sequence
+ from io import TextIOWrapper
++from re import Pattern
+ from typing import Any
+ 
+ import astroid
+@@ -565,11 +566,24 @@ class PyLinter(
+                 self._msgs_state[msg.msgid] = False
+ 
+     @staticmethod
+-    def _discover_files(files_or_modules: Sequence[str]) -> Iterator[str]:
++    def _discover_files(
++        files_or_modules: Sequence[str],
++        ignore_list: list[str] | None = None,
++        ignore_list_re: list[Pattern[str]] | None = None,
++        ignore_list_paths_re: list[Pattern[str]] | None = None,
++    ) -> Iterator[str]:
+         """Discover python modules and packages in sub-directory.
+ 
+         Returns iterator of paths to discovered modules and packages.
+         """
++        from pylint.lint.expand_modules import _is_in_ignore_list_re
++
++        if ignore_list is None:
++            ignore_list = []
++        if ignore_list_re is None:
++            ignore_list_re = []
++        if ignore_list_paths_re is None:
++            ignore_list_paths_re = []
+         for something in files_or_modules:
+             if os.path.isdir(something) and not os.path.isfile(
+                 os.path.join(something, "__init__.py")
+@@ -579,6 +593,17 @@ class PyLinter(
+                     if any(root.startswith(s) for s in skip_subtrees):
+                         # Skip subtree of already discovered package.
+                         continue
++                    # Check if the root should be ignored
++                    if any(
++                        os.path.basename(root) == ig for ig in ignore_list
++                    ) or _is_in_ignore_list_re(
++                        os.path.basename(root), ignore_list_re
++                    ):
++                        skip_subtrees.append(root)
++                        continue
++                    if _is_in_ignore_list_re(root, ignore_list_paths_re):
++                        skip_subtrees.append(root)
++                        continue
+                     if "__init__.py" in files:
+                         skip_subtrees.append(root)
+                         yield root

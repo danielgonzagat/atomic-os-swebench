@@ -1,0 +1,72 @@
+diff --git a/pylint/lint/pylinter.py b/pylint/lint/pylinter.py
+index 53345a6b1..165edc155 100644
+--- a/pylint/lint/pylinter.py
++++ b/pylint/lint/pylinter.py
+@@ -564,21 +564,30 @@ class PyLinter(
+             if not msg.may_be_emitted():
+                 self._msgs_state[msg.msgid] = False
+ 
+-    @staticmethod
+-    def _discover_files(files_or_modules: Sequence[str]) -> Iterator[str]:
++    def _discover_files(self, files_or_modules: Sequence[str]) -> Iterator[str]:
+         """Discover python modules and packages in sub-directory.
+ 
+         Returns iterator of paths to discovered modules and packages.
+         """
+         for something in files_or_modules:
++            if self._ignore_option_should_skip(something):
++                continue
+             if os.path.isdir(something) and not os.path.isfile(
+                 os.path.join(something, "__init__.py")
+             ):
+                 skip_subtrees: list[str] = []
+-                for root, _, files in os.walk(something):
++                for root, dirs, files in os.walk(something):
+                     if any(root.startswith(s) for s in skip_subtrees):
+                         # Skip subtree of already discovered package.
+                         continue
++                    # Filter out ignored directories so os.walk does not descend into them
++                    dirs[:] = [
++                        d
++                        for d in dirs
++                        if not self._ignore_option_should_skip(
++                            os.path.join(root, d), is_dir=True
++                        )
++                    ]
+                     if "__init__.py" in files:
+                         skip_subtrees.append(root)
+                         yield root
+@@ -587,10 +596,33 @@ class PyLinter(
+                             os.path.join(root, file)
+                             for file in files
+                             if file.endswith(".py")
++                            and not self._ignore_option_should_skip(
++                                os.path.join(root, file)
++                            )
+                         )
+             else:
+                 yield something
+ 
++    def _ignore_option_should_skip(
++        self, path: str, is_dir: bool = False
++    ) -> bool:
++        """Check if a path should be skipped according to ignore options."""
++        # --ignore: base names (files or directories)
++        if os.path.basename(path) in self.config.ignore:
++            return True
++        # --ignore-patterns: regex against base names
++        if self.config.ignore_patterns and any(
++            pattern.search(os.path.basename(path))
++            for pattern in self.config.ignore_patterns
++        ):
++            return True
++        # --ignore-paths: regex against full paths
++        if self.config.ignore_paths and any(
++            pattern.search(path) for pattern in self.config.ignore_paths
++        ):
++            return True
++        return False
++
+     def check(self, files_or_modules: Sequence[str] | str) -> None:
+         """Main checking entry: check a list of files or modules from their name.
+ 

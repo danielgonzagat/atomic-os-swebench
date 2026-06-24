@@ -1,0 +1,73 @@
+diff --git a/pylint/lint/pylinter.py b/pylint/lint/pylinter.py
+index 53345a6b1..244793a36 100644
+--- a/pylint/lint/pylinter.py
++++ b/pylint/lint/pylinter.py
+@@ -591,6 +591,59 @@ class PyLinter(
+             else:
+                 yield something
+ 
++    def _discover_files_with_ignores(
++        self, files_or_modules: Sequence[str]
++    ) -> Iterator[str]:
++        """Discover python modules and packages, respecting ignore settings."""
++        ignore_list = self.config.ignore
++        ignore_list_re = self.config.ignore_patterns
++        ignore_list_paths_re = self._ignore_paths
++
++        def _is_ignored(path: str) -> bool:
++            basename = os.path.basename(path)
++            if basename in ignore_list:
++                return True
++            if any(
++                file_pattern.match(basename) for file_pattern in ignore_list_re
++            ):
++                return True
++            if any(
++                file_pattern.match(path) for file_pattern in ignore_list_paths_re
++            ):
++                return True
++            # Also check directory components against ignore_list and ignore_list_re
++            parts = path.split(os.sep)
++            for part in parts:
++                if part in ignore_list:
++                    return True
++                if any(
++                    file_pattern.match(part) for file_pattern in ignore_list_re
++                ):
++                    return True
++            return False
++
++        for something in files_or_modules:
++            if os.path.isdir(something) and not os.path.isfile(
++                os.path.join(something, "__init__.py")
++            ):
++                skip_subtrees: list[str] = []
++                for root, _, files in os.walk(something):
++                    if any(root.startswith(s) for s in skip_subtrees):
++                        continue
++                    if "__init__.py" in files:
++                        skip_subtrees.append(root)
++                        if not _is_ignored(root):
++                            yield root
++                    else:
++                        for file in files:
++                            if file.endswith(".py"):
++                                filepath = os.path.join(root, file)
++                                if not _is_ignored(filepath):
++                                    yield filepath
++            else:
++                if not _is_ignored(something):
++                    yield something
++
+     def check(self, files_or_modules: Sequence[str] | str) -> None:
+         """Main checking entry: check a list of files or modules from their name.
+ 
+@@ -605,7 +658,7 @@ class PyLinter(
+             )
+             files_or_modules = (files_or_modules,)  # type: ignore[assignment]
+         if self.config.recursive:
+-            files_or_modules = tuple(self._discover_files(files_or_modules))
++            files_or_modules = tuple(self._discover_files_with_ignores(files_or_modules))
+         if self.config.from_stdin:
+             if len(files_or_modules) != 1:
+                 raise exceptions.InvalidArgsError(

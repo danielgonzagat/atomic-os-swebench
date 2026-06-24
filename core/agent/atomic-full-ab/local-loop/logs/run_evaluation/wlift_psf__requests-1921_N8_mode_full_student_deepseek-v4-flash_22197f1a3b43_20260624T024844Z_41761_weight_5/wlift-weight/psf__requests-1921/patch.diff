@@ -1,0 +1,35 @@
+diff --git a/requests/sessions.py b/requests/sessions.py
+index a023e4ec..447a0ec5 100644
+--- a/requests/sessions.py
++++ b/requests/sessions.py
+@@ -42,7 +42,11 @@ def merge_setting(request_setting, session_setting, dict_class=OrderedDict):
+         return request_setting
+ 
+     if request_setting is None:
+-        return session_setting
++        # Remove keys that are set to None, to avoid sending "None" as value.
++        merged_setting = dict_class(
++            (k, v) for k, v in to_key_val_list(session_setting) if v is not None
++        )
++        return merged_setting
+ 
+     # Bypass if not a dictionary (e.g. verify)
+     if not (
+@@ -54,11 +58,16 @@ def merge_setting(request_setting, session_setting, dict_class=OrderedDict):
+     merged_setting = dict_class(to_key_val_list(session_setting))
+     merged_setting.update(to_key_val_list(request_setting))
+ 
+-    # Remove keys that are set to None.
++    # Remove keys that are set to None in the request settings.
+     for (k, v) in request_setting.items():
+         if v is None:
+             del merged_setting[k]
+ 
++    # Remove keys that are set to None in the session settings as well.
++    for (k, v) in session_setting.items():
++        if v is None and k not in request_setting:
++            merged_setting.pop(k, None)
++
+     return merged_setting
+ 
+ 

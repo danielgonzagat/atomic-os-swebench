@@ -26,8 +26,23 @@ resolve_path(){
 }
 
 validate_swebench_python(){
-  "$SWE_PYTHON" - <<'PY' >/dev/null 2>&1
-import swebench.harness.run_evaluation
+  python3 - "$SWE_PYTHON" "$SWEBENCH_IMPORT_TIMEOUT_SECONDS" <<'PY' >/dev/null 2>&1
+import subprocess, sys
+swe_python, timeout = sys.argv[1], int(sys.argv[2])
+subprocess.check_call(
+    [swe_python, "-c", "import swebench.harness.run_evaluation"],
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+    timeout=timeout,
+)
+PY
+}
+
+validate_docker_api(){
+  python3 - "$DOCKER_TIMEOUT_SECONDS" <<'PY' >/dev/null 2>&1
+import subprocess, sys
+timeout = int(sys.argv[1])
+subprocess.check_output(["docker", "version", "--format", "{{.Server.Version}}"], stderr=subprocess.STDOUT, text=True, timeout=timeout)
 PY
 }
 
@@ -66,6 +81,12 @@ TEACHER_MODEL="${ATOMIC_WLIFT_TEACHER_MODEL:-deepseek-v4-pro}"
 STUDENT_MODEL="${ATOMIC_WLIFT_STUDENT_MODEL:-${DEEPSEEK_MODEL:-deepseek-v4-pro}}"
 BASE_ONLY=false
 [ "${ATOMIC_WLIFT_BASE_ONLY:-}" = "1" ] && BASE_ONLY=true
+SAMPLE_TIMEOUT_SECONDS="${ATOMIC_WLIFT_SAMPLE_TIMEOUT_SECONDS:-600}"
+SCORE_TIMEOUT_SECONDS="${ATOMIC_WLIFT_SCORE_TIMEOUT_SECONDS:-900}"
+SCORE_ATTEMPTS="${ATOMIC_WLIFT_SCORE_ATTEMPTS:-2}"
+MIN_FREE_KB="${ATOMIC_WLIFT_MIN_FREE_KB:-2097152}"
+DOCKER_TIMEOUT_SECONDS="${ATOMIC_WLIFT_DOCKER_TIMEOUT_SECONDS:-20}"
+SWEBENCH_IMPORT_TIMEOUT_SECONDS="${ATOMIC_WLIFT_SWEBENCH_IMPORT_TIMEOUT_SECONDS:-30}"
 CROSS_MODEL=false
 [ "$TEACHER_MODEL" != "$STUDENT_MODEL" ] && CROSS_MODEL=true
 
@@ -81,13 +102,19 @@ if [ "${1:-}" = "--selftest" ]; then
   echo "student_model=$STUDENT_MODEL"
   echo "cross_model=$CROSS_MODEL"
   echo "base_only=$BASE_ONLY"
+  echo "sample_timeout_seconds=$SAMPLE_TIMEOUT_SECONDS"
+  echo "score_timeout_seconds=$SCORE_TIMEOUT_SECONDS"
+  echo "score_attempts=$SCORE_ATTEMPTS"
+  echo "min_free_kb=$MIN_FREE_KB"
+  echo "docker_timeout_seconds=$DOCKER_TIMEOUT_SECONDS"
+  echo "swebench_import_timeout_seconds=$SWEBENCH_IMPORT_TIMEOUT_SECONDS"
   echo "swe_python=$SWE_PYTHON"
   if validate_swebench_python; then
     echo "swebench_importable=true"
   else
     echo "swebench_importable=false"
   fi
-  echo "summary_fields=base_resolved,weight_resolved,N,lift,weights_sha256,canonical_act,teacher_model,student_model,cross_model,base_only,g2_valid"
+  echo "summary_fields=base_resolved,weight_resolved,N,lift,weights_sha256,canonical_act,teacher_model,student_model,cross_model,base_only,sample_timeouts,score_failures,goldilocks_baseline,fail_floor_positive_lift,g2_valid"
   exit 0
 fi
 
@@ -97,6 +124,15 @@ canonical_act="$(validate_weights_bank "$WEIGHTS")" || exit $?
 weights_sha="$(sha256_file "$WEIGHTS")"
 if [ "$CROSS_MODEL" != true ] && [ "${ATOMIC_WLIFT_ALLOW_MODEL_EQUAL:-}" != "1" ]; then
   echo "model-equal lift is not G2: teacher_model=$TEACHER_MODEL student_model=$STUDENT_MODEL; set ATOMIC_WLIFT_STUDENT_MODEL to a different model or ATOMIC_WLIFT_ALLOW_MODEL_EQUAL=1 for experimental non-G2" >&2
+  exit 2
+fi
+available_kb=$(df -k /private/tmp | awk 'NR==2 {print $4}')
+if [ "${available_kb:-0}" -lt "$MIN_FREE_KB" ]; then
+  echo "insufficient free space for WLIFT scratch: available_kb=${available_kb:-0} required_kb=$MIN_FREE_KB path=/private/tmp" >&2
+  exit 2
+fi
+if ! validate_docker_api; then
+  echo "docker API unavailable for official SWE-bench scoring within ${DOCKER_TIMEOUT_SECONDS}s; refusing non-G2 run" >&2
   exit 2
 fi
 if ! validate_swebench_python; then
@@ -125,20 +161,103 @@ export DEEPSEEK_MODEL="$STUDENT_MODEL" DEEPSEEK_TIMEOUT=120
 run_one(){ # arm sample
   local arm="$1" i="$2"
   local wd="/private/tmp/swe/round/WLIFT/${RUN_ID}_${arm}_${i}"
-  rm -rf "$wd"; mkdir -p "$(dirname "$wd")"; cp -R "$PRISTINE" "$wd"
+  local out="$OUTDIR/${arm}_${i}.json"
+  if ! rm -rf "$wd" || ! mkdir -p "$(dirname "$wd")" || ! cp -R "$PRISTINE" "$wd"; then
+    python3 - "$out" <<'PY'
+import json, sys
+with open(sys.argv[1], "w") as f:
+    json.dump({"final_diff": "", "edits_applied": 0, "error": "scratch_setup_failed"}, f)
+PY
+    echo "$arm sample $i: edits=0 resolved=? timeout=0 score_timeout=0 score_bad=1 setup_failed=1"
+    return
+  fi
   git -C "$wd" reset --hard -q HEAD; git -C "$wd" clean -fdq
   if [ "$arm" = "weight" ]; then export ATOMIC_WEIGHTS_FILE="$WEIGHTS"; else unset ATOMIC_WEIGHTS_FILE; fi
-  local out="$OUTDIR/${arm}_${i}.json"
-  python3 "$DRIVER" --workdir "$wd" --task "$TD/PROBLEM.md" --gate NONE --out "$out" --max-steps 60 >/dev/null 2>&1
+  local driver_status=0 timeout_hit=0
+  python3 - "$SAMPLE_TIMEOUT_SECONDS" "$DRIVER" "$wd" "$TD/PROBLEM.md" "$out" <<'PY' >/dev/null 2>&1
+import json, os, subprocess, sys
+
+timeout = int(sys.argv[1])
+driver, wd, task, out = sys.argv[2:]
+cmd = [
+    sys.executable,
+    driver,
+    "--workdir", wd,
+    "--task", task,
+    "--gate", "NONE",
+    "--out", out,
+    "--max-steps", "60",
+]
+try:
+    completed = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout)
+except subprocess.TimeoutExpired:
+    with open(out, "w") as f:
+        json.dump({"final_diff": "", "edits_applied": 0, "error": "agent_timeout", "timeout_seconds": timeout}, f)
+    sys.exit(124)
+if completed.returncode != 0 and not os.path.exists(out):
+    with open(out, "w") as f:
+        json.dump({"final_diff": "", "edits_applied": 0, "error": "agent_exit", "exit_code": completed.returncode}, f)
+sys.exit(completed.returncode)
+PY
+  driver_status=$?
+  [ "$driver_status" -eq 124 ] && timeout_hit=1
+  [ -s "$out" ] || python3 - "$out" "$driver_status" <<'PY'
+import json, sys
+out, status = sys.argv[1:]
+with open(out, "w") as f:
+    json.dump({"final_diff": "", "edits_applied": 0, "error": "missing_agent_output", "exit_code": int(status)}, f)
+PY
   local pred="$OUTDIR/pred_${arm}_${i}.jsonl"
   python3 -c "import json;d=json.load(open('$out'));open('$pred','w').write(json.dumps({'instance_id':'$ID','model_name_or_path':'wlift-${arm}','model_patch':d.get('final_diff') or ''})+chr(10))"
-  local edits=$(python3 -c "import json;print(json.load(open('$out')).get('edits_applied'))")
+  local edits=$(python3 -c "import json;print(json.load(open('$out')).get('edits_applied') or 0)")
   # official score
-  "$SWE_PYTHON" -m swebench.harness.run_evaluation --dataset_name princeton-nlp/SWE-bench_Verified \
-    --predictions_path "$pred" --run_id "${RUN_ID}_${arm}_${i}" --max_workers 1 --cache_level instance \
-    >"$OUTDIR/score_${arm}_${i}.log" 2>&1
-  local res=$(grep -aE "Instances resolved:" "$OUTDIR/score_${arm}_${i}.log" | tail -1 | grep -oE "[0-9]+$")
-  echo "$arm sample $i: edits=$edits resolved=${res:-?}"
+  local score_log="$OUTDIR/score_${arm}_${i}.log"
+  local score_status=0 score_timeout=0
+  python3 - "$SCORE_TIMEOUT_SECONDS" "$SCORE_ATTEMPTS" "$score_log" "$SWE_PYTHON" "$pred" "${RUN_ID}_${arm}_${i}" <<'PY' >/dev/null 2>&1
+import subprocess, sys, time
+
+timeout = int(sys.argv[1])
+attempts = int(sys.argv[2])
+score_log, swe_python, pred, run_id = sys.argv[3:]
+cmd = [
+    swe_python,
+    "-m", "swebench.harness.run_evaluation",
+    "--dataset_name", "princeton-nlp/SWE-bench_Verified",
+    "--predictions_path", pred,
+    "--run_id", run_id,
+    "--max_workers", "1",
+    "--cache_level", "instance",
+]
+last_status = 1
+with open(score_log, "w") as log:
+    for attempt in range(1, attempts + 1):
+        if attempt > 1:
+            log.write(f"\nSWE_SCORE_RETRY attempt={attempt}/{attempts}\n")
+            log.flush()
+            time.sleep(5)
+        attempt_cmd = list(cmd)
+        if attempt > 1:
+            attempt_cmd[attempt_cmd.index("--run_id") + 1] = f"{run_id}_retry{attempt}"
+        try:
+            completed = subprocess.run(attempt_cmd, stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            log.write(f"\nSWE_SCORE_TIMEOUT seconds={timeout} attempt={attempt}/{attempts}\n")
+            log.flush()
+            last_status = 124
+            continue
+        last_status = completed.returncode
+        log.flush()
+        if completed.returncode == 0:
+            sys.exit(0)
+    sys.exit(last_status)
+PY
+  score_status=$?
+  [ "$score_status" -eq 124 ] && score_timeout=1
+  local res=$(grep -aE "Instances resolved:" "$score_log" | tail -1 | grep -oE "[0-9]+$")
+  local score_bad=0
+  [ -z "${res:-}" ] && score_bad=1
+  rm -rf "$wd"
+  echo "$arm sample $i: edits=$edits resolved=${res:-?} timeout=$timeout_hit score_timeout=$score_timeout score_bad=$score_bad"
 }
 
 echo "=== WEIGHT-LIFT on $ID, N=$N, student_model=$DEEPSEEK_MODEL one-shot NO_GATE ==="
@@ -150,6 +269,8 @@ echo "teacher_model=$TEACHER_MODEL"
 echo "student_model=$STUDENT_MODEL"
 echo "cross_model=$CROSS_MODEL"
 echo "base_only=$BASE_ONLY"
+echo "sample_timeout_seconds=$SAMPLE_TIMEOUT_SECONDS"
+echo "score_timeout_seconds=$SCORE_TIMEOUT_SECONDS"
 echo "matched weights for this task:"
 ATOMIC_WEIGHTS_FILE="$WEIGHTS" python3 -c "
 import sys, os, re, json
@@ -168,16 +289,23 @@ for w in ws:
         match_info = f'VSA sim={sim:.3f}' if not trig_match else 'regex'
         print('  MATCH:', w['class'], '(proof_n=%s, match via %s)' % (w.get('proof_n'), match_info))
 "
-base_res=0; weight_res=0
-for i in $(seq 1 $N); do r=$(run_one base $i);   echo "$r"; echo "$r" | grep -q "resolved=1" && base_res=$((base_res+1)); done
+base_res=0; weight_res=0; base_timeouts=0; weight_timeouts=0; base_score_failures=0; weight_score_failures=0
+for i in $(seq 1 $N); do
+  r=$(run_one base $i); echo "$r"
+  echo "$r" | grep -q "resolved=1" && base_res=$((base_res+1))
+  echo "$r" | grep -q " timeout=1" && base_timeouts=$((base_timeouts+1))
+  echo "$r" | grep -q " score_bad=1" && base_score_failures=$((base_score_failures+1))
+done
 if [ "$BASE_ONLY" = true ]; then
   echo "=== WEIGHT-LIFT BASELINE PROBE $ID ==="
   echo "BASE   (no weight): $base_res / $N resolved"
+  echo "BASE TIMEOUTS: $base_timeouts / $N"
+  echo "BASE SCORE FAILURES: $base_score_failures / $N"
   echo "BASE-ONLY probe is not G2; use it only to establish fail-floor before full N lift."
-  python3 - "$OUTDIR/g2_summary.json" "$ID" "$N" "$base_res" "-1" "$weights_sha" "$canonical_act" "$RUN_ID" "$TEACHER_MODEL" "$STUDENT_MODEL" "$CROSS_MODEL" "$BASE_ONLY" <<'PY'
+  python3 - "$OUTDIR/g2_summary.json" "$ID" "$N" "$base_res" "-1" "$base_timeouts" "$base_score_failures" "$weights_sha" "$canonical_act" "$RUN_ID" "$TEACHER_MODEL" "$STUDENT_MODEL" "$CROSS_MODEL" "$BASE_ONLY" <<'PY'
 import json, sys
-out, instance, n, base, weight, weights_sha, canonical_act, run_id, teacher_model, student_model, cross_model, base_only = sys.argv[1:]
-n = int(n); base = int(base); base_only_bool = base_only == "true"
+out, instance, n, base, weight, sample_timeouts, score_failures, weights_sha, canonical_act, run_id, teacher_model, student_model, cross_model, base_only = sys.argv[1:]
+n = int(n); base = int(base); sample_timeouts = int(sample_timeouts); score_failures = int(score_failures); base_only_bool = base_only == "true"
 weight_value = None if base_only_bool else int(weight)
 data = {
     "instance": instance,
@@ -185,6 +313,10 @@ data = {
     "base_resolved": base,
     "weight_resolved": weight_value,
     "lift": None if base_only_bool else weight_value - base,
+    "sample_timeouts": sample_timeouts,
+    "score_failures": score_failures,
+    "goldilocks_baseline": 0 < base < n,
+    "fail_floor_positive_lift": False,
     "weights_sha256": weights_sha,
     "canonical_act": canonical_act == "true",
     "run_id": run_id,
@@ -199,21 +331,38 @@ PY
   echo "G2 summary: $OUTDIR/g2_summary.json"
   exit 0
 fi
-for i in $(seq 1 $N); do r=$(run_one weight $i); echo "$r"; echo "$r" | grep -q "resolved=1" && weight_res=$((weight_res+1)); done
+for i in $(seq 1 $N); do
+  r=$(run_one weight $i); echo "$r"
+  echo "$r" | grep -q "resolved=1" && weight_res=$((weight_res+1))
+  echo "$r" | grep -q " timeout=1" && weight_timeouts=$((weight_timeouts+1))
+  echo "$r" | grep -q " score_bad=1" && weight_score_failures=$((weight_score_failures+1))
+done
 echo "=== WEIGHT-LIFT RESULT $ID ==="
 echo "BASE   (no weight): $base_res / $N resolved"
 echo "WEIGHT (injected):  $weight_res / $N resolved"
+echo "SAMPLE TIMEOUTS: $((base_timeouts + weight_timeouts)) / $((N * 2))"
+echo "SCORE FAILURES: $((base_score_failures + weight_score_failures)) / $((N * 2))"
 echo "LIFT = $((weight_res - base_res)) / $N  (positive => weight lifts the model on this class, by number)"
-python3 - "$OUTDIR/g2_summary.json" "$ID" "$N" "$base_res" "$weight_res" "$weights_sha" "$canonical_act" "$RUN_ID" "$TEACHER_MODEL" "$STUDENT_MODEL" "$CROSS_MODEL" "$BASE_ONLY" <<'PY'
+python3 - "$OUTDIR/g2_summary.json" "$ID" "$N" "$base_res" "$weight_res" "$base_timeouts" "$weight_timeouts" "$base_score_failures" "$weight_score_failures" "$weights_sha" "$canonical_act" "$RUN_ID" "$TEACHER_MODEL" "$STUDENT_MODEL" "$CROSS_MODEL" "$BASE_ONLY" <<'PY'
 import json, sys
-out, instance, n, base, weight, weights_sha, canonical_act, run_id, teacher_model, student_model, cross_model, base_only = sys.argv[1:]
-n = int(n); base = int(base); weight = int(weight); base_only_bool = base_only == "true"
+out, instance, n, base, weight, base_timeouts, weight_timeouts, base_score_failures, weight_score_failures, weights_sha, canonical_act, run_id, teacher_model, student_model, cross_model, base_only = sys.argv[1:]
+n = int(n); base = int(base); weight = int(weight); sample_timeouts = int(base_timeouts) + int(weight_timeouts); score_failures = int(base_score_failures) + int(weight_score_failures); base_only_bool = base_only == "true"
+goldilocks_baseline = 0 < base < n
+fail_floor_positive_lift = base == 0 and weight > base
+integrity_ok = (canonical_act == "true") and (cross_model == "true") and not base_only_bool and sample_timeouts == 0 and score_failures == 0
+goldilocks_baseline = 0 < base < n
+fail_floor_positive_lift = base == 0 and weight > base
+integrity_ok = (canonical_act == "true") and (cross_model == "true") and not base_only_bool and sample_timeouts == 0 and score_failures == 0
 data = {
     "instance": instance,
     "N": n,
     "base_resolved": base,
     "weight_resolved": weight,
     "lift": weight - base,
+    "sample_timeouts": sample_timeouts,
+    "score_failures": score_failures,
+    "goldilocks_baseline": goldilocks_baseline,
+    "fail_floor_positive_lift": fail_floor_positive_lift,
     "weights_sha256": weights_sha,
     "canonical_act": canonical_act == "true",
     "run_id": run_id,
@@ -221,7 +370,7 @@ data = {
     "student_model": student_model,
     "cross_model": cross_model == "true",
     "base_only": base_only_bool,
-    "g2_valid": (canonical_act == "true") and (cross_model == "true") and not base_only_bool,
+    "g2_valid": integrity_ok and (goldilocks_baseline or fail_floor_positive_lift),
 }
 open(out, "w").write(json.dumps(data, indent=2, sort_keys=True) + "\n")
 PY

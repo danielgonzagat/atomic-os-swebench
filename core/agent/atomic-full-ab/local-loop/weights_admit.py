@@ -33,6 +33,18 @@ def _get_char_vector(char, D=1024):
     return v
 
 
+def _get_symbol_vector(symbol, D=1024):
+    """Deterministic bipolar vector for a typed structural role/value token."""
+    h = hashlib.sha256(("structural-vsa:" + str(symbol)).encode("utf-8")).digest()
+    import random
+    seed = int.from_bytes(h, "big")
+    state = random.getstate()
+    random.seed(seed)
+    v = [random.choice([1, -1]) for _ in range(D)]
+    random.setstate(state)
+    return v
+
+
 def encode_vsa_text(text, D=1024):
     """Encode a text string into a D-dimensional bipolar hypervector using trigram random projection."""
     if not text:
@@ -53,6 +65,324 @@ def encode_vsa_text(text, D=1024):
         accum = [a + b for a, b in zip(accum, tg_vec)]
     # Threshold to bipolar +/-1
     return [1 if x >= 0 else -1 for x in accum]
+
+
+_SURFACE_KEYS = {
+    "description", "message", "surface", "surface_words", "surface_words_ignored",
+    "text", "task", "prompt", "path", "file", "filename", "name", "identifier",
+    "literal", "source", "source_text", "patch", "diff", "edit_target",
+    "symptom_loci", "causal_loci", "failing_stack_loci", "failure_stack_loci",
+    "test_loci", "failing_test_loci", "symbol_graph_edges", "symbol_edges",
+    "preservation_matrix",
+}
+
+
+def _as_list(value):
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return [str(v) for v in value if str(v)]
+    if isinstance(value, str) and value:
+        return [value]
+    return []
+
+
+def _bucket_count(n):
+    try:
+        n = int(n)
+    except Exception:
+        return "unknown"
+    if n <= 0:
+        return "0"
+    if n == 1:
+        return "1"
+    if n <= 3:
+        return "2-3"
+    return "4+"
+
+
+def _surface_keylike(value):
+    s = str(value or "").lower()
+    leaf = s.split(".")[-1]
+    return (
+        leaf in _SURFACE_KEYS
+        or "/" in s
+        or "\\" in s
+        or ":" in s
+        or s.endswith((".py", ".js", ".ts", ".tsx", ".java", ".go", ".rs"))
+    )
+
+
+def _safe_role_token(value, default="typed"):
+    token = str(value or "").strip().lower()
+    token = re.sub(r"[^a-z0-9_-]+", "_", token).strip("_")
+    return token or default
+
+
+def _locus_file(locus):
+    s = str(locus or "")
+    if not s:
+        return ""
+    return s.split(":", 1)[0]
+
+
+def _matches_locus(target, loci):
+    target = str(target or "")
+    return bool(target and target in set(_as_list(loci)))
+
+
+def _matches_locus_file(target, loci):
+    target_file = _locus_file(target)
+    return bool(target_file and target_file in {_locus_file(locus) for locus in _as_list(loci)})
+
+
+def _target_role(target, symptom_loci, causal_loci):
+    target = str(target or "")
+    symptoms = set(_as_list(symptom_loci))
+    causal = set(_as_list(causal_loci))
+    in_symptom = bool(target and target in symptoms)
+    in_causal = bool(target and target in causal)
+    if in_symptom and in_causal:
+        return "symptom_and_causal"
+    if in_symptom and not in_causal:
+        return "symptom_not_causal"
+    if in_causal and not in_symptom:
+        return "causal_not_symptom"
+    if causal:
+        return "outside_known_causal"
+    if symptoms:
+        return "outside_symptom"
+    return "unknown"
+
+
+def _causal_stack_roles(event):
+    target = event.get("edit_target")
+    stack_loci = _as_list(event.get("failing_stack_loci") or event.get("failure_stack_loci") or event.get("stack_loci"))
+    test_loci = _as_list(event.get("test_loci") or event.get("failing_test_loci"))
+    symptom_loci = _as_list(event.get("symptom_loci"))
+    causal_loci = _as_list(event.get("causal_loci"))
+    if not target and not stack_loci and not test_loci:
+        return []
+
+    target_is_causal = _matches_locus(target, causal_loci)
+    target_file_is_causal = _matches_locus_file(target, causal_loci)
+    target_is_stack = _matches_locus(target, stack_loci)
+    target_file_is_stack = _matches_locus_file(target, stack_loci)
+    target_is_symptom = _matches_locus(target, symptom_loci)
+
+    if target_is_causal:
+        stack_role = "edited_causal_locus"
+    elif target_file_is_causal:
+        stack_role = "edited_causal_file"
+    elif target_is_stack and target_is_symptom:
+        stack_role = "edited_failure_stack_symptom_not_causal"
+    elif target_is_stack:
+        stack_role = "edited_failure_stack_locus_not_causal"
+    elif target_file_is_stack:
+        stack_role = "edited_failure_stack_file_not_causal"
+    elif stack_loci:
+        stack_role = "outside_failure_stack"
+    else:
+        stack_role = "stack_unknown"
+
+    if _matches_locus(target, test_loci) or _matches_locus_file(target, test_loci):
+        test_role = "edited_test_locus"
+    elif test_loci:
+        test_role = "outside_test_locus"
+    else:
+        test_role = "test_locus_unknown"
+
+    roles = [
+        {"role": "edited_stack_relation", "kind": stack_role},
+        {"role": "edited_test_relation", "kind": test_role},
+    ]
+    if stack_loci:
+        roles.append({"role": "stack_loci_count", "bucket": _bucket_count(len(stack_loci))})
+    return roles
+
+
+def _symbol_graph_roles(event):
+    edges = event.get("symbol_graph_edges") or event.get("symbol_edges") or event.get("symbol_graph") or []
+    if not isinstance(edges, (list, tuple)):
+        return []
+    target = event.get("edit_target")
+    symptom_loci = _as_list(event.get("symptom_loci"))
+    causal_loci = _as_list(event.get("causal_loci"))
+    stack_loci = _as_list(event.get("failing_stack_loci") or event.get("failure_stack_loci") or event.get("stack_loci"))
+    roles = []
+    for edge in edges:
+        if not isinstance(edge, dict):
+            continue
+        source = edge.get("source") or edge.get("caller") or edge.get("from")
+        dest = edge.get("target") or edge.get("callee") or edge.get("to")
+        kind = _safe_role_token(edge.get("kind") or edge.get("relation") or "edge")
+        relation = None
+        if _matches_locus(target, [source]) and _matches_locus(dest, causal_loci):
+            relation = "edited_source_to_causal"
+        elif _matches_locus_file(target, [source]) and _matches_locus_file(dest, causal_loci):
+            relation = "edited_source_file_to_causal"
+        elif _matches_locus(target, [dest]) and _matches_locus(source, symptom_loci):
+            relation = "edited_target_from_symptom"
+        elif _matches_locus_file(target, [dest]) and _matches_locus_file(source, symptom_loci):
+            relation = "edited_target_file_from_symptom"
+        elif _matches_locus(target, [source]) and _matches_locus(dest, stack_loci):
+            relation = "edited_source_to_stack"
+        elif _matches_locus(target, [dest]) and _matches_locus(source, stack_loci):
+            relation = "edited_target_from_stack"
+        if relation:
+            roles.append({"role": "edited_relation", "kind": relation})
+            roles.append({"role": "edge_kind", "kind": kind})
+    unique = []
+    seen = set()
+    for role in roles:
+        marker = tuple(sorted(role.items()))
+        if marker not in seen:
+            seen.add(marker)
+            unique.append(role)
+    return unique
+
+
+def _preservation_roles(matrix):
+    if not isinstance(matrix, dict):
+        return matrix if isinstance(matrix, list) else []
+    roles = []
+    for key, value in sorted(matrix.items(), key=lambda kv: str(kv[0])):
+        if _surface_keylike(key):
+            continue
+        role = "preserve_" + _safe_role_token(key)
+        if isinstance(value, bool):
+            status = "preserved" if value else "violated"
+        else:
+            token = _safe_role_token(value, default="unknown")
+            if token in {"true", "pass", "passed", "ok", "preserved", "unchanged", "kept"}:
+                status = "preserved"
+            elif token in {"false", "fail", "failed", "broken", "changed", "violated", "removed"}:
+                status = "violated"
+            else:
+                status = token
+        roles.append({"role": role, "status": status})
+    return roles
+
+
+def _flatten_typed_features(prefix, value, out):
+    """Flatten typed structural data while deliberately ignoring surface/prose fields."""
+    key = str(prefix).lower()
+    if _surface_keylike(key.split(".")[-1]):
+        return
+    if isinstance(value, dict):
+        for k, v in sorted(value.items(), key=lambda kv: str(kv[0])):
+            if _surface_keylike(k):
+                continue
+            _flatten_typed_features(f"{prefix}.{k}" if prefix else str(k), v, out)
+        return
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            if isinstance(item, dict):
+                role = item.get("role") or item.get("kind") or "item"
+                for k, v in sorted(item.items(), key=lambda kv: str(kv[0])):
+                    if k in {"name", "path", "file", "identifier", "literal"}:
+                        continue
+                    _flatten_typed_features(f"{prefix}.{role}.{k}", v, out)
+            elif isinstance(item, (bool, int, float)):
+                out.append((prefix, str(item).lower()))
+        return
+    if isinstance(value, bool):
+        out.append((prefix, "true" if value else "false"))
+    elif isinstance(value, (int, float)):
+        out.append((prefix, str(value)))
+    elif isinstance(value, str):
+        token = value.strip().lower()
+        if token and re.fullmatch(r"[a-z0-9_.-]+", token) and not _surface_keylike(token):
+            out.append((prefix, token))
+
+
+def structural_signature_from_event(event):
+    """Extract a model-free structural/causal signature from a typed atomic event.
+
+    The output intentionally drops concrete names, paths, prose, and natural-language
+    descriptions. Meaning is encoded as verifiable roles: edited target relative to
+    symptom/causal loci, verdict class, byte class, AST role/kind, and other typed
+    machine facts supplied by the atomic world.
+    """
+    if not isinstance(event, dict):
+        return None
+    if isinstance(event.get("structural_signature"), dict):
+        base = dict(event["structural_signature"])
+    else:
+        base = {}
+    if any(k in event for k in ("edit_target", "symptom_loci", "causal_loci")):
+        symptoms = _as_list(event.get("symptom_loci"))
+        causal = _as_list(event.get("causal_loci"))
+        base["edit_target_role"] = _target_role(event.get("edit_target"), symptoms, causal)
+        base["symptom_loci_count"] = _bucket_count(len(symptoms))
+        base["causal_loci_count"] = _bucket_count(len(causal))
+        base["causal_loci_known"] = bool(causal)
+    causal_stack = _causal_stack_roles(event)
+    if causal_stack:
+        base["causal_stack"] = causal_stack
+    symbol_graph = _symbol_graph_roles(event)
+    if symbol_graph:
+        base["symbol_graph"] = symbol_graph
+    for src, dst in (
+        ("event", "event"),
+        ("test_verdict", "test_verdict"),
+        ("verdict", "test_verdict"),
+        ("byte_class", "byte_class"),
+        ("failure_stage", "failure_stage"),
+        ("operation", "operation"),
+        ("gate", "gate"),
+    ):
+        if src in event and isinstance(event[src], (str, bool, int, float)):
+            base[dst] = event[src]
+    if "ast" in event:
+        base["ast"] = event["ast"]
+    if "symbol_roles" in event:
+        base["symbol_roles"] = event["symbol_roles"]
+    if "preservation_matrix" in event:
+        base["preservation"] = _preservation_roles(event["preservation_matrix"])
+    elif "preservation" in event:
+        base["preservation"] = _preservation_roles(event["preservation"])
+    features = []
+    _flatten_typed_features("", base, features)
+    if not features:
+        return None
+    return {k: v for k, v in sorted(set(features))}
+
+
+def encode_vsa_structure(signature, D=1024):
+    """Encode typed structural/causal roles with bind/bundle/permute, model-free."""
+    sig = structural_signature_from_event(signature) if isinstance(signature, dict) else None
+    if sig is None and isinstance(signature, dict):
+        sig = {str(k): str(v).lower() for k, v in signature.items() if isinstance(v, (str, bool, int, float))}
+    if not sig:
+        return [0] * D
+    vectors = []
+    for idx, (role, value) in enumerate(sorted(sig.items())):
+        role_vec = _get_symbol_vector("role:" + str(role), D)
+        value_vec = _get_symbol_vector("value:" + str(value), D)
+        vectors.append(vsa_permute(vsa_bind(role_vec, value_vec), idx))
+    return vsa_bundle(vectors)
+
+
+def encode_vsa_signal(signal, D=1024):
+    """Encode a signal, preferring structural/causal semantics over text.
+
+    Dict/JSON signals are treated as typed atomic-world events. Plain strings remain a
+    legacy recall fallback only; they are not the semantic substrate for travas.
+    """
+    if isinstance(signal, dict):
+        return encode_vsa_structure(signal, D)
+    if isinstance(signal, str):
+        stripped = signal.strip()
+        if stripped.startswith("{") and stripped.endswith("}"):
+            try:
+                parsed = json.loads(stripped)
+            except Exception:
+                parsed = None
+            if isinstance(parsed, dict):
+                return encode_vsa_structure(parsed, D)
+        return encode_vsa_text(signal, D)
+    return encode_vsa_text(str(signal), D)
 
 
 def vsa_bind(v1, v2):
@@ -96,7 +426,7 @@ def reinforce_success(operator, success_signal, lr=1.0):
     gradient. (admit() still seeds the prototype via bipolar vsa_bundle; reinforce/correct finetune it real-valued.)"""
     if "vsa" not in operator:
         ensure_act(operator)
-    sig_vec = encode_vsa_text(success_signal)
+    sig_vec = encode_vsa_signal(success_signal)
     operator["vsa"] = [v + lr * s for v, s in zip(operator["vsa"], sig_vec)]
     ensure_act(operator, force_vsa_update=False)
 
@@ -106,7 +436,7 @@ def correct_error(operator, error_signal, lr=1.0):
     accumulation: each error SUBTRACTS the signal, so similarity to the error pattern strictly decreases with use."""
     if "vsa" not in operator:
         ensure_act(operator)
-    err_vec = encode_vsa_text(error_signal)
+    err_vec = encode_vsa_signal(error_signal)
     operator["vsa"] = [v - lr * e for v, e in zip(operator["vsa"], err_vec)]
     ensure_act(operator, force_vsa_update=False)
 
@@ -121,8 +451,9 @@ def correct_error(operator, error_signal, lr=1.0):
 def make_trava(error_pattern, opposite_suggestion="", threshold=0.35):
     """Capture a proven-wrong pattern as a recoverable, finetunable TRAVA operator."""
     return {"role": "TRAVA",
-            "vsa": encode_vsa_text(error_pattern),
+            "vsa": encode_vsa_signal(error_pattern),
             "error_pattern": error_pattern,
+            "structural_signature": structural_signature_from_event(error_pattern) if isinstance(error_pattern, dict) else None,
             "suggest_opposite": opposite_suggestion,
             "threshold": float(threshold),
             "hits": 0}
@@ -132,7 +463,7 @@ def trava_blocks(trava, candidate_signal):
     """Does this trava BLOCK the candidate move? (VSA-similarity of the candidate to the proven-wrong pattern >=
     threshold). Generalizes across distinct bugs because it matches the ERROR shape, not a specific fix. Returns
     (blocked: bool, similarity: float, opposite: str)."""
-    sim = vsa_similarity(trava["vsa"], encode_vsa_text(candidate_signal))
+    sim = vsa_similarity(trava["vsa"], encode_vsa_signal(candidate_signal))
     blocked = sim >= trava.get("threshold", 0.35)
     return blocked, sim, trava.get("suggest_opposite", "")
 
@@ -494,23 +825,59 @@ if __name__ == "__main__":
 
         # TRAVA primitive: a proven-wrong error pattern BLOCKS a matching move + suggests the opposite, and
         # GENERALIZES (blocks a surface-distinct re-occurrence of the same error shape), and SHARPENS with use.
-        trava = make_trava("edited the symptom site instead of the upstream root cause",
-                           opposite_suggestion="trace to the upstream decision function and fix the root", threshold=0.30)
-        # blocks the same error on a DISTINCT-surface bug (error recurs even though the fix is unique):
-        blk_recur, sim_recur, opp = trava_blocks(trava, "patched the symptom location not the upstream cause")
-        # does NOT block an unrelated, correct-shaped move:
-        blk_ok, sim_ok, _ = trava_blocks(trava, "added a dispatch handler in the registry module")
+        wrong_struct_a = {
+            "event": "candidate_edit_rejected",
+            "edit_target": "repo_a/module.py:visible_symptom",
+            "symptom_loci": ["repo_a/module.py:visible_symptom"],
+            "causal_loci": ["repo_a/root.py:decision_predicate"],
+            "test_verdict": "fail",
+            "byte_class": "byte_negative",
+            "ast": [{"role": "edited_node", "kind": "FunctionDef"}],
+            "surface_words_ignored": "edited the symptom site instead of root cause",
+        }
+        wrong_struct_b = {
+            "event": "candidate_edit_rejected",
+            "edit_target": "repo_b/callsite.py:observed_failure",
+            "symptom_loci": ["repo_b/callsite.py:observed_failure"],
+            "causal_loci": ["repo_b/causal.py:stored_policy"],
+            "test_verdict": "fail",
+            "byte_class": "byte_negative",
+            "ast": [{"role": "edited_node", "kind": "FunctionDef"}],
+            "surface_words_ignored": "modified the call site where the error appeared",
+        }
+        correct_struct = {
+            "event": "candidate_edit_candidate",
+            "edit_target": "repo_b/causal.py:stored_policy",
+            "symptom_loci": ["repo_b/callsite.py:observed_failure"],
+            "causal_loci": ["repo_b/causal.py:stored_policy"],
+            "test_verdict": "candidate",
+            "byte_class": "byte_candidate",
+            "ast": [{"role": "edited_node", "kind": "FunctionDef"}],
+        }
+        sig_a = structural_signature_from_event(wrong_struct_a)
+        sig_b = structural_signature_from_event(wrong_struct_b)
+        structural_same = sig_a == sig_b and "repo_a" not in json.dumps(sig_a) and "repo_b" not in json.dumps(sig_a)
+        structural_sim = vsa_similarity(encode_vsa_signal(wrong_struct_a), encode_vsa_signal(wrong_struct_b))
+        structural_diff = vsa_similarity(encode_vsa_signal(wrong_struct_a), encode_vsa_signal(correct_struct))
+        structural_vsa_ok = structural_same and structural_sim > 0.95 and structural_diff < 0.70
+        trava = make_trava(wrong_struct_a,
+                           opposite_suggestion="trace to the causal locus before editing", threshold=0.90)
+        # blocks the same STRUCTURAL error on a DISTINCT-surface bug (error recurs even though the fix is unique):
+        blk_recur, sim_recur, opp = trava_blocks(trava, wrong_struct_b)
+        # does NOT block a candidate that edits the causal locus:
+        blk_ok, sim_ok, _ = trava_blocks(trava, correct_struct)
         trava_generalizes = blk_recur and (not blk_ok) and bool(opp)
         # sharpens with use (recurring error → stronger block):
-        trava_reinforce(trava, "patched the symptom location not the upstream cause")
-        _, sim_after, _ = trava_blocks(trava, "patched the symptom location not the upstream cause")
+        trava_reinforce(trava, wrong_struct_b)
+        _, sim_after, _ = trava_blocks(trava, wrong_struct_b)
         trava_sharpens = sim_after > sim_recur
         trava_ok = trava_generalizes and trava_sharpens
+        print("STRUCTURAL/CAUSAL VSA model-free semantics:", structural_vsa_ok,
+              f"(same={structural_sim:.3f}, different={structural_diff:.3f})")
         print("TRAVA blocks proven-wrong + generalizes + sharpens:", trava_ok,
               f"(recur_sim={sim_recur:.2f} block={blk_recur}, distinct_sim={sim_ok:.2f} block={blk_ok}, after_reinforce={sim_after:.2f})")
 
-        print("VSA algebra and trigram random projection:   ", vsa_algebra_ok, f"(similar={sim_similar:.3f}, dissimilar={sim_dissimilar:.3f})")
+        print("VSA algebra and legacy text fallback:        ", vsa_algebra_ok, f"(similar={sim_similar:.3f}, dissimilar={sim_dissimilar:.3f})")
         print("VSA learns from usage (success/error loops): ", vsa_learning_ok, f"(reinforce: {sim_reinf_orig:.3f}->{sim_reinf:.3f}, correct: {sim_err_orig:.3f}->{sim_err:.3f})")
         
-        print("ALL LAWS HOLD:", absorbed and created and ok_short and (not ok_long) and (not ok_break) and ok_keep and fid_ok and merged_ok and act_load_ok and act_absorb_ok and act_created_ok and act_update_ok and act_merge_ok and vsa_algebra_ok and vsa_learning_ok and trava_ok)
-
+        print("ALL LAWS HOLD:", absorbed and created and ok_short and (not ok_long) and (not ok_break) and ok_keep and fid_ok and merged_ok and act_load_ok and act_absorb_ok and act_created_ok and act_update_ok and act_merge_ok and structural_vsa_ok and vsa_algebra_ok and vsa_learning_ok and trava_ok)

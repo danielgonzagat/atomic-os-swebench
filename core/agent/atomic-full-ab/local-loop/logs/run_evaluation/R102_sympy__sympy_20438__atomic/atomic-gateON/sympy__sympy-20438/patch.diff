@@ -1,0 +1,116 @@
+diff --git a/sympy/core/exprtools.py b/sympy/core/exprtools.py
+index 58914ba83b..2c786fd981 100644
+--- a/sympy/core/exprtools.py
++++ b/sympy/core/exprtools.py
+@@ -237,6 +237,8 @@ def decompose_power(expr):
+     (x**(y/3), 2)
+ 
+     """
++    if not hasattr(expr, 'as_base_exp'):
++        return expr, S.One
+     base, exp = expr.as_base_exp()
+ 
+     if exp.is_Number:
+diff --git a/sympy/core/relational.py b/sympy/core/relational.py
+index e2e0b7fbcc..6e3df3a2bc 100644
+--- a/sympy/core/relational.py
++++ b/sympy/core/relational.py
+@@ -311,7 +311,7 @@ def _eval_simplify(self, **kwargs):
+             v = None
+             if dif.is_comparable:
+                 v = dif.n(2)
+-            elif dif.equals(0):  # XXX this is expensive
++            elif hasattr(dif, 'equals') and dif.equals(0):  # XXX this is expensive
+                 v = S.Zero
+             if v is not None:
+                 r = r.func._eval_relation(v, S.Zero)
+@@ -334,7 +334,7 @@ def _eval_simplify(self, **kwargs):
+                             r = r.func(x, -b / m)
+                     else:
+                         r = r.func(b, S.zero)
+-                except ValueError:
++                except (ValueError, AttributeError):
+                     # maybe not a linear function, try polynomial
+                     from sympy.polys import Poly, poly, PolynomialError, gcd
+                     try:
+@@ -575,7 +575,7 @@ def _eval_simplify(self, **kwargs):
+                 measure = kwargs['measure']
+                 if measure(enew) <= kwargs['ratio'] * measure(e):
+                     e = enew
+-            except ValueError:
++            except (ValueError, TypeError):
+                 pass
+         return e.canonical
+ 
+diff --git a/sympy/sets/handlers/comparison.py b/sympy/sets/handlers/comparison.py
+index 6f7a19fccf..a15646f9bb 100644
+--- a/sympy/sets/handlers/comparison.py
++++ b/sympy/sets/handlers/comparison.py
+@@ -49,6 +49,26 @@ def _eval_is_eq(lhs, rhs): # noqa: F811
+     return tfn[fuzzy_and(map(fuzzy_bool, eqs))]
+ 
+ 
++@dispatch(ProductSet, FiniteSet) # type:ignore
++def _eval_is_eq(lhs, rhs): # noqa: F811
++    return tfn[fuzzy_and([lhs.is_subset(rhs), rhs.is_subset(lhs)])]
++
++
++@dispatch(FiniteSet, ProductSet) # type:ignore
++def _eval_is_eq(lhs, rhs): # noqa: F811
++    return tfn[fuzzy_and([lhs.is_subset(rhs), rhs.is_subset(lhs)])]
++
++
++@dispatch(ProductSet, Interval) # type:ignore
++def _eval_is_eq(lhs, rhs): # noqa: F811
++    return False
++
++
++@dispatch(Interval, ProductSet) # type:ignore
++def _eval_is_eq(lhs, rhs): # noqa: F811
++    return False
++
++
+ @dispatch(Set, Basic) # type:ignore
+ def _eval_is_eq(lhs, rhs): # noqa: F811
+     return False
+diff --git a/sympy/sets/handlers/issubset.py b/sympy/sets/handlers/issubset.py
+index fdca06025a..1841e869e6 100644
+--- a/sympy/sets/handlers/issubset.py
++++ b/sympy/sets/handlers/issubset.py
+@@ -1,7 +1,7 @@
+ from sympy import S, Symbol
+ from sympy.core.logic import fuzzy_and, fuzzy_bool, fuzzy_not, fuzzy_or
+ from sympy.core.relational import Eq
+-from sympy.sets.sets import FiniteSet, Interval, Set, Union
++from sympy.sets.sets import FiniteSet, Interval, ProductSet, Set, Union
+ from sympy.sets.fancysets import Complexes, Reals, Range, Rationals
+ from sympy.multipledispatch import dispatch
+ 
+@@ -133,3 +133,27 @@ def is_subset_sets(a, b): # noqa:F811
+ @dispatch(Rationals, Range)  # type: ignore # noqa:F811
+ def is_subset_sets(a, b): # noqa:F811
+     return False
++
++@dispatch(ProductSet, FiniteSet)  # type: ignore # noqa:F811
++def is_subset_sets(a_ps, b_fs): # noqa:F811
++    # Check if every element of the ProductSet is in the FiniteSet.
++    # If all component sets are finite, we can compute cardinality.
++    try:
++        a_card = 1
++        for s in a_ps.sets:
++            a_card *= len(s)
++        if a_card > len(b_fs):
++            return False
++    except (TypeError, ValueError):
++        pass
++    for elem in a_ps:
++        if not b_fs.contains(elem):
++            return False
++    return True
++
++@dispatch(FiniteSet, ProductSet)  # type: ignore # noqa:F811
++def is_subset_sets(a_fs, b_ps): # noqa:F811
++    for elem in a_fs:
++        if not b_ps.contains(elem):
++            return False
++    return True

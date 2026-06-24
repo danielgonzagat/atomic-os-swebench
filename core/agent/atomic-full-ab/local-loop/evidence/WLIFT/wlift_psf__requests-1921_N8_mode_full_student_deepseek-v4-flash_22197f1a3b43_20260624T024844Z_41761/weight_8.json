@@ -1,0 +1,426 @@
+{
+  "arm": "atomic-cli-deepseek-v4-pro",
+  "task": "/Users/danielpenin/atomic-os-swebench/core/agent/atomic-full-ab/local-loop/tasks/SWE-psf__requests-1921/PROBLEM.md",
+  "workdir": "/private/tmp/swe/round/WLIFT/wlift_psf__requests-1921_N8_mode_full_student_deepseek-v4-flash_22197f1a3b43_20260624T024844Z_41761_weight_8",
+  "baseline_fail_floor": 6,
+  "steps": 15,
+  "tool_calls": {
+    "atomic_survey": 1,
+    "atomic_read_many": 2,
+    "atomic_read": 4,
+    "atomic_replace": 2,
+    "quick_check": 5
+  },
+  "edits_applied": 2,
+  "invalid_states_prevented": 0,
+  "reads": 7,
+  "body_context_reads": 6,
+  "run_tests_calls": 0,
+  "quick_check_calls": 5,
+  "tokens": 137223,
+  "gate_pass": null,
+  "round_invalid": false,
+  "invalid_reason": "",
+  "model_call_error": "",
+  "model_call_error_kind": "",
+  "diff_lines": 2,
+  "wall_s": 122.3,
+  "transcript": [
+    "s1 atomic_survey({\"glob\": \"requests/*.py\"}) -> requests/__init__.py: NullHandler@L73, emit@L74",
+    "s2 atomic_read_many({\"items\": [{\"path\": \"requests/sessions.py\", \"selector\": \"merge_setting\"}, {\"path\": \"reques) -> ## requests/sessions.py:34-62 [merge_setting]",
+    "s3 TOPOLOGY-GUIDANCE injected (non-blocking)",
+    "s3 atomic_read_many({\"items\": [{\"path\": \"requests/models.py\", \"selector\": \"PreparedRequest\"}, {\"path\": \"reques) -> ## requests/models.py:255-500 [PreparedRequest]",
+    "s4 atomic_read({\"path\": \"requests/sessions.py\", \"startLine\": 260, \"endLine\": 310}) -> requests/sessions.py",
+    "s5 SAY: Now I understand the issue clearly. In `merge_setting`, when merging session headers into request headers, the code only removes keys set to `None` from the `request_setting`, but not from the `sessio",
+    "s5 OVER-FIX signal: added_loops=1 hunks=1",
+    "s5 atomic_replace({\"file\": \"requests/sessions.py\", \"oldText\": \"    # Remove keys that are set to None.\\n    ) -> \u2705 Atomic edit applied",
+    "s6 quick_check -> FAIL (exit 1)",
+    "s7 atomic_read({\"path\": \"requests/utils.py\", \"selector\": \"to_key_val_list\"}) -> requests/utils.py:144-166",
+    "s8 atomic_read({\"path\": \"requests/models.py\", \"selector\": \"Request\"}) -> requests/models.py:181-252",
+    "s9 quick_check -> PASS (exit 0)",
+    "s10 quick_check -> FAIL (exit 1)",
+    "s11 quick_check -> FAIL (exit 1)",
+    "s12 atomic_read({\"path\": \"requests/sessions.py\", \"selector\": \"merge_setting\"}) -> requests/sessions.py:34-62",
+    "s13 OVER-FIX signal: added_loops=1 hunks=1",
+    "s13 atomic_replace({\"file\": \"requests/sessions.py\", \"oldText\": \"    # Remove keys that are set to None.\\n    ) -> \u2705 Atomic edit applied",
+    "s14 quick_check -> PASS (exit 0)",
+    "s15 SAY: All four tests pass. The fix is a single-line change: iterating over `list(merged_setting.items())` instead of `merged_setting.items()`, and over the merged dictionary instead of just `request_setting",
+    "s15 DONE (no tool call; one-shot fix submitted)"
+  ],
+  "reasoning_trace": [
+    {
+      "step": 1,
+      "reasoning": "Let me understand the problem: when setting `session.headers['Accept-Encoding'] = None`, the value `None` is sent as a string \"None\" instead of being removed/not sent. The expected behavior (as per the docs) is that setting a header to `None` should prevent it from being sent.\n\nLet me explore the relevant code to understand how headers are processed when making requests.",
+      "say": ""
+    },
+    {
+      "step": 2,
+      "reasoning": "Let me look at the key files. The issue is about session headers. Let me look at:\n1. `requests/sessions.py` - where `merge_setting` is defined and where `Session.prepare_request` merges headers\n2. `requests/models.py` - `PreparedRequest.prepare_headers`\n3. `requests/utils.py` - `default_headers`",
+      "say": ""
+    },
+    {
+      "step": 3,
+      "reasoning": "Let me understand the issue:\n\n1. When you set `session.headers['Accept-Encoding'] = None`, the value `None` gets sent as the header value instead of being removed.\n2. The expected behavior is that setting a header to `None` should remove it (similar to how it works for method-level headers).\n\nLooking at the code:\n\nIn `merge_setting` (sessions.py), there's handling for removing keys set to None from `request_setting`:\n```python\n# Remove keys that are set to None.\nfor (k, v) in request_setting.items():\n    if v is None:\n        del merged_setting[k]\n```\n\nBut this only handles the `request_setting`, not the `session_setting`. \n\nWait, let me re-read more carefully. The issue is about how headers are prepared. Let me look at `PreparedRequest.prepare_headers` and how session headers get merged.",
+      "say": ""
+    },
+    {
+      "step": 4,
+      "reasoning": "Let me read the `prepare_request` method in sessions.py more carefully, and also the `send` method to understand the flow.",
+      "say": ""
+    },
+    {
+      "step": 5,
+      "reasoning": "Now I understand the flow:\n\n1. `Session.request` or `Session.prepare_request` is called.\n2. Headers from the request and session are merged using `merge_setting(request.headers, self.headers)`.\n3. `merge_setting` does handle `None` values from `request_setting` (removing them from merged), but it does NOT handle `None` values from `session_setting`.\n\nSo when the user does `session.headers['Accept-Encoding'] = None`, the session header value is `None`. Then in `merge_setting`:\n- `session_setting` is `CaseInsensitiveDict({'Accept-Encoding': None, ...})`\n- `request_setting` is whatever was passed in the request (or None)\n- The merged setting includes `Accept-Encoding: None`\n\nThe fix should be in `merge_setting`: after merging, we should also remove keys from the merged set where the value is None (from either source). Actually, looking more carefully:\n\n```python\nmerged_setting = dict_class(to_key_val_list(session_setting))\nmerged_setting.update(to_key_val_list(request_setting))\n\n# Remove keys that are set to None.\nfor (k, v) in request_setting.items():\n    if v is None:\n        del merged_setting[k]\n```\n\nThis loop only handles keys where the request explicitly set a value to None. But if the session has a key with value None, it's still in `merged_setting`. \n\nThe fix: we should also check the session_setting for None values after initializing `merged_setting`. Or we could just clean up `merged_setting` after the update, removing all keys with None values from either source.\n\nActually, let me think about this more carefully. The current logic:\n1. Start with session settings\n2. Overlay with request settings\n3. Remove keys where request_setting has None value\n\nThe fix should: also remove keys where the session has a None value initially. But wait, after the `.update()`, if request_setting has a key with a non-None value, it overrides the session's None. In that case, we should NOT remove it.\n\nSo the cleanest fix is: after building `merged_setting`, remove any keys whose value is None \u2014 regardless of which source set it to None. Since `request_setting.items()` already handles the case where request explicitly set None (overriding session), we just need to also handle the case where session had None and request didn't touch it.\n\nLet me re-think: after the update, any key with value None means it was set to None in either session or request (and not overridden). So removing all None-valued keys should be correct.\n\nLet me trace through:\n1. Session has `{'Accept-Encoding': None, 'User-Agent': '...', 'Accept': '*/*'}`\n2. Request has `{}` (or None)\n3. merged = session dict (contains Accept-Encoding: None)\n4. merged.update({}) (no change)\n5. Remove keys with None value \u2192 removes Accept-Encoding\n\nIf request explicitly has `{'Accept-Encoding': 'gzip'}`, then:\n1. merged = session dict (contains Accept-Encoding: None)\n2. merged.update({'Accept-Encoding': 'gzip'}) \u2192 Accept-Encoding is now 'gzip'\n3. The loop checks request_setting.items() \u2014 'Accept-Encoding' has value 'gzip', so NOT removed\n4. After the loop, Accept-Encoding is 'gzip' \u2014 correct!\n\nWait but what if the session has `{'Key': None}` and the request also has `{'Key': None}`? Then request_setting.items() includes ('Key', None), so `del merged_setting['Key']` would be called. That's fine.\n\nWhat if the session has `{'Key': 'value'}` and the request has `{'Key': None}`? The current code handles this: request_setting.items() has ('Key', None), so `del merged_setting['Key']`. Correct.\n\nSo the simplest fix is to extend the existing loop to also handle None values coming from session_setting. Or more simply, after the full merge, remove any key with None value.\n\nLet me look at the current code again:\n\n```python\nmerged_setting = dict_class(to_key_val_list(session_setting))\nmerged_setting.update(to_key_val_list(request_setting))\n\n# Remove keys that are set to None.\nfor (k, v) in request_setting.items():\n    if v is None:\n        del merged_setting[k]\n```\n\nThe simplest fix: change the loop to iterate over the merged_setting items instead of request_setting, removing any with None value. This handles both session and request None values.\n\n```python\n# Remove keys that are set to None.\nfor (k, v) in merged_setting.items():\n    if v is None:\n        del merged_setting[k]\n```\n\nWait, but that changes the behavior slightly. If the session has `{'Key': None}` and the request has `{'Key': 'value'}`, the merged_setting would be `{'Key': 'value'}`, and iterating over merged_setting wouldn't find any None values. So it's fine.\n\nActually wait, what about if request_setting has `{'Key': None}` and session_setting has `{'Key': 'session_value'}`? After `merged_setting.update(...)`, the merged_setting has `{'Key': None}`. Then the current code deletes it. With my proposed change, we'd iterate over merged_setting, find None, and delete it. Same result. Good.\n\nLet me verify with the simple case: session has `{'Accept-Encoding': None}`, request has None. Then merged_setting = session dict (with Accept-Encoding: None), update does nothing, then we iterate merged_setting, find None, delete it. Correct!\n\nLet me make this change.",
+      "say": "Now I understand the issue clearly. In `merge_setting`, when merging session headers into request headers, the code only removes keys set to `None` from the `request_setting`, but not from the `session_setting`. So if a user sets `session.headers['Accept-Encoding'] = None`, the `None` value survives into the merged result.\n\nThe fix: after building `merged_setting`, remove ALL keys whose value is `None` (regardless of source), not just those from `request_setting`."
+    },
+    {
+      "step": 6,
+      "reasoning": "Let me verify my fix works with a quick check.",
+      "say": ""
+    },
+    {
+      "step": 7,
+      "reasoning": "Hmm, the fix didn't work. Let me check why. The issue might be that when iterating over a dictionary and deleting from it, Python might skip keys. Let me check the actual behavior of the merge_setting function more carefully.\n\nActually, the problem is that `to_key_val_list(session_setting)` might be filtering out the None values already! Let me check.",
+      "say": ""
+    },
+    {
+      "step": 8,
+      "reasoning": "OK, so `to_key_val_list(session_headers)` will return `[('User-Agent', 'test'), ('Accept-Encoding', None), ('Accept', '*/*')]` \u2014 it doesn't filter out None values.\n\nThen `dict_class(to_key_val_list(session_setting))` creates an OrderedDict with those items, including `('Accept-Encoding', None)`.\n\nThen `merged_setting.update(to_key_val_list(request_setting))` \u2014 since request_setting is None, this returns None, and calling `.update(None)` would fail... Wait, let me check:\n\nActually, `to_key_val_list(None)` returns `None`. Then `merged_setting.update(None)` would raise an error if dict_class is OrderedDict. Let me check this...\n\nActually wait, `dict_class(to_key_val_list(session_setting))` \u2014 OrderedDict takes a list of tuples. That works.\n\n`merged_setting.update(to_key_val_list(request_setting))` \u2014 if request_setting is None, to_key_val_list returns None, and `OrderedDict.update(None)` would fail... unless OrderedDict handles None.\n\nActually, let me just test it:\n\n```python\nfrom collections import OrderedDict\nd = OrderedDict([('a', 1)])\nd.update(None)\n```\n\nThis would raise TypeError. So that can't be the path that's taken.\n\nWait, let me re-read the code. In `Session.prepare_request`, the call is:\n```python\nheaders=merge_setting(request.headers, self.headers, dict_class=CaseInsensitiveDict),\n```\n\nSo `session_setting` is `self.headers` (the session headers) and `request_setting` is `request.headers`. If the request has no explicit headers, `request.headers` could be None, but `request.headers` is the headers attribute of a Request, which might be an empty dict or None.\n\nLet me check what `request.headers` is when a Request is created.",
+      "say": ""
+    },
+    {
+      "step": 9,
+      "reasoning": "So `Request.__init__` sets `headers = {} if headers is None else headers`. So `request.headers` is always a dict (at least an empty one), never None.\n\nSo when `prepare_request` calls:\n```python\nheaders=merge_setting(request.headers, self.headers, dict_class=CaseInsensitiveDict),\n```\n\n`request_setting` is an empty dict `{}`, and `session_setting` is `self.headers` which could contain `{'Accept-Encoding': None}`.\n\nIn `merge_setting`:\n1. `merged_setting = dict_class(to_key_val_list(session_setting))` \u2014 creates a CaseInsensitiveDict with `{'Accept-Encoding': None, ...}`\n2. `merged_setting.update(to_key_val_list(request_setting))` \u2014 updates with empty dict, no change\n3. The loop iterates over `merged_setting.items()` and removes keys with None value.\n\nWait, but my test showed it didn't work! Let me debug more carefully.\n\nActually, let me re-read `to_key_val_list`:\n\n```python\ndef to_key_val_list(value):\n    if value is None:\n        return None\n    if isinstance(value, (str, bytes, bool, int)):\n        raise ValueError(...)\n    if isinstance(value, collections.Mapping):\n        value = value.items()\n    return list(value)\n```\n\nSo `to_key_val_list(session_headers)` where session_headers is a CaseInsensitiveDict (a Mapping) \u2192 returns `list(session_headers.items())`. That should work.\n\nBut in my test: `merge_setting(None, session_headers, ...)`. request_setting is None.\n\nThen:\n- `merged_setting = CaseInsensitiveDict(to_key_val_list(session_headers))` \u2014 this should work if `to_key_val_list` returns a list of tuples.\n- `merged_setting.update(to_key_val_list(None))` \u2014 `to_key_val_list(None)` returns None. Then `merged_setting.update(None)` \u2014 does CaseInsensitiveDict.update(None) work?\n\nLet me check CaseInsensitiveDict:",
+      "say": ""
+    },
+    {
+      "step": 10,
+      "reasoning": "So `merge_setting(None, session_headers, ...)` would fail because it tries to call `merged_setting.update(None)`. But wait - my test with `merge_setting(None, session_headers, dict_class=CaseInsensitiveDict)` should have failed too. But it didn't fail before my edit... Let me re-run my test.\n\nActually, wait - I already ran that test and it produced output, so it didn't crash. Let me re-examine.\n\nOh wait, I was looking at `to_key_val_list` output. For CaseInsensitiveDict, `isinstance(value, collections.Mapping)` would be True, so `value = value.items()` returns the items view. Then `list(value)` gives a list of tuples.\n\nBut `to_key_val_list(None)` returns None. So `merged_setting.update(None)` should fail.\n\nBut my test ran successfully (just with wrong output). So either `CaseInsensitiveDict.update(None)` doesn't crash, or my test path is different.\n\nWait, let me re-read my test:\n```python\nmerged = merge_setting(None, session_headers, dict_class=CaseInsensitiveDict)\n```\n\nIn `merge_setting`:\n```python\ndef merge_setting(request_setting, session_setting, dict_class=OrderedDict):\n    if session_setting is None:\n        session_setting = {}\n    ...\n    merged_setting = dict_class(to_key_val_list(session_setting))\n    merged_setting.update(to_key_val_list(request_setting))\n```\n\nSo `to_key_val_list(None)` returns None. Then `merged_setting.update(None)`.\n\nActually, let me check if CaseInsensitiveDict catches this...\n\nActually wait, when request_setting=None, then `to_key_val_list(request_setting)` returns None. And `merged_setting.update(None)` \u2014 let me check if CaseInsensitiveDict.update handles None.\n\nActually, in the standard MutableMapping, `update(None)` would try `if other: ...` and since None is falsy, it might skip. Let me check.",
+      "say": ""
+    },
+    {
+      "step": 11,
+      "reasoning": "So `update(None)` crashes. But my first test with `merge_setting(None, session_headers, dict_class=CaseInsensitiveDict)` didn't crash. That's weird. Let me re-check.\n\nWait, actually in my test I was using `requests.sessions.merge_setting`. But maybe there's a different version being loaded? Let me trace through more carefully.\n\nActually, maybe the issue is that in the actual `prepare_request`, the `request.headers` is always a dict (empty or otherwise), never None. So `to_key_val_list(request_setting)` gets a dict, not None. Let me re-test with an empty dict.\n\nLet me test what actually happens with the session flow:",
+      "say": ""
+    },
+    {
+      "step": 12,
+      "reasoning": "Right, the issue is that we can't modify a dictionary while iterating over its `.items()`. Need to make a copy of the keys first. Let me read the full function to make sure I get the edit right.",
+      "say": ""
+    },
+    {
+      "step": 13,
+      "reasoning": "The issue is that we're iterating over `merged_setting.items()` while deleting from the dictionary. Need to iterate over a copy of the items. Let me fix this.",
+      "say": ""
+    },
+    {
+      "step": 14,
+      "reasoning": "Now let me verify the fix works:",
+      "say": ""
+    },
+    {
+      "step": 15,
+      "reasoning": "All tests pass. The fix is correct and minimal:\n\n1. Changed the iteration target from `merged_setting.items()` to `list(merged_setting.items())` to avoid \"dictionary changed size during iteration\" error.\n2. Changed the source of iteration from `request_setting` to `merged_setting` so that None values from the session setting are also caught.\n\nThis means:\n- Setting `session.headers['Accept-Encoding'] = None` now correctly removes that header from the merged result\n- The original behavior (request overriding session, and request with None removing a header) still works\n\nDone.",
+      "say": "All four tests pass. The fix is a single-line change: iterating over `list(merged_setting.items())` instead of `merged_setting.items()`, and over the merged dictionary instead of just `request_setting`. This ensures that `None` values from **both** the request and session settings are removed during merge, fixing the reported bug where `session.headers['Accept-Encoding'] = None` would send the literal string `\"None\"`."
+    }
+  ],
+  "final_diff": "diff --git a/requests/sessions.py b/requests/sessions.py\nindex a023e4ec..a253a3f9 100644\n--- a/requests/sessions.py\n+++ b/requests/sessions.py\n@@ -55,7 +55,7 @@ def merge_setting(request_setting, session_setting, dict_class=OrderedDict):\n     merged_setting.update(to_key_val_list(request_setting))\n \n     # Remove keys that are set to None.\n-    for (k, v) in request_setting.items():\n+    for (k, v) in list(merged_setting.items()):\n         if v is None:\n             del merged_setting[k]\n \n",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are the Atomic-CLI coding agent. Solve the task by editing a real repository using ONLY atomic tools. Be efficient with calls: to understand the code, FIRST call atomic_survey(glob) once to outline the region, then atomic_read_many(items) to read the relevant files in ONE call \u2014 do NOT read files one at a time. Then make minimal faithful edits with atomic_replace / atomic_create (supply proofOfIncorrectness when you remove code). Spend your reads on SOURCE files only; do NOT read changelog/news/release-notes/.rst/docs files or grep for the issue number \u2014 the fix lives in source, and adding changelog/doc files is out of scope. Prefer the smallest correct behavioral delta: preserve existing exports, comments, and call graph where possible; avoid rewriting unrelated helpers; when two touched functions need the same logic, implement one canonical helper and have wrappers delegate instead of duplicating state machines or parsers. For merge/default-composition/update helpers, reason over the final merged representation unless source identity is explicitly part of the contract; preserve override precedence and filter by final value, not by independently scanning input sources. When the fix is 'apply check/filter F': FIRST call atomic_callers(F) \u2014 if F is ALREADY invoked where the bug manifests, the root is the EXISTING call or F's own body (often a normalization/comparison detail), so fix THAT; adding a second F guard usually duplicates the same latent bug and fails. You CANNOT run the hidden acceptance test suite (no run_tests tool), BUT you CAN run short Python snippets with quick_check \u2014 USE IT to reproduce the bug empirically (run the issue's repro snippet to SEE the real error) and to confirm your fix, instead of simulating behavior by hand. Implement the fix carefully and completely, then STOP by replying with a short summary and NO tool call. Paths are relative to the repo root. Edit SOURCE files ONLY \u2014 NEVER modify test files (paths under a tests/ directory or matching test_*.py / *_test.py); the grader supplies the hidden test, so editing tests is wasted surface.\n\nCROSS-SESSION EXPERIENCE: this atomic agent has resolved 20 previous tasks (avg 16 diff lines, 3 edits). From that experience: the smallest correct fix is almost always a single-symbol mutation or a one-line policy-site change; prefer modifying an existing canonical construct over adding parallel logic.\n\nLEARNED RESOLUTION STRATEGIES (atomic weights \u2014 generalized operators captured from PROVEN resolutions of this class; apply the matching one):\n- [FIX-AT-WRITE-SITE-NOT-READ-SITE] (proven on 1 resolution(s), match via VSA sim=0.240): When a value is WRONG at the point it is read/consumed, the bug is often NOT in the reader -- it is where the value was WRITTEN, STORED, or REGISTERED. For attributes set by decorators/__init__/registration/inheritance, fix the STORAGE or REGISTRATION site (e.g. store_X, __set_name__, the decorator that records the value) so the value is correct for ALL readers, rather than patching one accessor (which leaves other readers broken and usually fails the hidden test). Identify both write-site and read-site before editing; prefer the write-site.\n- [MISSED-COMPANION-CONFIG-FILE] (proven on 1 resolution(s), match via VSA sim=0.234): A behavior fix that touches configuration/path/registration logic often spans TWO files: the code (the logic) AND a packaging/metadata file (setup.cfg, pyproject.toml, MANIFEST.in, conftest.py). After fixing the code, check whether a companion metadata/config file also declares or registers the thing you changed -- the hidden test may assert the metadata too. Don't stop at the single code file; grep the repo root for setup.cfg/pyproject for a related key.\n- [READ-WRITE-ROUNDTRIP-SYMMETRY] (proven on 1 resolution(s), match via regex): When adding support for a new option/parameter/field to a reader/parser/format, implement BOTH directions: the READ/PARSE path AND the WRITE/OUTPUT/serialize path. A partial fix that only accepts the option on input (or only emits it on output) passes naive checks but FAILS round-trip tests (write-then-read, or read-then-write). After adding the parse side, find the symmetric write/format method (often nearby in the same class) and implement the corresponding output logic.\n- [DISPATCH-HANDLER-LIVES-IN-REGISTRY-FILE] (proven on 1 resolution(s), match via VSA sim=0.174): For a bug in a generic function dispatched by type (@dispatch, @singledispatch, functools.singledispatch, visitor pattern, registered handlers), the fix is NOT in the generic stub -- it is in the HANDLER that registers the type-specific behavior (often in a separate handlers/ directory or registry module). Grep the codebase for the function name with dispatch/register to find ALL handler files; the missing/buggy case is a handler you must add or fix there. A bug across types usually needs a new or corrected handler registration, not a change to the dispatcher.\n\nMANDATORY ACT CLASSES: FIX-AT-WRITE-SITE-NOT-READ-SITE, MISSED-COMPANION-CONFIG-FILE, DISPATCH-HANDLER-LIVES-IN-REGISTRY-FILE. These matched operators are executable preconditions, not optional prose. Apply their concrete preconditions before committing to the first edit.\n\nMANDATORY ACT APPLICATION (companion-config): a matched proof-carrying ACT says this class often spans source logic plus companion metadata/config. Before the first edit, use the metadata context below to decide whether the source change also needs dependency/import/registration updates. Do not stop with a single source-file patch if this context declares the same construct.\nIMPORTANT: If you implement compliance with a standard specification (such as XDG Base Directory) or introduce paths/configuration changes, do NOT implement ad-hoc custom environment variable logic (e.g. using os.environ directly to parse directories). Instead, use the standard package designed for this (such as `appdirs` for XDG compliance) to ensure proper cross-platform and environment alignment. If you do so, you MUST explicitly update the packaging/metadata files (e.g., add the package to `install_requires` in `setup.cfg`, `pyproject.toml`, or `setup.py`, list it in `known_third_party` under `[isort]`, and configure `ignore_missing_imports` under `[mypy-<package>]`). Failing to declare dependencies in config files causes test suites to crash with ImportError during collection.\n\n## setup.cfg\n[wheel]\nuniversal = 1\n\n## setup.py\n#!/usr/bin/env python\n\nimport os\nimport sys\n\nimport requests\n\ntry:\n    from setuptools import setup\nexcept ImportError:\n    from distutils.core import setup\n\nif sys.argv[-1] == 'publish':\n    os.system('python setup.py sdist upload')\n    sys.exit()\n\npackages = [\n    'requests',\n    'requests.packages',\n    'requests.packages.chardet',\n    'requests.packages.urllib3',\n    'requests.packages.urllib3.packages',\n    'requests.packages.urllib3.contrib',\n    'requests.packages.urllib3.packages.ssl_match_hostname'\n]\n\nrequires = []\n\nwith open('README.rst') as f:\n    readme = f.read()\nwith open('HISTORY.rst') as f:\n    history = f.read()\n\nsetup(\n    name='requests',\n    version=requests.__version__,\n    description='Python HTTP for Humans.',\n    long_description=readme + '\\n\\n' + history,\n    author='Kenneth Reitz',\n    author_email='me@kennethreitz.com',\n    url='http://python-requests.org',\n    packages=packages,\n    package_data={'': ['LICENSE', 'NOTICE'], 'requests': ['*.pem']},\n    package_dir={'requests': 'requests'},\n    include_package_data=True,\n    install_requires=requires,\n    license='Apache 2.0',\n    zip_safe=False,\n    classifiers=(\n        'Development Status :: 5 - Production/Stable',\n        'Intended Audience :: Developers',\n        'Natural Language :: English',\n        'License :: OSI Approved :: Apache Software License',\n        'Programming Language :: Python',\n        'Programming Language :: Python :: 2.6',\n        'Programming Language :: Python :: 2.7',\n        'Programming Language :: Python :: 3',\n        'Programming Language :: Python :: 3.3',\n\n    ),\n)\n\n## MANIFEST.in\ninclude README.rst LICENSE NOTICE HISTORY.rst test_requests.py requirements.txt requests/cacert.pem\n\n## requirements.txt\npy==1.4.12\npytest==2.3.4\npytest-cov==1.6\ninvoke==0.2.0\nwheel"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_xoOmMyS9rexMqRptQtB20586",
+          "type": "function",
+          "function": {
+            "name": "atomic_survey",
+            "arguments": "{\"glob\": \"requests/*.py\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_xoOmMyS9rexMqRptQtB20586",
+      "content": "requests/__init__.py: NullHandler@L73, emit@L74\nrequests/adapters.py: BaseAdapter@L35, __init__@L38, send@L41, close@L44, HTTPAdapter@L48, __init__@L73, __getstate__@L88, __setstate__@L92, init_poolma\n[...compacted by F3, was 264 chars; recent context retained...]"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_oG3L8qasIjUYITrNEZJ96479",
+          "type": "function",
+          "function": {
+            "name": "atomic_read_many",
+            "arguments": "{\"items\": [{\"path\": \"requests/sessions.py\", \"selector\": \"merge_setting\"}, {\"path\": \"requests/sessions.py\", \"selector\": \"Session.prepare_request\"}, {\"path\": \"requests/models.py\", \"selector\": \"PreparedRequest.prepare_headers\"}, {\"path\": \"requests/utils.py\", \"selector\": \"default_headers\"}]}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_oG3L8qasIjUYITrNEZJ96479",
+      "content": "## requests/sessions.py:34-62 [merge_setting]\ndef merge_setting(request_setting, session_setting, dict_class=OrderedDict):\n    \"\"\"\n    Determines appropriate setting for a given request, taking into a\n[...compacted by F3, was 264 chars; recent context retained...]"
+    },
+    {
+      "role": "user",
+      "content": "You have read enough to edit. Pick the smallest implementation topology \u2014 the canonical implementation location and any delegating wrappers, preferring ONE canonical implementation plus wrappers over duplicated logic when several exported functions need the same semantics \u2014 then make the smallest faithful edit(s) with atomic_replace/atomic_create in THIS turn. You may state your topology reasoning as content alongside the tool call."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_5Fuhwjq02xpv8HLbbx4g4136",
+          "type": "function",
+          "function": {
+            "name": "atomic_read_many",
+            "arguments": "{\"items\": [{\"path\":\"requests/models.py\",\"selector\":\"PreparedRequest\"},{\"path\":\"requests/sessions.py\",\"selector\":\"Session.prepare_request\"},{\"path\":\"requests/sessions.py\",\"selector\":\"Session.request\"}]}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_5Fuhwjq02xpv8HLbbx4g4136",
+      "content": "## requests/models.py:255-500 [PreparedRequest]\nclass PreparedRequest(RequestEncodingMixin, RequestHooksMixin):\n    \"\"\"The fully mutable :class:`PreparedRequest <PreparedRequest>` object,\n    containi\n[...compacted by F3, was 264 chars; recent context retained...]"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_hu3IUbggjqkozO3kTGcX6323",
+          "type": "function",
+          "function": {
+            "name": "atomic_read",
+            "arguments": "{\"path\": \"requests/sessions.py\", \"startLine\": 260, \"endLine\": 310}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_hu3IUbggjqkozO3kTGcX6323",
+      "content": "requests/sessions.py\n    def prepare_request(self, request):\n        \"\"\"Constructs a :class:`PreparedRequest <PreparedRequest>` for\n        transmission and returns it. The :class:`PreparedRequest` ha\n[...compacted by F3, was 264 chars; recent context retained...]"
+    },
+    {
+      "role": "assistant",
+      "content": "Now I understand the issue clearly. In `merge_setting`, when merging session headers into request headers, the code only removes keys set to `None` from the `request_setting`, but not from the `session_setting`. So if a user sets `session.headers['Accept-Encoding'] = None`, the `None` value survives into the merged result.\n\nThe fix: after building `merged_setting`, remove ALL keys whose value is `None` (regardless of source), not just those from `request_setting`.",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_eR21hUKoUOxy6ABNUioX8989",
+          "type": "function",
+          "function": {
+            "name": "atomic_replace",
+            "arguments": "{\"file\": \"requests/sessions.py\", \"oldText\": \"    # Remove keys that are set to None.\\n    for (k, v) in request_setting.items():\\n        if v is None:\\n            del merged_setting[k]\", \"newText\": \"    # Remove keys that are set to None.\\n    for (k, v) in merged_setting.items():\\n        if v is None:\\n            del merged_setting[k]\", \"proofOfIncorrectness\": \"Iterating over request_setting only misses None values from session_settings\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_eR21hUKoUOxy6ABNUioX8989",
+      "content": "\u2705 Atomic edit applied\n\nrequests/sessions.py\n\u001b[2m--- requests/sessions.py (atomic char-level)\u001b[0m\n  \n      # Remove keys that are set to None.\n      for (k, v) in \u001b[31m[-r-]\u001b[0m\u001b[32m{+m+}\u001b[0me\u001b[31m[-qu\n[...compacted by F3, was 264 chars; recent context retained...]"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_LE0l1dcmmGZTPL4qvP0U8903",
+          "type": "function",
+          "function": {
+            "name": "quick_check",
+            "arguments": "{\"code\": \"import requests\\nfrom requests.sessions import merge_setting\\nfrom requests.structures import CaseInsensitiveDict\\n\\n# Simulate: session headers have Accept-Encoding set to None\\nsession_headers = CaseInsensitiveDict({'User-Agent': 'test', 'Accept-Encoding': None, 'Accept': '*/*'})\\nmerged = merge_setting(None, session_headers, dict_class=CaseInsensitiveDict)\\nprint(\\\"Merged headers:\\\", dict(merged))\\nassert 'Accept-Encoding' not in merged, f\\\"Accept-Encoding should be removed, got {dict(merged)}\\\"\\nprint(\\\"PASS: session header with None value is removed\\\")\\n\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_LE0l1dcmmGZTPL4qvP0U8903",
+      "content": "FAIL (exit 1)\nMerged headers: {'User-Agent': 'test', 'Accept-Encoding': None, 'Accept': '*/*'}\n\n--- stderr ---\nTraceback (most recent call last):\n  File \"/private/tmp/swe/round/WLIFT/wlift_psf__reques\n[...compacted by F3, was 264 chars; recent context retained...]"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_S4ODYYPRQV0OLLH5uNyA7878",
+          "type": "function",
+          "function": {
+            "name": "atomic_read",
+            "arguments": "{\"path\": \"requests/utils.py\", \"selector\": \"to_key_val_list\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_S4ODYYPRQV0OLLH5uNyA7878",
+      "content": "requests/utils.py:144-166\ndef to_key_val_list(value):\n    \"\"\"Take an object and test to see if it can be represented as a\n    dictionary. If it can be, return a list of tuples, e.g.,\n\n    ::\n\n        \n[...compacted by F3, was 264 chars; recent context retained...]"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_eoNOtIDDrvPsBcpEOl1b1080",
+          "type": "function",
+          "function": {
+            "name": "atomic_read",
+            "arguments": "{\"path\": \"requests/models.py\", \"selector\": \"Request\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_eoNOtIDDrvPsBcpEOl1b1080",
+      "content": "requests/models.py:181-252\nclass Request(RequestHooksMixin):\n    \"\"\"A user-created :class:`Request <Request>` object.\n\n    Used to prepare a :class:`PreparedRequest <PreparedRequest>`, which is sent t\n[...compacted by F3, was 2361 chars; recent context retained...]"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_sQ0weUtXmYq0ELHrb00P6104",
+          "type": "function",
+          "function": {
+            "name": "quick_check",
+            "arguments": "{\"code\": \"from requests.structures import CaseInsensitiveDict\\nd = CaseInsensitiveDict([('a', 1)])\\ntry:\\n    d.update(None)\\n    print(\\\"update(None) works\\\")\\nexcept Exception as e:\\n    print(f\\\"update(None) fails: {e}\\\")\\n\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_sQ0weUtXmYq0ELHrb00P6104",
+      "content": "PASS (exit 0)\nupdate(None) fails: 'NoneType' object is not iterable\n"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_rkuYDy3wphj1dlpYghjN9452",
+          "type": "function",
+          "function": {
+            "name": "quick_check",
+            "arguments": "{\"code\": \"from requests.structures import CaseInsensitiveDict\\nd = CaseInsensitiveDict([('a', 1)])\\nd.update(None)\\nprint(\\\"update(None) works, result:\\\", dict(d))\\n\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_rkuYDy3wphj1dlpYghjN9452",
+      "content": "FAIL (exit 1)\n\n--- stderr ---\nTraceback (most recent call last):\n  File \"/private/tmp/swe/round/WLIFT/wlift_psf__requests-1921_N8_mode_full_student_deepseek-v4-flash_22197f1a3b43_20260624T024844Z_41761_weight_8/tmpsvt7rzd9.py\", line 3, in <module>\n    d.update(None)\n  File \"/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/_collections_abc.py\", line 947, in update\n    for key, value in other:\nTypeError: 'NoneType' object is not iterable\n"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_cXUSaPDYZozY8DjZr4Re5947",
+          "type": "function",
+          "function": {
+            "name": "quick_check",
+            "arguments": "{\"code\": \"from requests.sessions import merge_setting\\nfrom requests.structures import CaseInsensitiveDict\\n\\n# Simulate the actual session flow more carefully\\nsession_headers = CaseInsensitiveDict({'User-Agent': 'test', 'Accept-Encoding': None, 'Accept': '*/*'})\\n# In prepare_request, request.headers is always a dict (possibly empty)\\nrequest_headers = {}\\nmerged = merge_setting(request_headers, session_headers, dict_class=CaseInsensitiveDict)\\nprint(\\\"Merged headers:\\\", dict(merged))\\nassert 'Accept-Encoding' not in merged, f\\\"Accept-Encoding should be removed, got {dict(merged)}\\\"\\nprint(\\\"PASS\\\")\\n\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_cXUSaPDYZozY8DjZr4Re5947",
+      "content": "FAIL (exit 1)\n\n--- stderr ---\nTraceback (most recent call last):\n  File \"/private/tmp/swe/round/WLIFT/wlift_psf__requests-1921_N8_mode_full_student_deepseek-v4-flash_22197f1a3b43_20260624T024844Z_41761_weight_8/tmp4rwtgs2k.py\", line 8, in <module>\n    merged = merge_setting(request_headers, session_headers, dict_class=CaseInsensitiveDict)\n  File \"/private/tmp/swe/round/WLIFT/wlift_psf__requests-1921_N8_mode_full_student_deepseek-v4-flash_22197f1a3b43_20260624T024844Z_41761_weight_8/requests/sessions.py\", line 58, in merge_setting\n    for (k, v) in merged_setting.items():\n  File \"/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/_collections_abc.py\", line 851, in __iter__\n    for key in self._mapping:\n  File \"/private/tmp/swe/round/WLIFT/wlift_psf__requests-1921_N8_mode_full_student_deepseek-v4-flash_22197f1a3b43_20260624T024844Z_41761_weight_8/requests/structures.py\", line 83, in <genexpr>\n    return (casedkey for casedkey, mappedvalue in self._store.values())\nRuntimeError: dictionary changed size during iteration\n"
+    },
+    {
+      "role": "user",
+      "content": "You have read a lot without editing. You likely have enough context \u2014 make the edit now with atomic_replace/atomic_create."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_GDXhMZJ3rHjfMXfLqyeB7660",
+          "type": "function",
+          "function": {
+            "name": "atomic_read",
+            "arguments": "{\"path\": \"requests/sessions.py\", \"selector\": \"merge_setting\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_GDXhMZJ3rHjfMXfLqyeB7660",
+      "content": "requests/sessions.py:34-62\ndef merge_setting(request_setting, session_setting, dict_class=OrderedDict):\n    \"\"\"\n    Determines appropriate setting for a given request, taking into account the\n    explicit setting on that request, and the setting in the session. If a\n    setting is a dictionary, they will be merged together using `dict_class`\n    \"\"\"\n\n    if session_setting is None:\n        return request_setting\n\n    if request_setting is None:\n        return session_setting\n\n    # Bypass if not a dictionary (e.g. verify)\n    if not (\n            isinstance(session_setting, Mapping) and\n            isinstance(request_setting, Mapping)\n    ):\n        return request_setting\n\n    merged_setting = dict_class(to_key_val_list(session_setting))\n    merged_setting.update(to_key_val_list(request_setting))\n\n    # Remove keys that are set to None.\n    for (k, v) in merged_setting.items():\n        if v is None:\n            del merged_setting[k]\n\n    return merged_setting"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_MgqcGhc1LOZ8CAjAEjjM5307",
+          "type": "function",
+          "function": {
+            "name": "atomic_replace",
+            "arguments": "{\"file\": \"requests/sessions.py\", \"oldText\": \"    # Remove keys that are set to None.\\n    for (k, v) in merged_setting.items():\\n        if v is None:\\n            del merged_setting[k]\", \"newText\": \"    # Remove keys that are set to None.\\n    for (k, v) in list(merged_setting.items()):\\n        if v is None:\\n            del merged_setting[k]\", \"proofOfIncorrectness\": \"Cannot delete items from dict while iterating its .items()\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_MgqcGhc1LOZ8CAjAEjjM5307",
+      "content": "\u2705 Atomic edit applied\n\nrequests/sessions.py\n\u001b[2m--- requests/sessions.py (atomic char-level)\u001b[0m\n  \n      # Remove keys that are set to None.\n      for (k, v) in \u001b[32m{+list(+}\u001b[0mmerged_setting.items()\u001b[32m{+)+}\u001b[0m:\n          if v is None:\n              del merged_setting[k]\n\nValidation:\n- syntax: ok\n- typecheck: not-run\n- protected file: no\n- sha256: ok\n\nTrace metrics: expansion 0.96\u00d7 \u00b7 143 chars \u00b7 zeroCodeTrust 30 (unvalidated-text)\nTopology: text_span \u00b7 unclassified_code_edit \u00b7 preserved 2 \u00b7 modified 1 \u00b7 moved 0\nTrace: .atomic/traces/op_1782273184721_a7059757.json\n{\n  \"ok\": true,\n  \"changed\": true,\n  \"file\": \"requests/sessions.py\",\n  \"target\": {\n    \"repoRoot\": \"/private/tmp/swe/round/WLIFT/wlift_psf__requests-1921_N8_mode_full_student_deepseek-v4-flash_22197f1a3b43_20260624T024844Z_41761_weight_8\",\n    \"file\": \"requests/sessions.py\",\n    \"absPath\": \"/private/tmp/swe/round/WLIFT/wlift_psf__requests-1921_N8_mode_full_student_deepseek-v4-flash_22197f1a3b43_20260624T024844Z_41761_weight_8/requests/sessions.py\"\n  },\n  \"validation\": {\n    \"language\": \"python\",\n    \"syntaxErrorsBefore\": 1,\n    \"syntaxErrorsAfter\": 1\n  },\n  \"intentionChars\": 143,\n  \"lineRewriteSurfaceChars\": 137,\n  \"expansionFactorAvoided\": 0.96,\n  \"bytesNet\": 6,\n  \"afterSha256\": \"d768c345e8d5682a80986c38f58a169f5a32f32f260daf40748142ae6f674105\",\n  \"op\": \"atomic_replace_text\",\n  \"operationId\": \"op_1782273184721_a7059757\",\n  \"operation\": \"atomic_replace_text\",\n  \"validationSummary\": {\n    \"syntax\": \"ok\",\n    \"typecheck\": \"not-run\",\n    \"protectedFile\": \"no\",\n    \"sha256\": \"ok\"\n  },\n  \"tracePath\": \".atomic/traces/op_1782273184721_a7059757.json\",\n  \"chainHash\": \"ebdc3791daba4422bda593441410d331b511dea618073e5b97a0b57ed81f7d77\",\n  \"founder\": {\n    \"whatChanged\": \"Operation `atomic_replace_text` changed ~143 character(s) in `requests/sessions.py` (sub-line atomic edit, expansion 0.96\u00d7 \u2014 it did not rewrite surrounding code).\",\n    \"whatPreserved\": \"Everything outside the highlighted [-removed-]{+added+} span in that one file is byte-identical. No other file was touched by this operation.\",\n    \"howToValidate\": \"Read the atomicDiff above \u2014 it shows EXACTLY the changed characters, nothing else. Then exercise the affected behavior in the running product to confirm intent.\",\n    \"notProven\": \"Runtime/product behavior is NOT proven by this tool. Structural validity \u2260 correct behavior. Prove behavior by running the flow in the app.\",\n    \"nonTouched\": \"Single-file, single-span: every file other than `requests/sessions.py` is provably untouched by this operation. Policy/protected-file status requires the governance gate.\",\n    \"promiseClass\": \"unvalidated-text\",\n    \"zeroCodeTrust\": 30,\n    \"trustCeilingReason\": \"ceiling < 75: an edit tool proves structure + exact scope, not product behavior. Reaching 75 (validate by explanation) or 100 (validate by the product) requires running the changed flow \u2014 do that in the app, not here.\"\n  },\n  \"atomicDiff\": \"\\u001b[2m--- requests/sessions.py (atomic char-level)\\u001b[0m\\n  \\n      # Remove keys that are set to None.\\n      for (k, v) in \\u001b[32m{+list(+}\\u001b[0mmerged_setting.items()\\u001b[32m{+)+}\\u001b[0m:\\n          if v is None:\\n              del merged_setting[k]\"\n}\n[post-edit view] the file now reads (around your change) \u2014 no need to re-read to verify:\n54:     merged_setting = dict_class(to_key_val_list(session_setting))\n55:     merged_setting.update(to_key_val_list(request_setting))\n56: \n57:     # Remove keys that are set to None.\n58:     for (k, v) in list(merged_setting.items()):\n59:         if v is None:\n60:             del merged_setting[k]\n61: \n62:     return merged_setting\n63: \n64: \n65: def merge_hooks(request_hooks, session_hooks, dict_class=OrderedDict):\n[over-fix check] this edit added 1 new loop(s) (for/while) and touched 1 separate region(s). The failing tests likely exercise ONE path; if a strictly smaller single-path / single-region fix keeps the gate green, prefer it (the minimizer re-checks after run_tests)."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_QXW4Ma1FJKyKU8j9FfbL1825",
+          "type": "function",
+          "function": {
+            "name": "quick_check",
+            "arguments": "{\"code\": \"import requests\\nfrom requests.sessions import merge_setting\\nfrom requests.structures import CaseInsensitiveDict\\n\\n# Test 1: session header with None value is removed\\nsession_headers = CaseInsensitiveDict({'User-Agent': 'test', 'Accept-Encoding': None, 'Accept': '*/*'})\\nmerged = merge_setting({}, session_headers, dict_class=CaseInsensitiveDict)\\nprint(\\\"Test 1 merged:\\\", dict(merged))\\nassert 'Accept-Encoding' not in merged, f\\\"FAIL: Accept-Encoding should be removed\\\"\\nprint(\\\"PASS: session header with None value is removed\\\")\\n\\n# Test 2: the real-world scenario from the bug report\\nsession = requests.Session()\\nsession.headers['Accept-Encoding'] = None\\nmerged = merge_setting({}, session.headers, dict_class=CaseInsensitiveDict)\\nprint(\\\"Test 2 merged:\\\", dict(merged))\\nassert 'Accept-Encoding' not in merged, f\\\"FAIL: Accept-Encoding should be removed\\\"\\nprint(\\\"PASS: real session scenario works\\\")\\n\\n# Test 3: request header overriding session header with non-None value still works\\nsession_headers = CaseInsensitiveDict({'Accept-Encoding': 'gzip'})\\nreq_headers = CaseInsensitiveDict({'Accept-Encoding': 'deflate'})\\nmerged = merge_setting(req_headers, session_headers, dict_class=CaseInsensitiveDict)\\nprint(\\\"Test 3 merged:\\\", dict(merged))\\nassert merged['Accept-Encoding'] == 'deflate', f\\\"FAIL: request should override session\\\"\\nprint(\\\"PASS: request overrides session\\\")\\n\\n# Test 4: request header with None removes the header\\nsession_headers = CaseInsensitiveDict({'Accept-Encoding': 'gzip'})\\nreq_headers = CaseInsensitiveDict({'Accept-Encoding': None})\\nmerged = merge_setting(req_headers, session_headers, dict_class=CaseInsensitiveDict)\\nprint(\\\"Test 4 merged:\\\", dict(merged))\\nassert 'Accept-Encoding' not in merged, f\\\"FAIL: Accept-Encoding should be removed\\\"\\nprint(\\\"PASS: request with None removes the header\\\")\\n\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_QXW4Ma1FJKyKU8j9FfbL1825",
+      "content": "PASS (exit 0)\nTest 1 merged: {'User-Agent': 'test', 'Accept': '*/*'}\nPASS: session header with None value is removed\nTest 2 merged: {'User-Agent': 'python-requests/2.3.0 CPython/3.9.6 Darwin/25.4.0', 'Accept': '*/*'}\nPASS: real session scenario works\nTest 3 merged: {'Accept-Encoding': 'deflate'}\nPASS: request overrides session\nTest 4 merged: {}\nPASS: request with None removes the header\n"
+    },
+    {
+      "role": "assistant",
+      "content": "All four tests pass. The fix is a single-line change: iterating over `list(merged_setting.items())` instead of `merged_setting.items()`, and over the merged dictionary instead of just `request_setting`. This ensures that `None` values from **both** the request and session settings are removed during merge, fixing the reported bug where `session.headers['Accept-Encoding'] = None` would send the literal string `\"None\"`."
+    }
+  ]
+}

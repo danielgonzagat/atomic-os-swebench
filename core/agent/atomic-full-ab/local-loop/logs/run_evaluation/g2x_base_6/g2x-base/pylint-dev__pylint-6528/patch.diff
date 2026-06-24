@@ -1,0 +1,54 @@
+diff --git a/pylint/lint/pylinter.py b/pylint/lint/pylinter.py
+index 53345a6b1..ac3232aec 100644
+--- a/pylint/lint/pylinter.py
++++ b/pylint/lint/pylinter.py
+@@ -553,6 +553,21 @@ class PyLinter(
+ 
+     # pylint: enable=unused-argument
+ 
++    def _should_ignore_path(self, path: str) -> bool:
++        """Return True if the given path should be ignored based on config."""
++        basename = os.path.basename(path)
++        if basename in self.config.ignore:
++            return True
++        if self.config.ignore_patterns and any(
++            pattern.search(basename) for pattern in self.config.ignore_patterns
++        ):
++            return True
++        if getattr(self, "_ignore_paths", None) and any(
++            pattern.search(path) for pattern in self._ignore_paths
++        ):
++            return True
++        return False
++
+     def initialize(self) -> None:
+         """Initialize linter for linting.
+ 
+@@ -564,8 +579,7 @@ class PyLinter(
+             if not msg.may_be_emitted():
+                 self._msgs_state[msg.msgid] = False
+ 
+-    @staticmethod
+-    def _discover_files(files_or_modules: Sequence[str]) -> Iterator[str]:
++    def _discover_files(self, files_or_modules: Sequence[str]) -> Iterator[str]:
+         """Discover python modules and packages in sub-directory.
+ 
+         Returns iterator of paths to discovered modules and packages.
+@@ -575,10 +589,16 @@ class PyLinter(
+                 os.path.join(something, "__init__.py")
+             ):
+                 skip_subtrees: list[str] = []
+-                for root, _, files in os.walk(something):
++                for root, dirs, files in os.walk(something):
+                     if any(root.startswith(s) for s in skip_subtrees):
+                         # Skip subtree of already discovered package.
+                         continue
++                    # Prune directories that match ignore patterns
++                    dirs[:] = [
++                        d
++                        for d in dirs
++                        if not self._should_ignore_path(os.path.join(root, d))
++                    ]
+                     if "__init__.py" in files:
+                         skip_subtrees.append(root)
+                         yield root

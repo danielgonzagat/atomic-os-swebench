@@ -1,0 +1,56 @@
+diff --git a/pylint/lint/pylinter.py b/pylint/lint/pylinter.py
+index 53345a6b1..dac4112f7 100644
+--- a/pylint/lint/pylinter.py
++++ b/pylint/lint/pylinter.py
+@@ -564,12 +564,14 @@ class PyLinter(
+             if not msg.may_be_emitted():
+                 self._msgs_state[msg.msgid] = False
+ 
+-    @staticmethod
+-    def _discover_files(files_or_modules: Sequence[str]) -> Iterator[str]:
++    def _discover_files(self, files_or_modules: Sequence[str]) -> Iterator[str]:
+         """Discover python modules and packages in sub-directory.
+ 
+         Returns iterator of paths to discovered modules and packages.
+         """
++        ignore_list = self.config.black_list
++        ignore_list_re = self.config.ignore_patterns
++        ignore_list_paths_re = self.config.ignore_paths
+         for something in files_or_modules:
+             if os.path.isdir(something) and not os.path.isfile(
+                 os.path.join(something, "__init__.py")
+@@ -579,6 +581,18 @@ class PyLinter(
+                     if any(root.startswith(s) for s in skip_subtrees):
+                         # Skip subtree of already discovered package.
+                         continue
++                    # Check if the current directory should be ignored
++                    if os.path.basename(root) in ignore_list:
++                        continue
++                    if any(
++                        pattern.search(os.path.basename(root))
++                        for pattern in ignore_list_re
++                    ):
++                        continue
++                    if any(
++                        pattern.search(root) for pattern in ignore_list_paths_re
++                    ):
++                        continue
+                     if "__init__.py" in files:
+                         skip_subtrees.append(root)
+                         yield root
+@@ -587,6 +601,15 @@ class PyLinter(
+                             os.path.join(root, file)
+                             for file in files
+                             if file.endswith(".py")
++                            and file not in ignore_list
++                            and not any(
++                                pattern.search(file)
++                                for pattern in ignore_list_re
++                            )
++                            and not any(
++                                pattern.search(os.path.join(root, file))
++                                for pattern in ignore_list_paths_re
++                            )
+                         )
+             else:
+                 yield something

@@ -1,0 +1,44 @@
+diff --git a/django/db/models/deletion.py b/django/db/models/deletion.py
+index ae82d26340..05a34c525e 100644
+--- a/django/db/models/deletion.py
++++ b/django/db/models/deletion.py
+@@ -1,6 +1,7 @@
+ from collections import Counter
++from functools import reduce
+ from itertools import chain
+-from operator import attrgetter
++from operator import attrgetter, or_
+ 
+ from django.db import IntegrityError, connections, transaction
+ from django.db.models import signals, sql
+@@ -78,6 +79,21 @@ class Collector:
+         # parent.
+         self.dependencies = {}  # {model: {models}}
+ 
++    def get_fast_deletes(self):
++        """
++        Group fast deletes by model and combine same-model querysets
++        using | (OR) to reduce the number of database roundtrips.
++        """
++        grouped = {}
++        for qs in self.fast_deletes:
++            grouped.setdefault(qs.model, []).append(qs)
++        for model, qs_list in grouped.items():
++            if len(qs_list) == 1:
++                yield qs_list[0]
++            else:
++                # Combine multiple same-model querysets with OR
++                yield reduce(or_, qs_list)
++
+     def add(self, objs, source=None, nullable=False, reverse_dependency=False):
+         """
+         Add 'objs' to the collection of objects to be deleted.  If the call is
+@@ -310,7 +326,7 @@ class Collector:
+                     )
+ 
+             # fast deletes
+-            for qs in self.fast_deletes:
++            for qs in self.get_fast_deletes():
+                 count = qs._raw_delete(using=self.using)
+                 deleted_counter[qs.model._meta.label] += count
+ 

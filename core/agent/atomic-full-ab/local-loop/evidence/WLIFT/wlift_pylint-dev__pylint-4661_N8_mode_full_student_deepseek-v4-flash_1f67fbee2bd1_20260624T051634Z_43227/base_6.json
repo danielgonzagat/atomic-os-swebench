@@ -1,0 +1,366 @@
+{
+  "arm": "atomic-cli-deepseek-v4-pro",
+  "task": "/Users/danielpenin/atomic-os-swebench/core/agent/atomic-full-ab/local-loop/tasks/SWE-pylint-dev__pylint-4661/PROBLEM.md",
+  "workdir": "/private/tmp/swe/round/WLIFT/wlift_pylint-dev__pylint-4661_N8_mode_full_student_deepseek-v4-flash_1f67fbee2bd1_20260624T051634Z_43227_base_6",
+  "baseline_fail_floor": 1,
+  "steps": 12,
+  "tool_calls": {
+    "atomic_grep": 6,
+    "atomic_read": 2,
+    "quick_check": 2,
+    "atomic_replace": 2
+  },
+  "edits_applied": 2,
+  "invalid_states_prevented": 0,
+  "reads": 8,
+  "body_context_reads": 2,
+  "run_tests_calls": 0,
+  "quick_check_calls": 2,
+  "tokens": 98048,
+  "gate_pass": null,
+  "round_invalid": false,
+  "invalid_reason": "",
+  "model_call_error": "",
+  "model_call_error_kind": "",
+  "diff_lines": 9,
+  "wall_s": 89.4,
+  "transcript": [
+    "s1 atomic_grep({\"pattern\": \"\\\\.pylint\\\\.d\"}) -> doc/faq.rst:96: * \".pylint.d\" subdirectory of the user's home directory if it is found",
+    "s1 atomic_grep({\"pattern\": \"PYLINTHOME\"}) -> ChangeLog:4279: * Create the PYLINTHOME directory when needed, it might fail and lead to",
+    "s2 atomic_read({\"path\": \"pylint/config/__init__.py\"}) -> pylint/config/__init__.py",
+    "s3 TOPOLOGY-GUIDANCE injected (non-blocking)",
+    "s3 atomic_grep({\"pattern\": \"USER_HOME\", \"glob\": \"*.py\"}) -> pylint/config/__init__.py:58: USER_HOME = os.path.expanduser(\"~\")",
+    "s4 atomic_grep({\"pattern\": \"PYLINT_HOME\", \"glob\": \"*.py\"}) -> pylint/config/__init__.py:60: PYLINT_HOME = os.environ[\"PYLINTHOME\"]",
+    "s5 SAY: Let me also check the ENV_HELP text to update it:",
+    "s5 atomic_read({\"path\": \"pylint/config/__init__.py\", \"startLine\": 105, \"endLine\": 120}) -> pylint/config/__init__.py",
+    "s6 atomic_grep({\"pattern\": \"XDG\", \"glob\": \"*.py\"}) -> {",
+    "s7 SAY: Let's reproduce the issue first to see the current behavior:",
+    "s7 quick_check -> PASS (exit 0)",
+    "s8 SAY: Now I'll make the minimal edit to make `PYLINT_HOME` XDG-compliant, falling back to `$XDG_DATA_HOME/pylint` (or `~/.local/share/pylint` by default):",
+    "s8 atomic_replace({\"file\": \"pylint/config/__init__.py\", \"oldText\": \"USER_HOME = os.path.expanduser(\\\"~\\\")\\ni) -> \u2705 Atomic edit applied",
+    "s9 SAY: Now update the `ENV_HELP` text to reflect the new default:",
+    "s9 OVER-FIX signal: added_loops=0 hunks=2",
+    "s9 atomic_replace({\"file\": \"pylint/config/__init__.py\", \"oldText\": \"    * PYLINTHOME\\n    Path to the direct) -> \u2705 Atomic edit applied",
+    "s10 SAY: Let me verify the behavior empirically:",
+    "s10 quick_check -> PASS (exit 0)",
+    "s11 SAY: Let me verify there are no other source files that hardcode `.pylint.d` as the default path:",
+    "s11 atomic_grep({\"pattern\": \"\\\\.pylint\\\\.d\", \"glob\": \"pylint/**/*.py\"}) -> pylint/config/__init__.py:64: PYLINT_HOME = \".pylint.d\"",
+    "s12 SAY: The fix is complete. Summary of changes made to `pylint/config/__init__.py`: 1. **Default `PYLINT_HOME`** changed from `~/.pylint.d/` to `$XDG_DATA_HOME/pylint` (falling back to `~/.local/share/pylint",
+    "s12 DONE (no tool call; one-shot fix submitted)"
+  ],
+  "reasoning_trace": [
+    {
+      "step": 1,
+      "reasoning": "Let me understand the problem. The user wants pylint to be XDG Base Directory Specification compliant. Currently, pylint creates a `.pylint.d` directory in the user's home folder for storing data. According to XDG spec, data should go to `$XDG_DATA_HOME/pylint` (which defaults to `~/.local/share/pylint`).\n\nLet me first explore where `.pylint.d` is referenced in the codebase.",
+      "say": ""
+    },
+    {
+      "step": 2,
+      "reasoning": "Now let me look at the main source file where PYLINT_HOME is defined.",
+      "say": ""
+    },
+    {
+      "step": 3,
+      "reasoning": "Let me understand the issue. The task wants Pylint to use XDG Base Directory Specification for storing persistent data. Currently, Pylint stores data in `$HOME/.pylint.d` which is not the XDG standard location. According to XDG, data should go to `$HOME/.local/share/pylint/pylint.d` (or similar).\n\nThe key file is `pylint/config/__init__.py`. The relevant code is:\n\n```python\nUSER_HOME = os.path.expanduser(\"~\")\nif \"PYLINTHOME\" in os.environ:\n    PYLINT_HOME = os.environ[\"PYLINTHOME\"]\n    if USER_HOME == \"~\":\n        USER_HOME = os.path.dirname(PYLINT_HOME)\nelif USER_HOME == \"~\":\n    PYLINT_HOME = \".pylint.d\"\nelse:\n    PYLINT_HOME = os.path.join(USER_HOME, \".pylint.d\")\n```\n\nThe XDG Base Directory Specification says:\n- Data files should go to `$XDG_DATA_HOME` which defaults to `$HOME/.local/share`\n- Config files should go to `$XDG_CONFIG_HOME` which defaults to `$HOME/.config`\n- Cache files should go to `$XDG_CACHE_HOME` which defaults to `$HOME/.cache`\n\nFor this issue, the `.pylint.d` directory stores persistent data (stats/results), so it should be moved to `$XDG_DATA_HOME/pylint/.pylint.d` perhaps, or more likely since it's the \"PYLINTHOME\" data directory, it should go to `$XDG_DATA_HOME/pylint`.\n\nWait, let me re-read the issue more carefully. The issue title says \"Make pylint XDG Base Directory Specification compliant\". The user complains about `.pylint.d` directory in their home folder. So we need to change where `.pylint.d` is stored.\n\nLet me think about what the minimal change would be. The `PYLINT_HOME` variable currently defaults to `~/.pylint.d`. We need to change it to use XDG data home, which is `$XDG_DATA_HOME/pylint` (defaulting to `~/.local/share/pylint`).\n\nLet me check if there's an `XDG_DATA_HOME` environment variable pattern used elsewhere in the codebase to see if there's any existing XDG support.\n\nActually, let me think about this more carefully. The `.pylint.d` directory contains `.stats` files (pickled result data). This is data, not config. So it should use `$XDG_DATA_HOME`.\n\nAccording to XDG spec:\n- `$XDG_DATA_HOME` defines the base directory relative to which user-specific data files should be stored. If `$XDG_DATA_HOME` is either not set or empty, a default equal to `$HOME/.local/share` should be used.\n\nSo the change should be: instead of `~/.pylint.d`, use `$XDG_DATA_HOME/pylint` (or `$HOME/.local/share/pylint` when XDG_DATA_HOME is not set).\n\nBut wait, should we keep the directory name as `.pylint.d` or just `pylint`? The XDG standard uses the program name. Since this is the PYLINT_HOME directory, it makes sense to use `pylint` as the directory name under `$XDG_DATA_HOME`.\n\nLet me look at how other projects handle this. The change is minimal - just modify the fallback path for PYLINT_HOME.\n\nLet me also check if there are any other references to `.pylint.d` in source files that need updating.\n\nLooking at the grep results:\n- `pylint/config/__init__.py` - this is the main file to change\n- `doc/faq.rst` and `ChangeLog` - documentation, not source (we should not edit)\n- `tests/lint/unittest_lint.py` - test file (we should not edit)\n\nSo the only source file to change is `pylint/config/__init__.py`.\n\nNow, the minimal change: replace the default fallback for `PYLINT_HOME` from `~/.pylint.d` to using `$XDG_DATA_HOME/pylint` (or `~/.local/share/pylint` if `$XDG_DATA_HOME` is not set).\n\nLet me think about the exact code:\n\n```python\nimport os\nimport pickle\nimport sys\n\n# ... \n\nUSER_HOME = os.path.expanduser(\"~\")\nif \"PYLINTHOME\" in os.environ:\n    PYLINT_HOME = os.environ[\"PYLINTHOME\"]\n    if USER_HOME == \"~\":\n        USER_HOME = os.path.dirname(PYLINT_HOME)\nelif USER_HOME == \"~\":\n    PYLINT_HOME = \".pylint.d\"\nelse:\n    PYLINT_HOME = os.path.join(USER_HOME, \".pylint.d\")\n```\n\nThe XDG change should be:\n- If `PYLINTHOME` is set, use it (keep)\n- Otherwise, use `$XDG_DATA_HOME/pylint` where `$XDG_DATA_HOME` defaults to `$HOME/.local/share`\n\nSo the fallback becomes:\n```python\nelif USER_HOME == \"~\":\n    PYLINT_HOME = \".pylint.d\"\nelse:\n    xdg_data_home = os.environ.get(\"XDG_DATA_HOME\", os.path.join(USER_HOME, \".local\", \"share\"))\n    PYLINT_HOME = os.path.join(xdg_data_home, \"pylint\")\n```\n\nWait, but what about when USER_HOME == \"~\" (when home dir can't be found)? In that case, fall back to `.pylint.d` in current directory. That seems fine.\n\nActually, I need to be careful. Let me re-read the existing logic:\n\n1. If `PYLINTHOME` is set in env: use it (and if we couldn't resolve home dir, set USER_HOME to its parent)\n2. If USER_HOME is \"~\" (couldn't resolve): use `.pylint.d` (relative path in cwd)\n3. Otherwise: `~/.pylint.d`\n\nThe XDG-compliant change is to modify case 3 to use `XDG_DATA_HOME/pylint` instead of `~/.pylint.d`.\n\nBut we need to keep the `USER_HOME = os.path.expanduser(\"~\")` variable because it might be used elsewhere... Let me check.\n\nActually, let me check if `USER_HOME` is used elsewhere in the source code.",
+      "say": ""
+    },
+    {
+      "step": 4,
+      "reasoning": "`USER_HOME` is only used within this file. So the change is straightforward.\n\nThe minimal change: In the `else` branch (line 66), instead of `PYLINT_HOME = os.path.join(USER_HOME, \".pylint.d\")`, use XDG data home.\n\nLet me write the new code:\n\n```python\nUSER_HOME = os.path.expanduser(\"~\")\nif \"PYLINTHOME\" in os.environ:\n    PYLINT_HOME = os.environ[\"PYLINTHOME\"]\n    if USER_HOME == \"~\":\n        USER_HOME = os.path.dirname(PYLINT_HOME)\nelif USER_HOME == \"~\":\n    PYLINT_HOME = \".pylint.d\"\nelse:\n    PYLINT_HOME = os.path.join(\n        os.environ.get(\"XDG_DATA_HOME\", os.path.join(USER_HOME, \".local\", \"share\")),\n        \"pylint\",\n    )\n```\n\nWait, but should we keep the name `.pylint.d` or just `pylint`? Looking at the issue, the user is complaining about `.pylint.d` directory in their home folder. The XDG directory would typically be `~/.local/share/pylint/`. But should the data files be directly in `~/.local/share/pylint/` or in `~/.local/share/pylint/.pylint.d/`?\n\nLooking at the code, `PYLINT_HOME` is used as the base directory for stats files, and it's also created by `save_results` if it doesn't exist. So it should point to the directory where pylint stores its data.\n\nI think the most natural XDG-compliant location would be `$XDG_DATA_HOME/pylint` (e.g., `~/.local/share/pylint`). The `.pylint.d` name was just an old convention.\n\nBut let me also check if any code relies on the directory being named `.pylint.d`...\n\nLooking at the grep results, only `pylint/config/__init__.py` references `.pylint.d` in source code. The test files reference it too, but we can't modify those. The ENV_HELP string describes what it does and will need updating too.\n\nLet me also check if `PYLINT_HOME` is referenced elsewhere.",
+      "say": ""
+    },
+    {
+      "step": 5,
+      "reasoning": "Good. `PYLINT_HOME` is only used within `pylint/config/__init__.py` and in tests. The source change is isolated.\n\nNow let me make the change. I need to replace the logic that sets `PYLINT_HOME` in the `else` branch (line 65-66).\n\nCurrent code:\n```python\nUSER_HOME = os.path.expanduser(\"~\")\nif \"PYLINTHOME\" in os.environ:\n    PYLINT_HOME = os.environ[\"PYLINTHOME\"]\n    if USER_HOME == \"~\":\n        USER_HOME = os.path.dirname(PYLINT_HOME)\nelif USER_HOME == \"~\":\n    PYLINT_HOME = \".pylint.d\"\nelse:\n    PYLINT_HOME = os.path.join(USER_HOME, \".pylint.d\")\n```\n\nNew code:\n```python\nUSER_HOME = os.path.expanduser(\"~\")\nif \"PYLINTHOME\" in os.environ:\n    PYLINT_HOME = os.environ[\"PYLINTHOME\"]\n    if USER_HOME == \"~\":\n        USER_HOME = os.path.dirname(PYLINT_HOME)\nelif USER_HOME == \"~\":\n    PYLINT_HOME = \".pylint.d\"\nelse:\n    PYLINT_HOME = os.path.join(\n        os.environ.get(\"XDG_DATA_HOME\", os.path.join(USER_HOME, \".local\", \"share\")),\n        \"pylint\",\n    )\n```\n\nAlso need to update the `ENV_HELP` text to reflect the new default location.\n\nWait, I should also check if there's an `XDG_DATA_HOME` import or usage anywhere in the codebase already.",
+      "say": "Let me also check the ENV_HELP text to update it:"
+    },
+    {
+      "step": 6,
+      "reasoning": "Now I understand the issue. The `PYLINT_HOME` currently defaults to `~/.pylint.d/` which is not XDG compliant. According to the XDG Base Directory Specification:\n\n- Data files should go to `$XDG_DATA_HOME/<program>` (default `~/.local/share/<program>`)\n- Config files should go to `$XDG_CONFIG_HOME/<program>` (default `~/.config/<program>`)\n- Cache files should go to `$XDG_CACHE_HOME/<program>` (default `~/.cache/<program>`)\n\nLooking at what `PYLINT_HOME` is used for:\n1. `_get_pdata_path` - stores pickle data (`.stats` files)\n2. `load_results` - loads pickled results\n3. `save_results` - saves pickled results\n\nSo `PYLINT_HOME` is primarily used for **data** storage (`.stats` files). According to XDG, data should go to `~/.local/share/pylint/` or the value of `$XDG_DATA_HOME/pylint/`.\n\nThe fix is simple: change the default `PYLINT_HOME` from `~/.pylint.d/` to an XDG-compliant path. Since it's data, the right directory is `$XDG_DATA_HOME/pylint` (defaulting to `~/.local/share/pylint`).\n\nLet me also check if there's an `XDG_DATA_HOME` usage or any existing XDG support in the codebase.\n\nThe change will be in `pylint/config/__init__.py`:\n1. Change the default from `~/.pylint.d` to `~/.local/share/pylint`\n2. Update the ENV_HELP text\n\nLet me also check if there's any mention of `XDG_DATA_HOME` in the codebase.",
+      "say": ""
+    },
+    {
+      "step": 7,
+      "reasoning": "No existing XDG support. Now let me implement the fix. The default should be `~/.local/share/pylint` (data directory per XDG spec). Also, I should check `$XDG_DATA_HOME` environment variable.\n\nThe logic should be:\n1. If `PYLINTHOME` env var is set, use it (already handled)\n2. Otherwise, use `$XDG_DATA_HOME/pylint` if `$XDG_DATA_HOME` is set, else `~/.local/share/pylint`\n\nLet me now make the edit.",
+      "say": "Let's reproduce the issue first to see the current behavior:"
+    },
+    {
+      "step": 8,
+      "reasoning": "Good, the current behavior creates `~/.pylint.d`. Now let me make the fix. The XDG Base Directory Specification says:\n- `$XDG_DATA_HOME` defaults to `~/.local/share`\n- Data files go to `$XDG_DATA_HOME/<program>`\n\nSo `PYLINT_HOME` should default to `~/.local/share/pylint` (checking `$XDG_DATA_HOME` first).\n\nThe edit:\n\n1. Replace the `USER_HOME` and `PYLINT_HOME` logic with XDG-compliant logic\n2. Update the `ENV_HELP` text\n\nLet me also think about backward compatibility. The `PYLINTHOME` env var override is preserved. Only the default path changes. This is the expected behavior per the issue.\n\nLet me construct the minimal edit.",
+      "say": "Now I'll make the minimal edit to make `PYLINT_HOME` XDG-compliant, falling back to `$XDG_DATA_HOME/pylint` (or `~/.local/share/pylint` by default):"
+    },
+    {
+      "step": 9,
+      "reasoning": "The edit was applied. Now let me update the ENV_HELP text to reflect the new default, then verify the behavior with quick_check.",
+      "say": "Now update the `ENV_HELP` text to reflect the new default:"
+    },
+    {
+      "step": 10,
+      "reasoning": "The edits have been applied. Let me verify the behavior by running a quick check to ensure the new path is correct.",
+      "say": "Let me verify the behavior empirically:"
+    },
+    {
+      "step": 11,
+      "reasoning": "All three scenarios work correctly:\n1. Default: `~/.local/share/pylint` (XDG-compliant)\n2. `$XDG_DATA_HOME` set: uses that path + `/pylint`\n3. `$PYLINTHOME` set: still works (backward compatibility)\n\nThe fix is complete. Let me also check there's no other place that hardcodes `.pylint.d` that might need updating.",
+      "say": "Let me verify there are no other source files that hardcode `.pylint.d` as the default path:"
+    },
+    {
+      "step": 12,
+      "reasoning": "The remaining references are:\n- Line 64: The fallback case for `USER_HOME == \"~\"` (when home directory can't be determined) \u2014 this is correct, it keeps `.pylint.d` as a fallback in the current directory.\n- Line 117: The updated help text \u2014 this correctly documents the behavior.\n\nThe fix is complete. The change is minimal:\n1. Default `PYLINT_HOME` now resolves to `$XDG_DATA_HOME/pylint` (default: `~/.local/share/pylint`) instead of `~/.pylint.d/`\n2. `PYLINTHOME` env var override still works (backward compatible)\n3. The `USER_HOME == \"~\"` edge case still uses `.pylint.d` in the current directory\n4. Help text updated to reflect the new defaults",
+      "say": "The fix is complete. Summary of changes made to `pylint/config/__init__.py`:\n\n1. **Default `PYLINT_HOME`** changed from `~/.pylint.d/` to `$XDG_DATA_HOME/pylint` (falling back to `~/.local/share/pylint` when `$XDG_DATA_HOME` is unset), per the XDG Base Directory Specification.\n\n2. **`PYLINTHOME` env var** still takes precedence when set (backward compatible).\n\n3. **`ENV_HELP`** updated to document the new default paths.\n\nThe `~/.pylint.d` fallback on line 64 is preserved for the edge case where `USER_HOME == \"~\"` (home directory cannot be resolved), keeping `.pylint.d` relative to the current working directory."
+    }
+  ],
+  "final_diff": "diff --git a/pylint/config/__init__.py b/pylint/config/__init__.py\nindex 84774d0e3..57fce9335 100644\n--- a/pylint/config/__init__.py\n+++ b/pylint/config/__init__.py\n@@ -63,7 +63,10 @@ if \"PYLINTHOME\" in os.environ:\n elif USER_HOME == \"~\":\n     PYLINT_HOME = \".pylint.d\"\n else:\n-    PYLINT_HOME = os.path.join(USER_HOME, \".pylint.d\")\n+    PYLINT_HOME = os.path.join(\n+        os.environ.get(\"XDG_DATA_HOME\", os.path.join(USER_HOME, \".local\", \"share\")),\n+        \"pylint\",\n+    )\n \n \n def _get_pdata_path(base_name, recurs):\n@@ -110,8 +113,8 @@ ENV_HELP = (\n The following environment variables are used:\n     * PYLINTHOME\n     Path to the directory where persistent data for the run will be stored. If\n-not found, it defaults to ~/.pylint.d/ or .pylint.d (in the current working\n-directory).\n+not found, it defaults to ~/.local/share/pylint. If the current working\n+directory is home, it defaults to .pylint.d.\n     * PYLINTRC\n     Path to the configuration file. See the documentation for the method used\n to search for configuration file.\n",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are the Atomic-CLI coding agent. Solve the task by editing a real repository using ONLY atomic tools. Be efficient with calls: to understand the code, FIRST call atomic_survey(glob) once to outline the region, then atomic_read_many(items) to read the relevant files in ONE call \u2014 do NOT read files one at a time. Then make minimal faithful edits with atomic_replace / atomic_create (supply proofOfIncorrectness when you remove code). Spend your reads on SOURCE files only; do NOT read changelog/news/release-notes/.rst/docs files or grep for the issue number \u2014 the fix lives in source, and adding changelog/doc files is out of scope. Prefer the smallest correct behavioral delta: preserve existing exports, comments, and call graph where possible; avoid rewriting unrelated helpers; when two touched functions need the same logic, implement one canonical helper and have wrappers delegate instead of duplicating state machines or parsers. For merge/default-composition/update helpers, reason over the final merged representation unless source identity is explicitly part of the contract; preserve override precedence and filter by final value, not by independently scanning input sources. When the fix is 'apply check/filter F': FIRST call atomic_callers(F) \u2014 if F is ALREADY invoked where the bug manifests, the root is the EXISTING call or F's own body (often a normalization/comparison detail), so fix THAT; adding a second F guard usually duplicates the same latent bug and fails. You CANNOT run the hidden acceptance test suite (no run_tests tool), BUT you CAN run short Python snippets with quick_check \u2014 USE IT to reproduce the bug empirically (run the issue's repro snippet to SEE the real error) and to confirm your fix, instead of simulating behavior by hand. Implement the fix carefully and completely, then STOP by replying with a short summary and NO tool call. Paths are relative to the repo root. Edit SOURCE files ONLY \u2014 NEVER modify test files (paths under a tests/ directory or matching test_*.py / *_test.py); the grader supplies the hidden test, so editing tests is wasted surface.\n\nCROSS-SESSION EXPERIENCE: this atomic agent has resolved 20 previous tasks (avg 16 diff lines, 3 edits). From that experience: the smallest correct fix is almost always a single-symbol mutation or a one-line policy-site change; prefer modifying an existing canonical construct over adding parallel logic."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_Jji2dzb2i7K2AYvdvhoW6897",
+          "type": "function",
+          "function": {
+            "name": "atomic_grep",
+            "arguments": "{\"pattern\": \"\\\\.pylint\\\\.d\"}"
+          }
+        },
+        {
+          "index": 1,
+          "id": "call_01_3X6xU3X7Pg9gRoC51xZt1660",
+          "type": "function",
+          "function": {
+            "name": "atomic_grep",
+            "arguments": "{\"pattern\": \"PYLINTHOME\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_Jji2dzb2i7K2AYvdvhoW6897",
+      "content": "doc/faq.rst:96: * \".pylint.d\" subdirectory of the user's home directory if it is found\ndoc/faq.rst:99: * \".pylint.d\" directory in the current directory\npylint/config/__init__.py:64: PYLINT_HOME = \".py\n[...compacted by F3, was 264 chars; recent context retained...]"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_3X6xU3X7Pg9gRoC51xZt1660",
+      "content": "ChangeLog:4279: * Create the PYLINTHOME directory when needed, it might fail and lead to\ndoc/faq.rst:94: * value of the PYLINTHOME environment variable if set\npylint/config/__init__.py:59: if \"PYLINTH\n[...compacted by F3, was 264 chars; recent context retained...]"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_3Xqqa7RJddn8cnr6jQeT5644",
+          "type": "function",
+          "function": {
+            "name": "atomic_read",
+            "arguments": "{\"path\": \"pylint/config/__init__.py\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_3Xqqa7RJddn8cnr6jQeT5644",
+      "content": "pylint/config/__init__.py\n# Copyright (c) 2006-2010, 2012-2014 LOGILAB S.A. (Paris, FRANCE) <contact@logilab.fr>\n# Copyright (c) 2008 pyves@crater.logilab.fr <pyves@crater.logilab.fr>\n# Copyright (c) \n[...compacted by F3, was 264 chars; recent context retained...]"
+    },
+    {
+      "role": "user",
+      "content": "You have read enough to edit. Pick the smallest implementation topology \u2014 the canonical implementation location and any delegating wrappers, preferring ONE canonical implementation plus wrappers over duplicated logic when several exported functions need the same semantics \u2014 then make the smallest faithful edit(s) with atomic_replace/atomic_create in THIS turn. You may state your topology reasoning as content alongside the tool call."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_1kTPQLswwOQfOGKhCMMp1689",
+          "type": "function",
+          "function": {
+            "name": "atomic_grep",
+            "arguments": "{\"pattern\": \"USER_HOME\", \"glob\": \"*.py\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_1kTPQLswwOQfOGKhCMMp1689",
+      "content": "pylint/config/__init__.py:58: USER_HOME = os.path.expanduser(\"~\")\npylint/config/__init__.py:61: if USER_HOME == \"~\":\npylint/config/__init__.py:62: USER_HOME = os.path.dirname(PYLINT_HOME)\npylint/confi\n[...compacted by F3, was 264 chars; recent context retained...]"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_ujtsAu5HYaBJhpOAImsj7198",
+          "type": "function",
+          "function": {
+            "name": "atomic_grep",
+            "arguments": "{\"pattern\": \"PYLINT_HOME\", \"glob\": \"*.py\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_ujtsAu5HYaBJhpOAImsj7198",
+      "content": "pylint/config/__init__.py:60: PYLINT_HOME = os.environ[\"PYLINTHOME\"]\npylint/config/__init__.py:62: USER_HOME = os.path.dirname(PYLINT_HOME)\npylint/config/__init__.py:64: PYLINT_HOME = \".pylint.d\"\npyli\n[...compacted by F3, was 264 chars; recent context retained...]"
+    },
+    {
+      "role": "assistant",
+      "content": "Let me also check the ENV_HELP text to update it:",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_NtjSxfYWUonVhECXtcis2022",
+          "type": "function",
+          "function": {
+            "name": "atomic_read",
+            "arguments": "{\"path\": \"pylint/config/__init__.py\", \"startLine\": 105, \"endLine\": 120}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_NtjSxfYWUonVhECXtcis2022",
+      "content": "pylint/config/__init__.py\n\nPYLINTRC = find_pylintrc()\n\nENV_HELP = (\n    \"\"\"\nThe following environment variables are used:\n    * PYLINTHOME\n    Path to the directory where persistent data for the run w\n[...compacted by F3, was 471 chars; recent context retained...]"
+    },
+    {
+      "role": "user",
+      "content": "You have read a lot without editing. You likely have enough context \u2014 make the edit now with atomic_replace/atomic_create."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_PKyP8rkJeQ2C8lIdMhRd7037",
+          "type": "function",
+          "function": {
+            "name": "atomic_grep",
+            "arguments": "{\"pattern\": \"XDG\", \"glob\": \"*.py\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_PKyP8rkJeQ2C8lIdMhRd7037",
+      "content": "{\n  \"totalMatches\": 0,\n  \"filesWithMatches\": 0,\n  \"filesSearched\": 841,\n  \"limitReached\": false,\n  \"matches\": []\n}"
+    },
+    {
+      "role": "assistant",
+      "content": "Let's reproduce the issue first to see the current behavior:",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_HRqc4cu9iAgtDekbvmfy0443",
+          "type": "function",
+          "function": {
+            "name": "quick_check",
+            "arguments": "{\"code\": \"import os\\nprint(\\\"HOME:\\\", os.path.expanduser(\\\"~\\\"))\\n# Simulate current logic\\nUSER_HOME = os.path.expanduser(\\\"~\\\")\\nif \\\"PYLINTHOME\\\" in os.environ:\\n    PYLINT_HOME = os.environ[\\\"PYLINTHOME\\\"]\\nelif USER_HOME == \\\"~\\\":\\n    PYLINT_HOME = \\\".pylint.d\\\"\\nelse:\\n    PYLINT_HOME = os.path.join(USER_HOME, \\\".pylint.d\\\")\\nprint(\\\"Current PYLINT_HOME:\\\", PYLINT_HOME)\\n# XDG compliant would be ~/.local/share/pylint\\nprint(\\\"Expected XDG data dir:\\\", os.path.join(USER_HOME, \\\".local\\\", \\\"share\\\", \\\"pylint\\\"))\\n\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_HRqc4cu9iAgtDekbvmfy0443",
+      "content": "PASS (exit 0)\nHOME: /Users/danielpenin\nCurrent PYLINT_HOME: /Users/danielpenin/.pylint.d\nExpected XDG data dir: /Users/danielpenin/.local/share/pylint\n"
+    },
+    {
+      "role": "assistant",
+      "content": "Now I'll make the minimal edit to make `PYLINT_HOME` XDG-compliant, falling back to `$XDG_DATA_HOME/pylint` (or `~/.local/share/pylint` by default):",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_nNXa2paL7BsqclCzrTA53852",
+          "type": "function",
+          "function": {
+            "name": "atomic_replace",
+            "arguments": "{\"file\": \"pylint/config/__init__.py\", \"oldText\": \"USER_HOME = os.path.expanduser(\\\"~\\\")\\nif \\\"PYLINTHOME\\\" in os.environ:\\n    PYLINT_HOME = os.environ[\\\"PYLINTHOME\\\"]\\n    if USER_HOME == \\\"~\\\":\\n        USER_HOME = os.path.dirname(PYLINT_HOME)\\nelif USER_HOME == \\\"~\\\":\\n    PYLINT_HOME = \\\".pylint.d\\\"\\nelse:\\n    PYLINT_HOME = os.path.join(USER_HOME, \\\".pylint.d\\\")\", \"newText\": \"USER_HOME = os.path.expanduser(\\\"~\\\")\\nif \\\"PYLINTHOME\\\" in os.environ:\\n    PYLINT_HOME = os.environ[\\\"PYLINTHOME\\\"]\\n    if USER_HOME == \\\"~\\\":\\n        USER_HOME = os.path.dirname(PYLINT_HOME)\\nelif USER_HOME == \\\"~\\\":\\n    PYLINT_HOME = \\\".pylint.d\\\"\\nelse:\\n    PYLINT_HOME = os.path.join(\\n        os.environ.get(\\\"XDG_DATA_HOME\\\", os.path.join(USER_HOME, \\\".local\\\", \\\"share\\\")),\\n        \\\"pylint\\\",\\n    )\", \"proofOfIncorrectness\": \"default PYLINT_HOME is ~/.pylint.d instead of XDG-compliant ~/.local/share/pylint\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_nNXa2paL7BsqclCzrTA53852",
+      "content": "\u2705 Atomic edit applied\n\npylint/config/__init__.py\n\u001b[2m--- pylint/config/__init__.py (atomic char-level)\u001b[0m\n      PYLINT_HOME = \".pylint.d\"\n  else:\n      PYLINT_HOME = os.path.join(\u001b[32m{+\n          os.environ.get(\"XDG_DATA_HOME\", os.path.join(+}\u001b[0mUSER_HOME, \".\u001b[32m{+local\", \"share\")),\n          \"+}\u001b[0mpylint\u001b[31m[-.d-]\u001b[0m\"\u001b[32m{+,\n      +}\u001b[0m)\n  \n  \n\nValidation:\n- syntax: ok\n- typecheck: not-run\n- protected file: no\n- sha256: ok\n\nTrace metrics: expansion 0.78\u00d7 \u00b7 383 chars \u00b7 zeroCodeTrust 30 (unvalidated-text)\nTopology: text_span \u00b7 unclassified_code_edit \u00b7 preserved 2 \u00b7 modified 1 \u00b7 moved 0\nTrace: .atomic/traces/op_1782278827869_7c64186c.json\n{\n  \"ok\": true,\n  \"changed\": true,\n  \"file\": \"pylint/config/__init__.py\",\n  \"target\": {\n    \"repoRoot\": \"/private/tmp/swe/round/WLIFT/wlift_pylint-dev__pylint-4661_N8_mode_full_student_deepseek-v4-flash_1f67fbee2bd1_20260624T051634Z_43227_base_6\",\n    \"file\": \"pylint/config/__init__.py\",\n    \"absPath\": \"/private/tmp/swe/round/WLIFT/wlift_pylint-dev__pylint-4661_N8_mode_full_student_deepseek-v4-flash_1f67fbee2bd1_20260624T051634Z_43227_base_6/pylint/config/__init__.py\"\n  },\n  \"validation\": {\n    \"language\": \"python\",\n    \"syntaxErrorsBefore\": 0,\n    \"syntaxErrorsAfter\": 0\n  },\n  \"intentionChars\": 383,\n  \"lineRewriteSurfaceChars\": 297,\n  \"expansionFactorAvoided\": 0.78,\n  \"bytesNet\": 86,\n  \"afterSha256\": \"d2c53d4db5e1ac8ff33cf800b6265ab5a100bb56b60461fbaa6fc53b3661d961\",\n  \"op\": \"atomic_replace_text\",\n  \"negativeActionProof\": {\n    \"verdict\": \"NEGATIVE_BYTES_ADMITTED\",\n    \"action\": \"atomic_replace_text\",\n    \"target\": \"pylint/config/__init__.py\",\n    \"targetUnit\": \"file\",\n    \"removedByteCount\": 1,\n    \"proofLength\": 81,\n    \"proofSha256\": \"4d3e45babd2864c260f2a73f1a865bac58a096a00f7dd7adeb90097507ceb25a\",\n    \"proof\": \"default PYLINT_HOME is ~/.pylint.d instead of XDG-compliant ~/.local/share/pylint\",\n    \"witnessKind\": \"asserted\",\n    \"recomputed\": false\n  },\n  \"operationId\": \"op_1782278827869_7c64186c\",\n  \"operation\": \"atomic_replace_text\",\n  \"validationSummary\": {\n    \"syntax\": \"ok\",\n    \"typecheck\": \"not-run\",\n    \"protectedFile\": \"no\",\n    \"sha256\": \"ok\"\n  },\n  \"tracePath\": \".atomic/traces/op_1782278827869_7c64186c.json\",\n  \"chainHash\": \"482e639e1624c7b2c6ca791a13507557f7382cb8f17c47f438d8c6615cb618e3\",\n  \"founder\": {\n    \"whatChanged\": \"Operation `atomic_replace_text` changed ~383 character(s) in `pylint/config/__init__.py` (sub-line atomic edit, expansion 0.78\u00d7 \u2014 it did not rewrite surrounding code).\",\n    \"whatPreserved\": \"Everything outside the highlighted [-removed-]{+added+} span in that one file is byte-identical. No other file was touched by this operation.\",\n    \"howToValidate\": \"Read the atomicDiff above \u2014 it shows EXACTLY the changed characters, nothing else. Then exercise the affected behavior in the running product to confirm intent.\",\n    \"notProven\": \"Runtime/product behavior is NOT proven by this tool. Structural validity \u2260 correct behavior. Prove behavior by running the flow in the app.\",\n    \"nonTouched\": \"Single-file, single-span: every file other than `pylint/config/__init__.py` is provably untouched by this operation. Policy/protected-file status requires the governance gate.\",\n    \"promiseClass\": \"unvalidated-text\",\n    \"zeroCodeTrust\": 30,\n    \"trustCeilingReason\": \"ceiling < 75: an edit tool proves structure + exact scope, not product behavior. Reaching 75 (validate by explanation) or 100 (validate by the product) requires running the changed flow \u2014 do that in the app, not here.\"\n  },\n  \"atomicDiff\": \"\\u001b[2m--- pylint/config/__init__.py (atomic char-level)\\u001b[0m\\n      PYLINT_HOME = \\\".pylint.d\\\"\\n  else:\\n      PYLINT_HOME = os.path.join(\\u001b[32m{+\\n          os.environ.get(\\\"XDG_DATA_HOME\\\", os.path.join(+}\\u001b[0mUSER_HOME, \\\".\\u001b[32m{+local\\\", \\\"share\\\")),\\n          \\\"+}\\u001b[0mpylint\\u001b[31m[-.d-]\\u001b[0m\\\"\\u001b[32m{+,\\n      +}\\u001b[0m)\\n  \\n  \"\n}\n[post-edit view] the file now reads (around your change) \u2014 no need to re-read to verify:\n55:     \"UnsupportedAction\",\n56: ]\n57: \n58: USER_HOME = os.path.expanduser(\"~\")\n59: if \"PYLINTHOME\" in os.environ:\n60:     PYLINT_HOME = os.environ[\"PYLINTHOME\"]\n61:     if USER_HOME == \"~\":\n62:         USER_HOME = os.path.dirname(PYLINT_HOME)\n63: elif USER_HOME == \"~\":\n64:     PYLINT_HOME = \".pylint.d\"\n65: else:\n66:     PYLINT_HOME = os.path.join(\n\n[SELF-VERIFY] Your first edit landed. Call quick_check NOW: write a focused Python snippet (3-5 lines with assert) testing the specific behavior you just fixed. This catches incorrect approaches BEFORE the expensive run_tests."
+    },
+    {
+      "role": "assistant",
+      "content": "Now update the `ENV_HELP` text to reflect the new default:",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_uiVeHFeRnrRI1O6UvXuk1445",
+          "type": "function",
+          "function": {
+            "name": "atomic_replace",
+            "arguments": "{\"file\": \"pylint/config/__init__.py\", \"oldText\": \"    * PYLINTHOME\\n    Path to the directory where persistent data for the run will be stored. If\\nnot found, it defaults to ~/.pylint.d/ or .pylint.d (in the current working\\ndirectory).\", \"newText\": \"    * PYLINTHOME\\n    Path to the directory where persistent data for the run will be stored. If\\nnot found, it defaults to ~/.local/share/pylint. If the current working\\ndirectory is home, it defaults to .pylint.d.\", \"proofOfIncorrectness\": \"ENV_HELP still mentions old ~/.pylint.d default path\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_uiVeHFeRnrRI1O6UvXuk1445",
+      "content": "\u2705 Atomic edit applied\n\npylint/config/__init__.py\n\u001b[2m--- pylint/config/__init__.py (atomic char-level)\u001b[0m\n      * PYLINTHOME\n      Path to the directory where persistent data for the run will be stored. If\n  not found, it defaults to ~/.\u001b[31m[-py-]\u001b[0ml\u001b[31m[-int.d/ -]\u001b[0mo\u001b[32m{+cal/sha+}\u001b[0mr\u001b[31m[- .-]\u001b[0m\u001b[32m{+e/+}\u001b[0mpylint.\u001b[31m[-d-]\u001b[0m \u001b[31m[-(in-]\u001b[0m\u001b[32m{+If+}\u001b[0m the current working\n  directory\u001b[31m[-)-]\u001b[0m\u001b[32m{+ is home, it defaults to +}\u001b[0m.\u001b[32m{+pylint.d.+}\u001b[0m\n      * PYLINTRC\n      Path to the configuration file. See the documentation for the method used\n\nValidation:\n- syntax: ok\n- typecheck: not-run\n- protected file: no\n- sha256: ok\n\nTrace metrics: expansion 0.86\u00d7 \u00b7 212 chars \u00b7 zeroCodeTrust 30 (unvalidated-text)\nTopology: text_span \u00b7 unclassified_code_edit \u00b7 preserved 2 \u00b7 modified 1 \u00b7 moved 0\nTrace: .atomic/traces/op_1782278833860_3b7a3f41.json\n{\n  \"ok\": true,\n  \"changed\": true,\n  \"file\": \"pylint/config/__init__.py\",\n  \"target\": {\n    \"repoRoot\": \"/private/tmp/swe/round/WLIFT/wlift_pylint-dev__pylint-4661_N8_mode_full_student_deepseek-v4-flash_1f67fbee2bd1_20260624T051634Z_43227_base_6\",\n    \"file\": \"pylint/config/__init__.py\",\n    \"absPath\": \"/private/tmp/swe/round/WLIFT/wlift_pylint-dev__pylint-4661_N8_mode_full_student_deepseek-v4-flash_1f67fbee2bd1_20260624T051634Z_43227_base_6/pylint/config/__init__.py\"\n  },\n  \"validation\": {\n    \"language\": \"python\",\n    \"syntaxErrorsBefore\": 0,\n    \"syntaxErrorsAfter\": 0\n  },\n  \"intentionChars\": 212,\n  \"lineRewriteSurfaceChars\": 183,\n  \"expansionFactorAvoided\": 0.86,\n  \"bytesNet\": 29,\n  \"afterSha256\": \"eae92136c2d187178218b909e0dba40d3523f0a6141edfe93cb1d2357e4e3869\",\n  \"op\": \"atomic_replace_text\",\n  \"negativeActionProof\": {\n    \"verdict\": \"NEGATIVE_BYTES_ADMITTED\",\n    \"action\": \"atomic_replace_text\",\n    \"target\": \"pylint/config/__init__.py\",\n    \"targetUnit\": \"file\",\n    \"removedByteCount\": 3,\n    \"proofLength\": 52,\n    \"proofSha256\": \"5d0d1257f779ac9600c8dec2cb29440bea205ea1f63a8e137fa13610eb6b75c7\",\n    \"proof\": \"ENV_HELP still mentions old ~/.pylint.d default path\",\n    \"witnessKind\": \"asserted\",\n    \"recomputed\": false\n  },\n  \"operationId\": \"op_1782278833860_3b7a3f41\",\n  \"operation\": \"atomic_replace_text\",\n  \"validationSummary\": {\n    \"syntax\": \"ok\",\n    \"typecheck\": \"not-run\",\n    \"protectedFile\": \"no\",\n    \"sha256\": \"ok\"\n  },\n  \"tracePath\": \".atomic/traces/op_1782278833860_3b7a3f41.json\",\n  \"chainHash\": \"b22f50b78dc77d1cfd8142ee80a08897e800255e52127ef920ca07bbeea0f16a\",\n  \"founder\": {\n    \"whatChanged\": \"Operation `atomic_replace_text` changed ~212 character(s) in `pylint/config/__init__.py` (sub-line atomic edit, expansion 0.86\u00d7 \u2014 it did not rewrite surrounding code).\",\n    \"whatPreserved\": \"Everything outside the highlighted [-removed-]{+added+} span in that one file is byte-identical. No other file was touched by this operation.\",\n    \"howToValidate\": \"Read the atomicDiff above \u2014 it shows EXACTLY the changed characters, nothing else. Then exercise the affected behavior in the running product to confirm intent.\",\n    \"notProven\": \"Runtime/product behavior is NOT proven by this tool. Structural validity \u2260 correct behavior. Prove behavior by running the flow in the app.\",\n    \"nonTouched\": \"Single-file, single-span: every file other than `pylint/config/__init__.py` is provably untouched by this operation. Policy/protected-file status requires the governance gate.\",\n    \"promiseClass\": \"unvalidated-text\",\n    \"zeroCodeTrust\": 30,\n    \"trustCeilingReason\": \"ceiling < 75: an edit tool proves structure + exact scope, not product behavior. Reaching 75 (validate by explanation) or 100 (validate by the product) requires running the changed flow \u2014 do that in the app, not here.\"\n  },\n  \"atomicDiff\": \"\\u001b[2m--- pylint/config/__init__.py (atomic char-level)\\u001b[0m\\n      * PYLINTHOME\\n      Path to the directory where persistent data for the run will be stored. If\\n  not found, it defaults to ~/.\\u001b[31m[-py-]\\u001b[0ml\\u001b[31m[-int.d/ -]\\u001b[0mo\\u001b[32m{+cal/sha+}\\u001b[0mr\\u001b[31m[- .-]\\u001b[0m\\u001b[32m{+e/+}\\u001b[0mpylint.\\u001b[31m[-d-]\\u001b[0m \\u001b[31m[-(in-]\\u001b[0m\\u001b[32m{+If+}\\u001b[0m the current working\\n  directory\\u001b[31m[-)-]\\u001b[0m\\u001b[32m{+ is home, it defaults to +}\\u001b[0m.\\u001b[32m{+pylint.d.+}\\u001b[0m\\n      * PYLINTRC\\n      Path to the configuration file. See the documentation for the method used\"\n}\n[post-edit view] the file now reads (around your change) \u2014 no need to re-read to verify:\n111: ENV_HELP = (\n112:     \"\"\"\n113: The following environment variables are used:\n114:     * PYLINTHOME\n115:     Path to the directory where persistent data for the run will be stored. If\n116: not found, it defaults to ~/.local/share/pylint. If the current working\n117: directory is home, it defaults to .pylint.d.\n118:     * PYLINTRC\n119:     Path to the configuration file. See the documentation for the method used\n120: to search for configuration file.\n121: \"\"\"\n122:     % globals()  # type: ignore\n[over-fix check] this edit added 0 new loop(s) (for/while) and touched 2 separate region(s). The failing tests likely exercise ONE path; if a strictly smaller single-path / single-region fix keeps the gate green, prefer it (the minimizer re-checks after run_tests)."
+    },
+    {
+      "role": "assistant",
+      "content": "Let me verify the behavior empirically:",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_hyi1rrAPEnssI0poidiN7519",
+          "type": "function",
+          "function": {
+            "name": "quick_check",
+            "arguments": "{\"code\": \"import os, sys\\nsys.path.insert(0, \\\".\\\")\\n# Import the module fresh (without PYLINTHOME set)\\nos.environ.pop(\\\"PYLINTHOME\\\", None)\\n\\n# Clear any cached import\\nif \\\"pylint.config\\\" in sys.modules:\\n    del sys.modules[\\\"pylint.config\\\"]\\n\\nfrom pylint.config import PYLINT_HOME\\nprint(\\\"PYLINT_HOME:\\\", PYLINT_HOME)\\nhome = os.path.expanduser(\\\"~\\\")\\nexpected = os.path.join(home, \\\".local\\\", \\\"share\\\", \\\"pylint\\\")\\nassert PYLINT_HOME == expected, f\\\"Expected {expected}, got {PYLINT_HOME}\\\"\\nprint(\\\"OK - XDG default path works\\\")\\n\\n# Test with XDG_DATA_HOME set\\nos.environ[\\\"XDG_DATA_HOME\\\"] = \\\"/custom/data\\\"\\nif \\\"pylint.config\\\" in sys.modules:\\n    del sys.modules[\\\"pylint.config\\\"]\\n# Reimport requires reloading the module chain\\nimport importlib\\nimport pylint.config\\nimportlib.reload(pylint.config)\\nfrom pylint.config import PYLINT_HOME\\nprint(\\\"With XDG_DATA_HOME:\\\", PYLINT_HOME)\\nassert PYLINT_HOME == \\\"/custom/data/pylint\\\", f\\\"Expected /custom/data/pylint, got {PYLINT_HOME}\\\"\\nprint(\\\"OK - XDG_DATA_HOME env var works\\\")\\ndel os.environ[\\\"XDG_DATA_HOME\\\"]\\n\\n# Test with PYLINTHOME set (should still work)\\nos.environ[\\\"PYLINTHOME\\\"] = \\\"/custom/pylinthome\\\"\\nif \\\"pylint.config\\\" in sys.modules:\\n    del sys.modules[\\\"pylint.config\\\"]\\nimport pylint.config\\nimportlib.reload(pylint.config)\\nfrom pylint.config import PYLINT_HOME\\nprint(\\\"With PYLINTHOME:\\\", PYLINT_HOME)\\nassert PYLINT_HOME == \\\"/custom/pylinthome\\\", f\\\"Expected /custom/pylinthome, got {PYLINT_HOME}\\\"\\nprint(\\\"OK - PYLINTHOME env var still works\\\")\\n\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_hyi1rrAPEnssI0poidiN7519",
+      "content": "PASS (exit 0)\nPYLINT_HOME: /Users/danielpenin/.local/share/pylint\nOK - XDG default path works\nWith XDG_DATA_HOME: /custom/data/pylint\nOK - XDG_DATA_HOME env var works\nWith PYLINTHOME: /custom/pylinthome\nOK - PYLINTHOME env var still works\n"
+    },
+    {
+      "role": "assistant",
+      "content": "Let me verify there are no other source files that hardcode `.pylint.d` as the default path:",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "call_00_vINUPIn4bUw7Z0gCG7cc6179",
+          "type": "function",
+          "function": {
+            "name": "atomic_grep",
+            "arguments": "{\"pattern\": \"\\\\.pylint\\\\.d\", \"glob\": \"pylint/**/*.py\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_vINUPIn4bUw7Z0gCG7cc6179",
+      "content": "pylint/config/__init__.py:64: PYLINT_HOME = \".pylint.d\"\npylint/config/__init__.py:117: directory is home, it defaults to .pylint.d."
+    },
+    {
+      "role": "assistant",
+      "content": "The fix is complete. Summary of changes made to `pylint/config/__init__.py`:\n\n1. **Default `PYLINT_HOME`** changed from `~/.pylint.d/` to `$XDG_DATA_HOME/pylint` (falling back to `~/.local/share/pylint` when `$XDG_DATA_HOME` is unset), per the XDG Base Directory Specification.\n\n2. **`PYLINTHOME` env var** still takes precedence when set (backward compatible).\n\n3. **`ENV_HELP`** updated to document the new default paths.\n\nThe `~/.pylint.d` fallback on line 64 is preserved for the edge case where `USER_HOME == \"~\"` (home directory cannot be resolved), keeping `.pylint.d` relative to the current working directory."
+    }
+  ]
+}
