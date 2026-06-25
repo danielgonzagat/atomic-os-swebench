@@ -1404,6 +1404,69 @@ def _symbol_graph_roles_for_files(metrics, edited_sources):
     return unique
 
 
+def _accumulate_loci_from_gate(gate_out, metrics, workdir):
+    if not gate_out:
+        return
+    stack_loci = metrics.setdefault("failing_stack_loci", [])
+    test_loci = metrics.setdefault("test_loci", [])
+    seen = set(stack_loci + test_loci)
+    for match in re.finditer(r'File "([^"]+\.py)", line (\d+)', gate_out):
+        fp = match.group(1)
+        line = match.group(2)
+        fp_norm = os.path.normpath(fp)
+        if os.path.isabs(fp_norm):
+            try:
+                fp_norm = os.path.relpath(fp_norm, workdir)
+            except ValueError:
+                pass
+        if fp_norm.startswith("..") or os.path.isabs(fp_norm):
+            continue
+        locus = f"{fp_norm}:{line}"
+        if locus not in seen:
+            seen.add(locus)
+            if re.search(r"(^|/)(tests?|test_.*|.*_test)\b", fp_norm):
+                test_loci.append(locus)
+            else:
+                stack_loci.append(locus)
+    for match in re.finditer(r'\b([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+\.py):(\d+)\b', gate_out):
+        fp = match.group(1)
+        line = match.group(2)
+        fp_norm = os.path.normpath(fp)
+        if os.path.isabs(fp_norm):
+            try:
+                fp_norm = os.path.relpath(fp_norm, workdir)
+            except ValueError:
+                pass
+        if fp_norm.startswith("..") or os.path.isabs(fp_norm):
+            continue
+        locus = f"{fp_norm}:{line}"
+        if locus not in seen:
+            seen.add(locus)
+            if re.search(r"(^|/)(tests?|test_.*|.*_test)\b", fp_norm):
+                test_loci.append(locus)
+            else:
+                stack_loci.append(locus)
+
+
+def _extract_loci_from_diff(diff_text):
+    loci = []
+    cur_file = None
+    for line in str(diff_text).splitlines():
+        if line.startswith("diff --git "):
+            mf = re.search(r" b/(.+)$", line)
+            cur_file = mf.group(1) if mf else None
+        elif line.startswith("@@") and cur_file:
+            hm = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@ ?(.*)", line)
+            if hm:
+                ctx = hm.group(2).strip()
+                fn = re.search(r"(?:def|class|function|func|fn|sub)\s+([A-Za-z_$][\w$]*)", ctx)
+                if fn:
+                    loci.append(f"{cur_file}:{fn.group(1)}")
+                else:
+                    loci.append(f"{cur_file}:{hm.group(1)}")
+    return list(set(loci))
+
+
 def _preservation_roles_from_metrics(metrics):
     matrix = metrics.get("preservation_matrix") or metrics.get("preservation")
     if not isinstance(matrix, dict):
@@ -2268,9 +2331,11 @@ def main():
                     reads_since_edit = 0; distinct_since_edit.clear()
                     metrics["run_tests_calls"] += 1
                     last_pass, gate_out, (np_, nf_) = run_gate(workdir, args.gate)
+                    _accumulate_loci_from_gate(gate_out, metrics, workdir)
                     if last_pass and overfix_full_file_required(workdir):
                         metrics["run_tests_calls"] += 1
                         last_pass, gate_out, (np_, nf_) = run_gate(workdir, args.gate, full_file=True)
+                        _accumulate_loci_from_gate(gate_out, metrics, workdir)
                         metrics["transcript"].append(
                             f"s{step} WEIGHT-MACRO FULL-FILE-OVERFIX gate -> pass={np_} fail={nf_} all_green={last_pass}")
                     metrics["transcript"].append(f"s{step} WEIGHT-MACRO run_tests -> pass={np_} fail={nf_} all_green={last_pass}")
@@ -2669,11 +2734,13 @@ def main():
                                "still fails. Make your atomic edit FIRST, then run_tests.")
                 else:
                     last_pass, gate_out, (np_, nf_) = run_gate(workdir, args.gate)
+                    _accumulate_loci_from_gate(gate_out, metrics, workdir)
                     post_edit_gate_required = False
                     post_edit_quick_checks = 0
                     if last_pass and overfix_full_file_required(workdir):
                         metrics["run_tests_calls"] += 1
                         last_pass, gate_out, (np_, nf_) = run_gate(workdir, args.gate, full_file=True)
+                        _accumulate_loci_from_gate(gate_out, metrics, workdir)
                         metrics["transcript"].append(
                             f"s{step} FULL-FILE-OVERFIX gate -> pass={np_} fail={nf_} all_green={last_pass}")
                     res = f"pass={np_} fail={nf_} all_green={last_pass}\n" + gate_out[-1500:]
@@ -3016,6 +3083,34 @@ def main():
                     metrics["transcript"].append(f"s{step} atomic_read SUPPRESSED (overlapping re-read of {_sf}:{_ss}-{_se})")
                 else:
                     res, ok = atomic_call(workdir, tool, call_args)
+                    if tool == "atomic_grep_calls" and ok and res:
+                        edges = metrics.setdefault("symbol_graph_edges", [])
+                        callee_name = call_args.get("name")
+                        if callee_name:
+                            callee_file = None
+                            try:
+                                out_grep = subprocess.run(
+                                    ["git", "-C", workdir, "grep", "-nIE", r"^[[:space:]]*(def|class)[[:space:]]+" + re.escape(callee_name) + r"\b"],
+                                    capture_output=True, text=True, timeout=5
+                                ).stdout
+                                for gl in out_grep.splitlines():
+                                    m_grep = re.match(r"([^:]+):", gl)
+                                    if m_grep:
+                                        callee_file = m_grep.group(1)
+                                        break
+                            except Exception:
+                                pass
+                            if callee_file:
+                                for match in re.finditer(r'^([^:\n]+):(\d+)\s+\(calls\s+([^\)]+)\)', res, re.M):
+                                    caller_file = match.group(1).strip()
+                                    caller_line = match.group(2).strip()
+                                    edge = {
+                                        "source": f"{caller_file}:{caller_line}",
+                                        "target": callee_file,
+                                        "kind": "caller"
+                                    }
+                                    if edge not in edges:
+                                        edges.append(edge)
                     # CLASS-BLIND-LINE-RANGE-REJECTED (WFB+2): a range read that overshoots EOF ("endLine N exceeds
                     # file line count M") is never a real error — the model just guessed the file is longer. Auto-retry
                     # clamped to M instead of burning a round-trip re-issuing one line shorter (sklearn-10297 s2→s3).
@@ -3057,6 +3152,12 @@ def main():
                 after = git_diff(workdir)
                 if fn in ("atomic_replace", "atomic_create"):
                     if after != before:
+                        _file = a.get("file") or a.get("path") or ""
+                        _selector = a.get("selector") or ""
+                        if _file:
+                            locus = f"{_file}:{_selector}" if _selector else _file
+                            if locus not in metrics.setdefault("attempted_edits", []):
+                                metrics["attempted_edits"].append(locus)
                         if last_pass:
                             last_pass = False  # a new edit invalidates the previous green gate
                         metrics["edits_applied"] += 1
@@ -3224,9 +3325,11 @@ def main():
     elif NO_GATE:
         metrics["gate_pass"] = None  # scored externally by the official SWE-bench Docker harness
     else:
-        final_pass, _, _ = run_gate(workdir, args.gate)
+        final_pass, final_gate_out, _ = run_gate(workdir, args.gate)
+        _accumulate_loci_from_gate(final_gate_out, metrics, workdir)
         if final_pass and overfix_full_file_required(workdir):
-            final_pass, _, _ = run_gate(workdir, args.gate, full_file=True)
+            final_pass, final_gate_out, _ = run_gate(workdir, args.gate, full_file=True)
+            _accumulate_loci_from_gate(final_gate_out, metrics, workdir)
             metrics["transcript"].append(f"FULL-FILE-OVERFIX final gate -> all_green={final_pass}")
         # CLASS-SCORING-GATE-FLAKE (F5, anti-fachada §9): a single end-of-main scoring gate can spuriously
         # return False (container timing/timeout) when the fix is actually green (measured q4: in-loop run_tests
@@ -3237,7 +3340,8 @@ def main():
         if not final_pass and last_pass:
             for _f5_attempt in range(2):
                 time.sleep(2)
-                final_pass, _, _ = run_gate(workdir, args.gate)
+                final_pass, final_gate_out, _ = run_gate(workdir, args.gate)
+                _accumulate_loci_from_gate(final_gate_out, metrics, workdir)
                 if final_pass:
                     metrics["transcript"].append("F5 scoring-gate retry: passed (initial false-red flake)")
                     break
@@ -3253,7 +3357,8 @@ def main():
                 subprocess.run(["git", "clean", "-fdq"], cwd=workdir, capture_output=True)
                 ap = subprocess.run(["git", "apply"], cwd=workdir, input=last_green_diff, capture_output=True, text=True)
                 if ap.returncode == 0:
-                    restored_pass, _, _ = run_gate(workdir, args.gate)
+                    restored_pass, final_gate_out, _ = run_gate(workdir, args.gate)
+                    _accumulate_loci_from_gate(final_gate_out, metrics, workdir)
                     if restored_pass:
                         final_pass = True
                         metrics["transcript"].append("GREEN-THEN-BROKE: restored last-green diff (model had broken it past green); re-scored GREEN")
@@ -3304,6 +3409,31 @@ def main():
     d = git_diff(workdir)
     metrics["diff_lines"] = diff_lines(d)
     metrics["final_diff"] = d
+
+    # Wire automatic producers for structural/causal roles
+    _final_diff = d
+    _is_success = (metrics.get("gate_pass") is True or
+                  (NO_GATE and (metrics.get("edits_applied", 0) > 0 or bool(_final_diff.strip()))))
+
+    if _is_success:
+        metrics["causal_loci"] = _extract_loci_from_diff(_final_diff)
+    else:
+        metrics["causal_loci"] = metrics.get("attempted_edits", [])
+
+    metrics["symptom_loci"] = metrics.get("failing_stack_loci", [])
+
+    preservation = {
+        "ast": True,
+        "symbols": True,
+        "behavior": True if _is_success else False
+    }
+    for line in str(_final_diff).splitlines():
+        if line.startswith("+++ b/"):
+            fp = line[6:]
+            if fp and fp != "/dev/null":
+                preservation[fp] = "changed"
+    metrics["preservation_matrix"] = preservation
+
     metrics["wall_s"] = round(time.time() - t0, 1)
     # FULL ACTION+RESULT RECORD: the complete message stream (every tool-call arg + every tool result
     # verbatim, as the model saw it). Skip the giant initial file-tree user turn to keep it auditable.

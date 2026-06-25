@@ -25,6 +25,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 
 const here = path.resolve(path.dirname(fileURLToPath(import.meta.url)));
 // Default the loop root to the atomic-edit source tree itself (where the
@@ -39,10 +40,28 @@ fs.mkdirSync(logDir, { recursive: true });
 const once = process.argv.includes('--once');
 const cycleMs = once ? 0 : 2 * 60 * 60 * 1000; // 2 hours between cycles
 
+const sha256 = (s) => createHash('sha256').update(String(s)).digest('hex');
+
 function ts() { return Date.now(); }
 function iso() { return new Date().toISOString(); }
 function appendFeed(record) {
-  fs.appendFileSync(feedPath, JSON.stringify({ v: 1, ts: ts(), ...record }) + '\n');
+  const headPath = path.join(repoRoot, '.atomic', 'emergence-feed.head');
+  let prev = null;
+  try {
+    if (fs.existsSync(headPath)) prev = fs.readFileSync(headPath, 'utf8').trim() || null;
+  } catch {
+    prev = null;
+  }
+  const body = {
+    v: 1,
+    ts: ts(),
+    ...record
+  };
+  const recordSha = sha256(JSON.stringify({ event: body, previousSha: prev }));
+  fs.appendFileSync(feedPath, JSON.stringify({ ...body, previousSha: prev, recordSha }) + '\n');
+  try {
+    fs.writeFileSync(headPath, recordSha + '\n');
+  } catch {}
 }
 function runScript(name) {
   const t0 = Date.now();

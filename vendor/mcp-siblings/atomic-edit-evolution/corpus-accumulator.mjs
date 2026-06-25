@@ -29,13 +29,24 @@ const DEFAULT_GATES = [
   'gates/cognitive-emergence.proof.mjs',
 ];
 
-function readGeneration() {
-  if (!fs.existsSync(CORPUS_FILE)) return 0;
+function readLastRecordInfo() {
+  if (!fs.existsSync(CORPUS_FILE)) return { generation: 0, lastSha: null };
   let max = 0;
-  for (const line of fs.readFileSync(CORPUS_FILE, 'utf8').trim().split('\n').filter(Boolean)) {
-    try { const r = JSON.parse(line); if (typeof r.generation === 'number') max = Math.max(max, r.generation); } catch {}
+  let lastSha = null;
+  const lines = fs.readFileSync(CORPUS_FILE, 'utf8').trim().split('\n').filter(Boolean);
+  if (lines.length > 0) {
+    try {
+      const r = JSON.parse(lines[lines.length - 1]);
+      lastSha = r.recordSha256 ?? null;
+    } catch {}
   }
-  return max;
+  for (const line of lines) {
+    try {
+      const r = JSON.parse(line);
+      if (typeof r.generation === 'number') max = Math.max(max, r.generation);
+    } catch {}
+  }
+  return { generation: max, lastSha };
 }
 
 function runGate(gatePath) {
@@ -47,7 +58,7 @@ function runGate(gatePath) {
   }
 }
 
-function createWitness(gatePath, result, generation, allGateCmds) {
+function createWitness(gatePath, result, generation, allGateCmds, previousRecordSha256) {
   const record = {
     kind: 'atomic-disproof-witness-record',
     invariantId: 'node ' + gatePath + ' --json',
@@ -62,6 +73,7 @@ function createWitness(gatePath, result, generation, allGateCmds) {
     proposalDigest: sha256('acc-' + generation + '-' + gatePath),
     archiveEntrySha256: sha256('archive-' + generation),
     generation,
+    previousRecordSha256: previousRecordSha256 || null,
   };
   record.recordSha256 = sha256(JSON.stringify(record));
   return record;
@@ -69,7 +81,9 @@ function createWitness(gatePath, result, generation, allGateCmds) {
 
 const gates = DEFAULT_GATES;
 const allGateCmds = gates.map((g) => 'node ' + g + ' --json');
-let generation = readGeneration();
+const lastInfo = readLastRecordInfo();
+let generation = lastInfo.generation;
+let previousRecordSha256 = lastInfo.lastSha;
 const results = [];
 let newRecords = 0;
 
@@ -79,7 +93,9 @@ for (const gate of gates) {
   results.push({ gate, passed, exitCode: result.exitCode });
   if (!passed) {
     generation += 1;
-    fs.appendFileSync(CORPUS_FILE, JSON.stringify(createWitness(gate, result, generation, allGateCmds)) + '\n');
+    const witness = createWitness(gate, result, generation, allGateCmds, previousRecordSha256);
+    fs.appendFileSync(CORPUS_FILE, JSON.stringify(witness) + '\n');
+    previousRecordSha256 = witness.recordSha256;
     newRecords++;
   }
 }

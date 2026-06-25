@@ -54,10 +54,21 @@ function isEphemeralAtomicFixture(rel: string): boolean {
  * broken — in which case self-expansion falls back to the legacy path-only
  * admission (no regression).
  */
+function findRepoRoot(start: string): string {
+  let dir = start;
+  for (;;) {
+    if (fs.existsSync(path.join(dir, '.git'))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) return start;
+    dir = parent;
+  }
+}
+
 let cachedSelfSourceRoot: string | null | undefined;
 function atomicEditSourceRoot(): string | null {
   if (cachedSelfSourceRoot !== undefined) return cachedSelfSourceRoot;
-  let dir = path.dirname(fileURLToPath(import.meta.url));
+  const startDir = path.dirname(fileURLToPath(import.meta.url));
+  let dir = startDir;
   for (let i = 0; i < 8; i++) {
     const pj = path.join(dir, 'package.json');
     try {
@@ -84,9 +95,35 @@ function atomicEditSourceRoot(): string | null {
     if (parent === dir) break;
     dir = parent;
   }
+
+  // Fallback check relative to repo root
+  const repoRoot = findRepoRoot(startDir);
+  const candidates = [
+    path.join(repoRoot, 'core/atomic-edit'),
+    path.join(repoRoot, 'scripts/mcp/atomic-edit'),
+  ];
+  for (const cand of candidates) {
+    const pj = path.join(cand, 'package.json');
+    try {
+      if (fs.existsSync(pj)) {
+        const j = JSON.parse(fs.readFileSync(pj, 'utf8'));
+        const isAtomicEditPackage =
+          (j && (j.name === 'atomic-edit-mcp' || j.name === 'atomic-os')) ||
+          (j && j.bin && typeof j.bin === 'object' && Boolean(j.bin['atomic-edit-mcp']));
+        if (isAtomicEditPackage) {
+          cachedSelfSourceRoot = cand;
+          return cand;
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   cachedSelfSourceRoot = null;
   return null;
 }
+
 
 /**
  * Legacy / canonical admission: paths under {repoRoot}/scripts/mcp/atomic-edit/.

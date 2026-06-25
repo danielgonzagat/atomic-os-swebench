@@ -1,4 +1,4 @@
-# SWE-bench-Verified: psf__requests-1921
+# SWE-bench-Pro: psf__requests-1921
 
 repo: psf/requests  base_commit: 3c88e520da24ae6f736929a750876e7654accc3d
 

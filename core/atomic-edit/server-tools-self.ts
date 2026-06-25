@@ -1,6 +1,7 @@
 import * as childProcess from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
@@ -378,7 +379,7 @@ function shellPath(value: string): string {
 type ProofCommandResult = { command: string; ok: boolean; stdout: string; stderr: string };
 
 const SELF_EXPANSION_PROOF_CONCURRENCY = 8;
-const SELF_EXPANSION_PROOF_GLOBAL_BUDGET_MS = 1800000;
+const SELF_EXPANSION_PROOF_GLOBAL_BUDGET_MS = 3600000;
 const SELF_EXPANSION_PROOF_DEADLINE_SAFETY_MS = 3000;
 const PROOF_OUTPUT_MAX_BYTES = 32 * 1024 * 1024;
 const SELF_EXPANSION_SNAPSHOT_MAX_FILE_BYTES = 128 * 1024 * 1024;
@@ -463,16 +464,20 @@ function appendProofOutput(current: string, chunk: Buffer | string, maxBytes = P
 
 function proofCommandConcurrency(): number {
   const raw = Number(process.env.ATOMIC_SELF_EXPANSION_PROOF_CONCURRENCY ?? '');
-  if (Number.isFinite(raw) && raw > 0) return Math.max(1, Math.min(16, Math.floor(raw)));
-  return SELF_EXPANSION_PROOF_CONCURRENCY;
+  if (Number.isFinite(raw) && raw > 0) return Math.max(1, Math.min(32, Math.floor(raw)));
+  try {
+    const cpus = os.cpus().length;
+    return Math.max(4, Math.min(12, cpus));
+  } catch {
+    return SELF_EXPANSION_PROOF_CONCURRENCY;
+  }
 }
 
 function proofGlobalBudgetMs(): number {
   const raw = Number(process.env.ATOMIC_SELF_EXPANSION_PROOF_GLOBAL_BUDGET_MS ?? '');
   if (Number.isFinite(raw) && raw > 0) {
-    // Upper clamp was 115_000 — BELOW the 180_000 default, so the env override could only LOWER the
-    // budget (a bug). Allow up to 1h so a large-repo lattice can be given the time it needs.
-    return Math.max(30000, Math.min(3600000, Math.floor(raw)));
+    // Allow up to 4h so a large-repo lattice can be given the time it needs.
+    return Math.max(30000, Math.min(14400000, Math.floor(raw)));
   }
   return SELF_EXPANSION_PROOF_GLOBAL_BUDGET_MS;
 }

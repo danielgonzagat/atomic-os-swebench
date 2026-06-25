@@ -1,4 +1,4 @@
-# SWE-bench-Verified: pylint-dev__pylint-7080
+# SWE-bench-Pro: pylint-dev__pylint-7080
 
 repo: pylint-dev/pylint  base_commit: 3c5eca2ded3dd2b59ebaf23eb289453b5d2930f0
 

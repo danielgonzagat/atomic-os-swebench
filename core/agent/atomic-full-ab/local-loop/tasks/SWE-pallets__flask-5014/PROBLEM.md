@@ -1,4 +1,4 @@
-# SWE-bench-Verified: pallets__flask-5014
+# SWE-bench-Pro: pallets__flask-5014
 
 repo: pallets/flask  base_commit: 7ee9ceb71e868944a46e1ff00b506772a53a4f1d
 

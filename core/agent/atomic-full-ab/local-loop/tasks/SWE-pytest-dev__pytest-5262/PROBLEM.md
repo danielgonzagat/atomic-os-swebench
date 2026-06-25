@@ -1,4 +1,4 @@
-# SWE-bench-Verified: pytest-dev__pytest-5262
+# SWE-bench-Pro: pytest-dev__pytest-5262
 
 repo: pytest-dev/pytest  base_commit: 58e6a09db49f34886ff13f3b7520dd0bcd7063cd
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # run_elevation_stream.sh — distinct-task Elevation stream for the finetunable substrate.
 #
-# Metric: DeepSeek V4 Pro with the accumulated canonical ACT substrate must resolve more
-# distinct SWE-Bench-Verified tasks than DeepSeek V4 Pro without that substrate, and more
-# than the frozen native baseline when that baseline carries resolved=true/false fields.
+# Metric: DeepSeek V4 Pro with the accumulated canonical ACT substrate is measured only
+# on official SWE-Bench Pro tasks, against a paired frozen frontier baseline on the same
+# task ids. Verified/WLIFT/within-task efficiency is diagnostic only, not Elevação.
 # This replaces recurrence-style WLIFT as the north metric; no synthetic recurrence.
 set -uo pipefail
 
@@ -12,6 +12,10 @@ HERE="/Users/danielpenin/atomic-os-swebench/core/agent/atomic-full-ab/local-loop
 DRIVER="$HERE/local_atomic_agent.py"
 SWE_PYTHON="${SWE_PYTHON:-/opt/homebrew/bin/python3}"
 MODEL="deepseek-v4-pro"
+BENCHMARK_SUITE="${ATOMIC_ELEVATION_BENCHMARK_SUITE:-swe_bench_pro}"
+DATASET_NAME="${ATOMIC_ELEVATION_DATASET_NAME:-ScaleAI/SWE-bench_Pro}"
+TASKROOT="${ATOMIC_ELEVATION_TASK_ROOT:-$HERE/tasks}"
+SUITEROOT="${ATOMIC_ELEVATION_SUITE_ROOT:-${ATOMIC_SWE_SUITE_ROOT:-/tmp/swe/suite}}"
 
 sha256_file(){ shasum -a 256 "$1" | awk '{print $1}'; }
 sanitize(){ printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_'; }
@@ -41,6 +45,116 @@ import subprocess, sys
 timeout = int(sys.argv[1])
 subprocess.check_output(["docker", "version", "--format", "{{.Server.Version}}"], stderr=subprocess.STDOUT, text=True, timeout=timeout)
 PY
+}
+
+is_official_benchmark(){
+  [ "$BENCHMARK_SUITE" = "swe_bench_pro" ] && [ "$DATASET_NAME" = "ScaleAI/SWE-bench_Pro" ]
+}
+
+task_problem_path(){
+  printf '%s/SWE-%s/PROBLEM.md\n' "$TASKROOT" "$1"
+}
+
+task_meta_path(){
+  printf '%s/SWE-%s/meta.json\n' "$TASKROOT" "$1"
+}
+
+validate_task_provenance(){
+  local iid task meta
+  for iid in "$@"; do
+    task="$(task_problem_path "$iid")"
+    meta="$(task_meta_path "$iid")"
+    if [ ! -f "$task" ]; then
+      echo "official SWE-Bench Pro task provenance required: missing PROBLEM.md for $iid at $task" >&2
+      return 2
+    fi
+    if [ ! -f "$meta" ]; then
+      echo "official SWE-Bench Pro task provenance required: missing meta.json for $iid at $meta" >&2
+      return 2
+    fi
+    python3 - "$iid" "$DATASET_NAME" "$task" "$meta" <<'PY' || return 2
+import json, sys
+
+iid, dataset_name, problem_path, meta_path = sys.argv[1:]
+expected_header = f"# SWE-bench-Pro: {iid}"
+try:
+    with open(problem_path, encoding="utf-8") as f:
+        header = f.readline().strip()
+    with open(meta_path, encoding="utf-8") as f:
+        meta = json.load(f)
+except Exception as exc:
+    print(f"official SWE-Bench Pro task provenance required: unreadable task metadata for {iid}: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+meta_iid = meta.get("instance_id")
+meta_dataset = meta.get("dataset_name")
+meta_label = meta.get("benchmark_label")
+ok = (
+    header == expected_header
+    and meta_iid == iid
+    and meta_dataset == dataset_name
+    and meta_label == "SWE-bench-Pro"
+)
+if not ok:
+    print(
+        "official SWE-Bench Pro task provenance required: "
+        f"iid={iid} header={header!r} meta_instance_id={meta_iid!r} "
+        f"meta_dataset_name={meta_dataset!r} meta_benchmark_label={meta_label!r} "
+        f"expected_header={expected_header!r} expected_dataset={dataset_name!r}",
+        file=sys.stderr,
+    )
+raise SystemExit(0 if ok else 1)
+PY
+  done
+}
+
+find_pristine(){
+  local iid="$1" root
+  for root in "$SUITEROOT" /private/tmp/swe/suite /tmp/swe/suite; do
+    if [ -d "$root/$iid/pristine/.git" ]; then
+      printf '%s\n' "$root/$iid/pristine"
+      return 0
+    fi
+  done
+  return 1
+}
+
+task_base_commit(){
+  python3 - "$(task_meta_path "$1")" <<'PY'
+import json, sys
+try:
+    base = json.load(open(sys.argv[1])).get("base_commit") or ""
+except Exception:
+    base = ""
+print(base if isinstance(base, str) else str(base))
+PY
+}
+
+validate_suite_preflight(){
+  local iid pristine expected actual searched
+  for iid in "$@"; do
+    pristine="$(find_pristine "$iid")" || {
+      searched="$SUITEROOT/$iid/pristine,/private/tmp/swe/suite/$iid/pristine,/tmp/swe/suite/$iid/pristine"
+      echo "official SWE-Bench Pro suite checkout required: missing .git for $iid expected=$SUITEROOT/$iid/pristine searched=$searched" >&2
+      return 2
+    }
+    expected="$(task_base_commit "$iid")"
+    if [ -z "$expected" ]; then
+      echo "official SWE-Bench Pro task metadata requires base_commit for suite preflight: iid=$iid meta=$(task_meta_path "$iid")" >&2
+      return 2
+    fi
+    actual="$(git -C "$pristine" rev-parse HEAD 2>/dev/null || true)"
+    if [ -z "$actual" ]; then
+      echo "official SWE-Bench Pro pristine checkout unreadable: iid=$iid pristine=$pristine" >&2
+      return 2
+    fi
+    case "$actual" in
+      "$expected"*) ;;
+      *)
+        echo "official SWE-Bench Pro pristine checkout base mismatch: iid=$iid pristine=$pristine expected_base=$expected actual_head=$actual" >&2
+        return 2
+        ;;
+    esac
+  done
 }
 
 act_schema_ok(){
@@ -125,6 +239,135 @@ except Exception:
 atomic = data.get("atomic")
 tooling = str(data.get("tooling") or data.get("protocol") or "").lower()
 print("true" if atomic is True or "atomic" in tooling else "false")
+PY
+}
+
+baseline_frontier_report(){
+  local baseline="$1"; shift
+  python3 - "$baseline" "$BENCHMARK_SUITE" "$DATASET_NAME" "$@" <<'PY'
+import hashlib, json, re, sys
+from pathlib import Path
+
+baseline, benchmark_suite, dataset_name = sys.argv[1:4]
+tasks = sys.argv[4:]
+
+def emit(*values):
+    print(" ".join("true" if v else "false" for v in values))
+
+try:
+    baseline_path = Path(baseline).resolve()
+    data = json.loads(baseline_path.read_text(encoding="utf-8"))
+except Exception:
+    emit(False, False, False, False, False)
+    raise SystemExit
+
+role_ok = data.get("frontier_baseline") is True or data.get("baseline_role") == "frontier"
+frozen_ok = data.get("frozen") is True or data.get("baseline_frozen") is True
+official_ok = (
+    data.get("official_docker") is True
+    or data.get("official_harness") is True
+    or data.get("scoring_harness") == "swebench.harness.run_evaluation"
+)
+dataset_ok = (
+    data.get("benchmark_suite") == benchmark_suite
+    and data.get("dataset_name") == dataset_name
+    and data.get("benchmark_label") == "SWE-bench-Pro"
+)
+baseline_tasks = data.get("task_ids") or data.get("held_out_task_ids") or []
+paired_ok = (
+    isinstance(baseline_tasks, list)
+    and bool(tasks)
+    and len(baseline_tasks) == len(tasks)
+    and set(baseline_tasks) == set(tasks)
+)
+
+instances = data.get("instances") or {}
+
+def find_instance(iid):
+    if iid in instances:
+        return instances[iid]
+    short = iid.split("__", 1)[-1]
+    return instances.get(short)
+
+def resolve_evidence_path(raw):
+    if not isinstance(raw, str) or not raw:
+        return None
+    path = Path(raw)
+    if not path.is_absolute():
+        path = baseline_path.parent / path
+    return path
+
+def sha256_path(path):
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+def prediction_instance_ok(path, iid):
+    try:
+        with path.open(encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    return json.loads(line).get("instance_id") == iid
+    except Exception:
+        return False
+    return False
+
+def score_resolved_ok(path, resolved):
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return False
+    matches = re.findall(r"Instances resolved:\s*(\d+)", text)
+    if not matches:
+        return False
+    return int(matches[-1]) == (1 if resolved else 0)
+
+receipt = data.get("frontier_receipt") or data.get("baseline_receipt") or {}
+receipt_metadata_ok = (
+    isinstance(receipt, dict)
+    and receipt.get("format") == "swebench_pro_frontier_baseline_v1"
+    and receipt.get("frozen") is True
+    and receipt.get("official_docker") is True
+    and receipt.get("scoring_harness") == "swebench.harness.run_evaluation"
+    and receipt.get("benchmark_suite") == benchmark_suite
+    and receipt.get("dataset_name") == dataset_name
+    and receipt.get("benchmark_label") == "SWE-bench-Pro"
+)
+receipt_tasks = receipt.get("task_ids") if isinstance(receipt, dict) else []
+receipt_paired_ok = isinstance(receipt_tasks, list) and receipt_tasks == tasks
+evidence = receipt.get("evidence") if isinstance(receipt, dict) else None
+receipt_ok = receipt_metadata_ok and receipt_paired_ok and isinstance(evidence, dict) and bool(tasks)
+
+if receipt_ok:
+    for iid in tasks:
+        rec = evidence.get(iid)
+        inst = find_instance(iid)
+        if not isinstance(rec, dict) or not isinstance(inst, dict):
+            receipt_ok = False
+            break
+        resolved = inst.get("resolved")
+        if not isinstance(resolved, bool) or rec.get("resolved") != resolved:
+            receipt_ok = False
+            break
+        pred = resolve_evidence_path(rec.get("prediction_jsonl"))
+        score = resolve_evidence_path(rec.get("score_log"))
+        if pred is None or score is None or not pred.is_file() or not score.is_file():
+            receipt_ok = False
+            break
+        if rec.get("prediction_sha256") != sha256_path(pred):
+            receipt_ok = False
+            break
+        if rec.get("score_log_sha256") != sha256_path(score):
+            receipt_ok = False
+            break
+        if not prediction_instance_ok(pred, iid) or not score_resolved_ok(score, resolved):
+            receipt_ok = False
+            break
+
+ok = role_ok and frozen_ok and official_ok and dataset_ok and paired_ok and receipt_ok
+emit(ok, frozen_ok, official_ok, paired_ok, receipt_ok)
 PY
 }
 
@@ -255,14 +498,29 @@ if [ "${1:-}" = "--selftest" ]; then
   teacher_atomic="$(baseline_teacher_atomic "$BASELINE")"
   anti_replay="$(tasks_anti_replay "$BASELINE" "${TASKS[@]}")"
   held_out="$anti_replay"
+  official_benchmark=false
+  if is_official_benchmark; then official_benchmark=true; fi
+  read -r frontier_baseline_provenance_ok frontier_baseline_frozen frontier_baseline_official_docker frontier_baseline_paired_tasks frontier_baseline_evidence_receipt_ok <<<"$(baseline_frontier_report "$BASELINE" "${TASKS[@]}")"
   read -r substrate_weight_count accumulation_index <<<"$(substrate_stats "$WEIGHTS")"
   echo "metric=elevation"
+  echo "benchmark_suite=$BENCHMARK_SUITE"
+  echo "benchmark_dataset_name=$DATASET_NAME"
+  echo "official_benchmark=$official_benchmark"
+  echo "task_root=$TASKROOT"
+  echo "suite_root=$SUITEROOT"
+  echo "task_provenance_enforced=true"
+  echo "suite_preflight_enforced=true"
   echo "canonical_act=$canonical_act"
   echo "run_id=elevation_selftest_$(sanitize "${weights_sha:0:12}")_$(tasks_hash "${TASKS[@]}" | cut -c1-12)"
   echo "weights_sha256=$weights_sha"
   echo "student_model=$MODEL"
   echo "teacher_model=$teacher_model"
   echo "teacher_atomic=$teacher_atomic"
+  echo "frontier_baseline_provenance_ok=$frontier_baseline_provenance_ok"
+  echo "frontier_baseline_frozen=$frontier_baseline_frozen"
+  echo "frontier_baseline_official_docker=$frontier_baseline_official_docker"
+  echo "frontier_baseline_paired_tasks=$frontier_baseline_paired_tasks"
+  echo "frontier_baseline_evidence_receipt_ok=$frontier_baseline_evidence_receipt_ok"
   echo "held_out=$held_out"
   echo "anti_replay=$anti_replay"
   echo "substrate_mode=accumulated_canonical_act"
@@ -276,8 +534,8 @@ if [ "${1:-}" = "--selftest" ]; then
   echo "accumulation_index=$accumulation_index"
   echo "swebench_import_timeout_seconds=${ATOMIC_ELEVATION_IMPORT_TIMEOUT_SECONDS:-20}"
   if validate_swebench_python; then echo "swebench_importable=true"; else echo "swebench_importable=false"; fi
-  echo "summary_fields=metric,run_id,task_ids,distinct_tasks,native_resolved,frontier_baseline_resolved,atomic_base_resolved,deepseek_control_resolved,atomic_substrate_resolved,elevation_vs_atomic_base,elevation_vs_native,elevation_vs_frontier,elevation_vs_deepseek_control,accumulation_index,substrate_weight_count,weights_sha256,weights_sha256_initial,weights_sha256_final,weights_snapshot_path,canonical_act,student_model,teacher_model,teacher_atomic,held_out,anti_replay,sample_timeouts,score_failures,reused_samples,rerun_timeout_samples,elevation_valid"
-  if [ "$canonical_act" = true ] && [ "$native_fields" = true ] && [ "$distinct" = true ] && [ "$teacher_atomic" = true ] && [ "$anti_replay" = true ]; then
+  echo "summary_fields=metric,run_id,benchmark_suite,benchmark_dataset_name,official_benchmark,task_provenance_ok,suite_preflight_ok,frontier_baseline_provenance_ok,frontier_baseline_evidence_receipt_ok,task_ids,distinct_tasks,native_resolved,frontier_baseline_resolved,atomic_base_resolved,deepseek_control_resolved,atomic_substrate_resolved,elevation_vs_atomic_base,elevation_vs_native,elevation_vs_frontier,elevation_vs_deepseek_control,accumulation_index,substrate_weight_count,weights_sha256,weights_sha256_initial,weights_sha256_final,weights_snapshot_path,canonical_act,student_model,teacher_model,teacher_atomic,held_out,anti_replay,sample_timeouts,score_failures,reused_samples,rerun_timeout_samples,elevation_valid"
+  if [ "$canonical_act" = true ] && [ "$native_fields" = true ] && [ "$distinct" = true ] && [ "$teacher_atomic" = true ] && [ "$anti_replay" = true ] && [ "$official_benchmark" = true ] && [ "$frontier_baseline_provenance_ok" = true ] && [ "$frontier_baseline_evidence_receipt_ok" = true ]; then
     echo "elevation_valid_if_run=true"
   else
     echo "elevation_valid_if_run=false"
@@ -300,6 +558,9 @@ teacher_model="$(baseline_teacher_model "$BASELINE")"
 teacher_atomic="$(baseline_teacher_atomic "$BASELINE")"
 anti_replay="$(tasks_anti_replay "$BASELINE" "${TASKS[@]}")"
 held_out="$anti_replay"
+official_benchmark=false
+if is_official_benchmark; then official_benchmark=true; fi
+read -r frontier_baseline_provenance_ok frontier_baseline_frozen frontier_baseline_official_docker frontier_baseline_paired_tasks frontier_baseline_evidence_receipt_ok <<<"$(baseline_frontier_report "$BASELINE" "${TASKS[@]}")"
 read -r substrate_weight_count accumulation_index <<<"$(substrate_stats "$WEIGHTS")"
 SAMPLE_TIMEOUT_SECONDS="${ATOMIC_ELEVATION_SAMPLE_TIMEOUT_SECONDS:-900}"
 SCORE_TIMEOUT_SECONDS="${ATOMIC_ELEVATION_SCORE_TIMEOUT_SECONDS:-1200}"
@@ -310,6 +571,24 @@ if [ "$distinct" != true ]; then
   echo "elevation stream requires distinct SWE-Bench task ids; duplicates are non-metric" >&2
   exit 2
 fi
+if [ "$official_benchmark" != true ]; then
+  echo "official SWE-Bench Pro dataset required for Elevação: benchmark_suite=$BENCHMARK_SUITE dataset=$DATASET_NAME expected_dataset=ScaleAI/SWE-bench_Pro" >&2
+  exit 2
+fi
+if [ "$frontier_baseline_provenance_ok" != true ]; then
+  echo "paired official SWE-Bench Pro frontier baseline required: baseline=$BASELINE dataset=$DATASET_NAME frozen=$frontier_baseline_frozen official_docker=$frontier_baseline_official_docker paired_tasks=$frontier_baseline_paired_tasks evidence_receipt=$frontier_baseline_evidence_receipt_ok" >&2
+  exit 2
+fi
+task_provenance_ok=false
+if ! validate_task_provenance "${TASKS[@]}"; then
+  exit 2
+fi
+task_provenance_ok=true
+suite_preflight_ok=false
+if ! validate_suite_preflight "${TASKS[@]}"; then
+  exit 2
+fi
+suite_preflight_ok=true
 if ! validate_swebench_python; then
   echo "swebench import failed for SWE_PYTHON=$SWE_PYTHON; refusing elevation run" >&2
   exit 2
@@ -345,7 +624,7 @@ export DEEPSEEK_MODEL="$MODEL" DEEPSEEK_TIMEOUT="${DEEPSEEK_TIMEOUT:-120}" DEEPS
 
 find_pristine(){
   local iid="$1"
-  for root in /private/tmp/swe/suite /tmp/swe/suite; do
+  for root in "$SUITEROOT" /private/tmp/swe/suite /tmp/swe/suite; do
     if [ -d "$root/$iid/pristine/.git" ]; then
       printf '%s\n' "$root/$iid/pristine"
       return 0
@@ -356,12 +635,12 @@ find_pristine(){
 
 score_prediction(){
   local pred="$1" run_id="$2" log="$3"
-  python3 - "$SCORE_TIMEOUT_SECONDS" "$SWE_PYTHON" "$pred" "$run_id" "$log" <<'PY' >/dev/null 2>&1
+  python3 - "$SCORE_TIMEOUT_SECONDS" "$SWE_PYTHON" "$DATASET_NAME" "$pred" "$run_id" "$log" <<'PY' >/dev/null 2>&1
 import subprocess, sys
-timeout, swe_python, pred, run_id, log_path = int(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
+timeout, swe_python, dataset_name, pred, run_id, log_path = int(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6]
 cmd = [
     swe_python, "-m", "swebench.harness.run_evaluation",
-    "--dataset_name", "princeton-nlp/SWE-bench_Verified",
+    "--dataset_name", dataset_name,
     "--predictions_path", pred,
     "--run_id", run_id,
     "--max_workers", "1",
@@ -398,7 +677,8 @@ run_one(){
     echo "$arm $iid: resolved=? timeout=0 score_bad=1 setup_failed=1"
     return
   }
-  local task="$HERE/tasks/SWE-$iid/PROBLEM.md"
+  local task
+  task="$(task_problem_path "$iid")"
   local wd="/private/tmp/swe/round/ELEVATION/${RUN_ID}_${arm}_${idx}_$(sanitize "$iid")"
   local out="$OUTDIR/${arm}_${idx}_$(sanitize "$iid").json"
   local pred="$OUTDIR/pred_${arm}_${idx}_$(sanitize "$iid").jsonl"
@@ -474,6 +754,8 @@ echo "tasks=${TASKS[*]}"
 echo "weights_sha256_initial=$weights_sha_initial canonical_act=$canonical_act accumulation_index=$accumulation_index"
 echo "weights_snapshot_path=$WEIGHTS_SNAPSHOT"
 echo "frontier_baseline_resolved_fields=$native_fields teacher_model=$teacher_model teacher_atomic=$teacher_atomic held_out=$held_out anti_replay=$anti_replay baseline=$BASELINE"
+echo "frontier_baseline_provenance_ok=$frontier_baseline_provenance_ok frozen=$frontier_baseline_frozen official_docker=$frontier_baseline_official_docker paired_tasks=$frontier_baseline_paired_tasks evidence_receipt=$frontier_baseline_evidence_receipt_ok"
+echo "task_root=$TASKROOT suite_root=$SUITEROOT task_provenance_ok=$task_provenance_ok suite_preflight_ok=$suite_preflight_ok"
 
 atomic_base_resolved=0; atomic_substrate_resolved=0; sample_timeouts=0; score_failures=0; reused_samples=0; rerun_timeout_samples=0
 idx=0
@@ -503,24 +785,31 @@ if [ "$native_fields" = true ]; then
 fi
 weights_sha_final="$(sha256_file "$WEIGHTS_SNAPSHOT")"
 
-python3 - "$OUTDIR/elevation_summary.json" "$RUN_ID" "$weights_sha_initial" "$weights_sha_final" "$canonical_act" "$MODEL" \
+python3 - "$OUTDIR/elevation_summary.json" "$RUN_ID" "$BENCHMARK_SUITE" "$DATASET_NAME" "$official_benchmark" "$task_provenance_ok" "$suite_preflight_ok" "$frontier_baseline_provenance_ok" "$frontier_baseline_evidence_receipt_ok" "$weights_sha_initial" "$weights_sha_final" "$canonical_act" "$MODEL" \
   "$teacher_model" "$teacher_atomic" "$held_out" "$anti_replay" \
   "$native_fields" "$native_resolved_value" "$atomic_base_resolved" "$atomic_substrate_resolved" \
   "$accumulation_index" "$substrate_weight_count" "$sample_timeouts" "$score_failures" \
   "$reused_samples" "$rerun_timeout_samples" "$WEIGHTS_SNAPSHOT" "${TASKS[@]}" <<'PY'
 import json, sys
-out, run_id, weights_sha_initial, weights_sha_final, canonical_act, model = sys.argv[1:7]
-teacher_model, teacher_atomic, held_out, anti_replay = sys.argv[7:11]
-native_fields, native_resolved_raw, atomic_base, atomic_substrate = sys.argv[11:15]
-accumulation_index, substrate_weight_count, sample_timeouts, score_failures = map(int, sys.argv[15:19])
-reused_samples, rerun_timeout_samples = map(int, sys.argv[19:21])
-weights_snapshot_path = sys.argv[21]
-tasks = sys.argv[22:]
+out, run_id, benchmark_suite, benchmark_dataset_name, official_benchmark, task_provenance_ok, suite_preflight_ok, frontier_baseline_provenance_ok, frontier_baseline_evidence_receipt_ok, weights_sha_initial, weights_sha_final, canonical_act, model = sys.argv[1:14]
+teacher_model, teacher_atomic, held_out, anti_replay = sys.argv[14:18]
+native_fields, native_resolved_raw, atomic_base, atomic_substrate = sys.argv[18:22]
+accumulation_index, substrate_weight_count, sample_timeouts, score_failures = map(int, sys.argv[22:26])
+reused_samples, rerun_timeout_samples = map(int, sys.argv[26:28])
+weights_snapshot_path = sys.argv[28]
+tasks = sys.argv[29:]
 atomic_base = int(atomic_base); atomic_substrate = int(atomic_substrate)
 native_resolved = None if native_resolved_raw == "null" else int(native_resolved_raw)
 data = {
     "metric": "elevation",
     "run_id": run_id,
+    "benchmark_suite": benchmark_suite,
+    "benchmark_dataset_name": benchmark_dataset_name,
+    "official_benchmark": official_benchmark == "true",
+    "task_provenance_ok": task_provenance_ok == "true",
+    "suite_preflight_ok": suite_preflight_ok == "true",
+    "frontier_baseline_provenance_ok": frontier_baseline_provenance_ok == "true",
+    "frontier_baseline_evidence_receipt_ok": frontier_baseline_evidence_receipt_ok == "true",
     "task_ids": tasks,
     "distinct_tasks": len(tasks) == len(set(tasks)) and bool(tasks),
     "native_resolved": native_resolved,
@@ -550,6 +839,11 @@ data = {
     "rerun_timeout_samples": rerun_timeout_samples,
     "elevation_valid": (
         canonical_act == "true"
+        and official_benchmark == "true"
+        and task_provenance_ok == "true"
+        and suite_preflight_ok == "true"
+        and frontier_baseline_provenance_ok == "true"
+        and frontier_baseline_evidence_receipt_ok == "true"
         and native_fields == "true"
         and teacher_atomic == "true"
         and anti_replay == "true"

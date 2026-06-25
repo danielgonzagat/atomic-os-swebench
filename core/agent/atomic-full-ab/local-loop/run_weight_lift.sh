@@ -77,6 +77,35 @@ PY
   return 2
 }
 
+matched_weight_fidelity_report(){
+  local weights="$1" task_file="$2"
+  python3 - "$weights" "$task_file" <<'PY'
+import json, re, sys
+weights_path, task_file = sys.argv[1:]
+task = open(task_file).read()
+matched = []
+unproven = []
+with open(weights_path) as f:
+    rows = [json.loads(line) for line in f if line.strip()]
+for weight in rows:
+    trigger = weight.get("trigger") or ""
+    try:
+        trigger_match = bool((not trigger) or re.search(trigger, task, re.I))
+    except re.error:
+        trigger_match = False
+    if trigger_match:
+        cls = str(weight.get("class") or "UNKNOWN")
+        matched.append(cls)
+        act = weight.get("act") if isinstance(weight.get("act"), dict) else {}
+        battery = weight.get("fidelity_battery") or act.get("fidelity_battery") or weight.get("instances") or []
+        if not isinstance(battery, list) or not battery:
+            unproven.append(cls)
+print("matched_weight_fidelity_ok=" + ("true" if not unproven else "false"))
+print("matched_weight_classes=" + ",".join(matched))
+print("unproven_matched_weight_classes=" + ",".join(unproven))
+PY
+}
+
 TEACHER_MODEL="${ATOMIC_WLIFT_TEACHER_MODEL:-deepseek-v4-pro}"
 STUDENT_MODEL="${ATOMIC_WLIFT_STUDENT_MODEL:-${DEEPSEEK_MODEL:-deepseek-v4-pro}}"
 BASE_ONLY=false
@@ -86,7 +115,7 @@ SCORE_TIMEOUT_SECONDS="${ATOMIC_WLIFT_SCORE_TIMEOUT_SECONDS:-900}"
 SCORE_ATTEMPTS="${ATOMIC_WLIFT_SCORE_ATTEMPTS:-2}"
 MIN_FREE_KB="${ATOMIC_WLIFT_MIN_FREE_KB:-2097152}"
 DOCKER_TIMEOUT_SECONDS="${ATOMIC_WLIFT_DOCKER_TIMEOUT_SECONDS:-20}"
-SWEBENCH_IMPORT_TIMEOUT_SECONDS="${ATOMIC_WLIFT_SWEBENCH_IMPORT_TIMEOUT_SECONDS:-30}"
+SWEBENCH_IMPORT_TIMEOUT_SECONDS="${ATOMIC_WLIFT_SWEBENCH_IMPORT_TIMEOUT_SECONDS:-120}"
 CROSS_MODEL=false
 [ "$TEACHER_MODEL" != "$STUDENT_MODEL" ] && CROSS_MODEL=true
 
@@ -114,7 +143,7 @@ if [ "${1:-}" = "--selftest" ]; then
   else
     echo "swebench_importable=false"
   fi
-  echo "summary_fields=base_resolved,weight_resolved,N,lift,weights_sha256,canonical_act,teacher_model,student_model,cross_model,base_only,sample_timeouts,score_failures,goldilocks_baseline,fail_floor_positive_lift,g2_valid"
+  echo "summary_fields=base_resolved,weight_resolved,N,lift,weights_sha256,canonical_act,teacher_model,student_model,cross_model,base_only,sample_timeouts,score_failures,goldilocks_baseline,fail_floor_positive_lift,matched_weight_fidelity_ok,unproven_matched_weight_classes,g2_valid"
   exit 0
 fi
 
@@ -131,15 +160,23 @@ if [ "${available_kb:-0}" -lt "$MIN_FREE_KB" ]; then
   echo "insufficient free space for WLIFT scratch: available_kb=${available_kb:-0} required_kb=$MIN_FREE_KB path=/private/tmp" >&2
   exit 2
 fi
-if ! validate_docker_api; then
-  echo "docker API unavailable for official SWE-bench scoring within ${DOCKER_TIMEOUT_SECONDS}s; refusing non-G2 run" >&2
+TD="$HERE/tasks/SWE-$ID"
+[ -f "$TD/PROBLEM.md" ] || { echo "task problem not found: $TD/PROBLEM.md" >&2; exit 2; }
+matched_report="$(matched_weight_fidelity_report "$WEIGHTS" "$TD/PROBLEM.md")"
+matched_weight_fidelity_ok="$(printf '%s\n' "$matched_report" | awk -F= '$1=="matched_weight_fidelity_ok" {print $2}')"
+unproven_matched_weight_classes="$(printf '%s\n' "$matched_report" | awk -F= '$1=="unproven_matched_weight_classes" {print $2}')"
+if [ "$BASE_ONLY" != true ] && [ "$matched_weight_fidelity_ok" != true ] && [ "${ATOMIC_WLIFT_ALLOW_UNPROVEN_MATCHED_WEIGHTS:-}" != "1" ]; then
+  echo "matched weights lack proof-carrying fidelity battery: ${unproven_matched_weight_classes:-unknown}; refusing full G2 run" >&2
   exit 2
 fi
 if ! validate_swebench_python; then
   echo "swebench import failed for SWE_PYTHON=$SWE_PYTHON; official evaluator unavailable, refusing non-G2 run" >&2
   exit 2
 fi
-TD="$HERE/tasks/SWE-$ID"
+if ! validate_docker_api; then
+  echo "docker API unavailable for official SWE-bench scoring within ${DOCKER_TIMEOUT_SECONDS}s; refusing non-G2 run" >&2
+  exit 2
+fi
 PRISTINE="/private/tmp/swe/suite/$ID/pristine"
 OUTROOT="$HERE/evidence/WLIFT"; mkdir -p "$OUTROOT"
 RUN_MODE="full"
@@ -269,6 +306,8 @@ echo "teacher_model=$TEACHER_MODEL"
 echo "student_model=$STUDENT_MODEL"
 echo "cross_model=$CROSS_MODEL"
 echo "base_only=$BASE_ONLY"
+echo "matched_weight_fidelity_ok=${matched_weight_fidelity_ok:-not_checked}"
+echo "unproven_matched_weight_classes=${unproven_matched_weight_classes:-}"
 echo "sample_timeout_seconds=$SAMPLE_TIMEOUT_SECONDS"
 echo "score_timeout_seconds=$SCORE_TIMEOUT_SECONDS"
 echo "matched weights for this task:"
@@ -302,9 +341,9 @@ if [ "$BASE_ONLY" = true ]; then
   echo "BASE TIMEOUTS: $base_timeouts / $N"
   echo "BASE SCORE FAILURES: $base_score_failures / $N"
   echo "BASE-ONLY probe is not G2; use it only to establish fail-floor before full N lift."
-  python3 - "$OUTDIR/g2_summary.json" "$ID" "$N" "$base_res" "-1" "$base_timeouts" "$base_score_failures" "$weights_sha" "$canonical_act" "$RUN_ID" "$TEACHER_MODEL" "$STUDENT_MODEL" "$CROSS_MODEL" "$BASE_ONLY" <<'PY'
+  python3 - "$OUTDIR/g2_summary.json" "$ID" "$N" "$base_res" "-1" "$base_timeouts" "$base_score_failures" "$weights_sha" "$canonical_act" "$RUN_ID" "$TEACHER_MODEL" "$STUDENT_MODEL" "$CROSS_MODEL" "$BASE_ONLY" "$matched_weight_fidelity_ok" "$unproven_matched_weight_classes" <<'PY'
 import json, sys
-out, instance, n, base, weight, sample_timeouts, score_failures, weights_sha, canonical_act, run_id, teacher_model, student_model, cross_model, base_only = sys.argv[1:]
+out, instance, n, base, weight, sample_timeouts, score_failures, weights_sha, canonical_act, run_id, teacher_model, student_model, cross_model, base_only, matched_weight_fidelity_ok, unproven_matched_weight_classes = sys.argv[1:]
 n = int(n); base = int(base); sample_timeouts = int(sample_timeouts); score_failures = int(score_failures); base_only_bool = base_only == "true"
 weight_value = None if base_only_bool else int(weight)
 data = {
@@ -324,6 +363,8 @@ data = {
     "student_model": student_model,
     "cross_model": cross_model == "true",
     "base_only": base_only_bool,
+    "matched_weight_fidelity_ok": matched_weight_fidelity_ok == "true",
+    "unproven_matched_weight_classes": [c for c in unproven_matched_weight_classes.split(",") if c],
     "g2_valid": False,
 }
 open(out, "w").write(json.dumps(data, indent=2, sort_keys=True) + "\n")
@@ -343,16 +384,21 @@ echo "WEIGHT (injected):  $weight_res / $N resolved"
 echo "SAMPLE TIMEOUTS: $((base_timeouts + weight_timeouts)) / $((N * 2))"
 echo "SCORE FAILURES: $((base_score_failures + weight_score_failures)) / $((N * 2))"
 echo "LIFT = $((weight_res - base_res)) / $N  (positive => weight lifts the model on this class, by number)"
-python3 - "$OUTDIR/g2_summary.json" "$ID" "$N" "$base_res" "$weight_res" "$base_timeouts" "$weight_timeouts" "$base_score_failures" "$weight_score_failures" "$weights_sha" "$canonical_act" "$RUN_ID" "$TEACHER_MODEL" "$STUDENT_MODEL" "$CROSS_MODEL" "$BASE_ONLY" <<'PY'
+python3 - "$OUTDIR/g2_summary.json" "$ID" "$N" "$base_res" "$weight_res" "$base_timeouts" "$weight_timeouts" "$base_score_failures" "$weight_score_failures" "$weights_sha" "$canonical_act" "$RUN_ID" "$TEACHER_MODEL" "$STUDENT_MODEL" "$CROSS_MODEL" "$BASE_ONLY" "$matched_weight_fidelity_ok" "$unproven_matched_weight_classes" <<'PY'
 import json, sys
-out, instance, n, base, weight, base_timeouts, weight_timeouts, base_score_failures, weight_score_failures, weights_sha, canonical_act, run_id, teacher_model, student_model, cross_model, base_only = sys.argv[1:]
+out, instance, n, base, weight, base_timeouts, weight_timeouts, base_score_failures, weight_score_failures, weights_sha, canonical_act, run_id, teacher_model, student_model, cross_model, base_only, matched_weight_fidelity_ok, unproven_matched_weight_classes = sys.argv[1:]
 n = int(n); base = int(base); weight = int(weight); sample_timeouts = int(base_timeouts) + int(weight_timeouts); score_failures = int(base_score_failures) + int(weight_score_failures); base_only_bool = base_only == "true"
 goldilocks_baseline = 0 < base < n
 fail_floor_positive_lift = base == 0 and weight > base
-integrity_ok = (canonical_act == "true") and (cross_model == "true") and not base_only_bool and sample_timeouts == 0 and score_failures == 0
-goldilocks_baseline = 0 < base < n
-fail_floor_positive_lift = base == 0 and weight > base
-integrity_ok = (canonical_act == "true") and (cross_model == "true") and not base_only_bool and sample_timeouts == 0 and score_failures == 0
+matched_fidelity_ok = matched_weight_fidelity_ok == "true"
+integrity_ok = (
+    canonical_act == "true"
+    and cross_model == "true"
+    and not base_only_bool
+    and sample_timeouts == 0
+    and score_failures == 0
+    and matched_fidelity_ok
+)
 data = {
     "instance": instance,
     "N": n,
@@ -370,6 +416,8 @@ data = {
     "student_model": student_model,
     "cross_model": cross_model == "true",
     "base_only": base_only_bool,
+    "matched_weight_fidelity_ok": matched_fidelity_ok,
+    "unproven_matched_weight_classes": [c for c in unproven_matched_weight_classes.split(",") if c],
     "g2_valid": integrity_ok and (goldilocks_baseline or fail_floor_positive_lift),
 }
 open(out, "w").write(json.dumps(data, indent=2, sort_keys=True) + "\n")

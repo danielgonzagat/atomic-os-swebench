@@ -31,10 +31,10 @@ grep -q 'score_timeout_seconds=900' "$selftest_out"
 grep -q 'score_attempts=2' "$selftest_out"
 grep -q 'min_free_kb=2097152' "$selftest_out"
 grep -q 'docker_timeout_seconds=20' "$selftest_out"
-grep -q 'swebench_import_timeout_seconds=30' "$selftest_out"
+grep -q 'swebench_import_timeout_seconds=120' "$selftest_out"
 grep -q 'swe_python=/opt/homebrew/bin/python3' "$selftest_out"
 grep -q 'swebench_importable=' "$selftest_out"
-grep -q 'summary_fields=base_resolved,weight_resolved,N,lift,weights_sha256,canonical_act,teacher_model,student_model,cross_model,base_only,sample_timeouts,score_failures,goldilocks_baseline,fail_floor_positive_lift,g2_valid' "$selftest_out"
+grep -q 'summary_fields=base_resolved,weight_resolved,N,lift,weights_sha256,canonical_act,teacher_model,student_model,cross_model,base_only,sample_timeouts,score_failures,goldilocks_baseline,fail_floor_positive_lift,matched_weight_fidelity_ok,unproven_matched_weight_classes,g2_valid' "$selftest_out"
 
 cross_out="$tmp/cross.out"
 ATOMIC_WLIFT_STUDENT_MODEL=deepseek-v3 ATOMIC_WLIFT_SWEBENCH_IMPORT_TIMEOUT_SECONDS=1 bash ./run_weight_lift.sh --selftest "$canonical" >"$cross_out"
@@ -79,7 +79,17 @@ fi
 
 grep -q 'model-equal lift is not G2' "$tmp/model_equal.err"
 
-if SWE_PYTHON=/usr/bin/python3 ATOMIC_WLIFT_STUDENT_MODEL=deepseek-v3 bash ./run_weight_lift.sh pylint-dev__pylint-7080 1 "$canonical" >"$tmp/missing_swebench.out" 2>"$tmp/missing_swebench.err"; then
+if ATOMIC_WLIFT_STUDENT_MODEL=deepseek-v3 bash ./run_weight_lift.sh pylint-dev__pylint-4661 1 "$canonical" >"$tmp/unproven_match.out" 2>"$tmp/unproven_match.err"; then
+  echo "expected proofless matched ACTs to be rejected before a full G2 run" >&2
+  exit 1
+fi
+
+grep -q 'matched weights lack proof-carrying fidelity battery' "$tmp/unproven_match.err"
+grep -q 'MISSED-COMPANION-CONFIG-FILE' "$tmp/unproven_match.err"
+grep -q 'matched_weight_fidelity_ok' ./run_weight_lift.sh
+grep -q 'unproven_matched_weight_classes' ./run_weight_lift.sh
+
+if SWE_PYTHON=/usr/bin/python3 ATOMIC_WLIFT_STUDENT_MODEL=deepseek-v3 ATOMIC_WLIFT_SWEBENCH_IMPORT_TIMEOUT_SECONDS=1 ATOMIC_WLIFT_ALLOW_UNPROVEN_MATCHED_WEIGHTS=1 bash ./run_weight_lift.sh pylint-dev__pylint-7080 1 "$canonical" >"$tmp/missing_swebench.out" 2>"$tmp/missing_swebench.err"; then
   echo "expected normal run to reject a Python interpreter without swebench" >&2
   exit 1
 fi
