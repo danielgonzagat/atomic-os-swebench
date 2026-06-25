@@ -76,7 +76,40 @@ PY
 
 write_frontier_baseline "$tmp/native_baseline.json" psf__requests-1921:true pytest-dev__pytest-5262:false
 
-selftest="$("$SCRIPT" --selftest "$WEIGHTS" "$tmp/native_baseline.json" psf__requests-1921 pytest-dev__pytest-5262)"
+cherrypicked_selftest="$("$SCRIPT" --selftest "$WEIGHTS" "$tmp/native_baseline.json" psf__requests-1921 pytest-dev__pytest-5262)"
+grep -q '^selection_receipt_ok=false$' <<<"$cherrypicked_selftest"
+grep -q '^anti_cherry_pick=false$' <<<"$cherrypicked_selftest"
+grep -q '^elevation_valid_if_run=false$' <<<"$cherrypicked_selftest"
+
+cat >"$tmp/selection_manifest.json" <<'JSON'
+{
+  "anti_leakage": {
+    "patch": "omitted",
+    "problem_statement": "omitted",
+    "test_patch": "omitted"
+  },
+  "benchmark_label": "SWE-bench-Pro",
+  "benchmark_suite": "swe_bench_pro",
+  "dataset_name": "ScaleAI/SWE-bench_Pro",
+  "dataset_split": "test",
+  "eligible_count": 731,
+  "metric_claim": false,
+  "official_benchmark": true,
+  "purpose": "held_out_candidate_manifest_not_elevation_result",
+  "rows": [
+    {"instance_id": "psf__requests-1921", "selection_rank_sha256": "001"},
+    {"instance_id": "pytest-dev__pytest-5262", "selection_rank_sha256": "002"}
+  ],
+  "selected_count": 2,
+  "selected_task_ids": ["psf__requests-1921", "pytest-dev__pytest-5262"],
+  "selection_method": "sha256(seed + NUL + instance_id) over official dataset rows; excludes teach task ids",
+  "selection_seed": "contract-seed",
+  "teach_task_ids": ["django__django-0001"],
+  "total_count": 731
+}
+JSON
+
+selftest="$(ATOMIC_ELEVATION_SELECTION_MANIFEST="$tmp/selection_manifest.json" "$SCRIPT" --selftest "$WEIGHTS" "$tmp/native_baseline.json" psf__requests-1921 pytest-dev__pytest-5262)"
 
 grep -q '^metric=elevation$' <<<"$selftest"
 grep -q '^benchmark_suite=swe_bench_pro$' <<<"$selftest"
@@ -97,7 +130,33 @@ grep -q '^frontier_baseline_frozen=true$' <<<"$selftest"
 grep -q '^frontier_baseline_official_docker=true$' <<<"$selftest"
 grep -q '^frontier_baseline_paired_tasks=true$' <<<"$selftest"
 grep -q '^frontier_baseline_evidence_receipt_ok=true$' <<<"$selftest"
+grep -q '^frontier_baseline_role=frontier$' <<<"$selftest"
+grep -q '^frontier_baseline_benchmark_label=SWE-bench-Pro$' <<<"$selftest"
 grep -q '^held_out=true$' <<<"$selftest"
+grep -q '^selection_manifest_path='"$tmp"'/selection_manifest.json$' <<<"$selftest"
+grep -q '^selection_manifest_sha256=[0-9a-f]\{64\}$' <<<"$selftest"
+grep -q '^selection_receipt_ok=true$' <<<"$selftest"
+grep -q '^anti_cherry_pick=true$' <<<"$selftest"
+grep -q '^metric_scope=paired_frontier_solve_rate_delta$' <<<"$selftest"
+grep -q '^within_task_efficiency_metric_admissible=false$' <<<"$selftest"
+
+write_frontier_baseline "$tmp/native_reordered_top_level_baseline.json" psf__requests-1921:true pytest-dev__pytest-5262:false
+python3 - "$tmp/native_reordered_top_level_baseline.json" <<'PYREORDEREDBASELINE'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    data = json.load(handle)
+data["task_ids"] = list(reversed(data["task_ids"]))
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PYREORDEREDBASELINE
+reordered_top_level_selftest="$("$SCRIPT" --selftest "$WEIGHTS" "$tmp/native_reordered_top_level_baseline.json" psf__requests-1921 pytest-dev__pytest-5262)"
+grep -q '^frontier_baseline_paired_tasks=false$' <<<"$reordered_top_level_selftest"
+grep -q '^frontier_baseline_provenance_ok=false$' <<<"$reordered_top_level_selftest"
+grep -q '^elevation_valid_if_run=false$' <<<"$reordered_top_level_selftest"
 grep -q '^anti_replay=true$' <<<"$selftest"
 grep -q '^substrate_mode=accumulated_canonical_act$' <<<"$selftest"
 grep -q '^control_arm=deepseek_v4_pro_without_substrate$' <<<"$selftest"
@@ -107,17 +166,36 @@ grep -q '^swebench_import_timeout_seconds=20$' <<<"$selftest"
 grep -q 'summary_fields=.*atomic_base_resolved' <<<"$selftest"
 grep -q 'summary_fields=.*atomic_substrate_resolved' <<<"$selftest"
 grep -q 'summary_fields=.*frontier_baseline_resolved' <<<"$selftest"
+grep -q 'summary_fields=.*frontier_solve_rate' <<<"$selftest"
+grep -q 'summary_fields=.*selected_task_ids_sha256' <<<"$selftest"
+grep -q 'summary_fields=.*selection_manifest_path' <<<"$selftest"
+grep -q 'summary_fields=.*selection_manifest_sha256' <<<"$selftest"
+grep -q 'summary_fields=.*selection_receipt_ok' <<<"$selftest"
+grep -q 'summary_fields=.*anti_cherry_pick' <<<"$selftest"
+grep -q 'summary_fields=.*frontier_baseline_path' <<<"$selftest"
+grep -q 'summary_fields=.*frontier_baseline_sha256' <<<"$selftest"
 grep -q 'summary_fields=.*benchmark_suite' <<<"$selftest"
+grep -q 'summary_fields=.*metric_claim' <<<"$selftest"
 grep -q 'summary_fields=.*benchmark_dataset_name' <<<"$selftest"
 grep -q 'summary_fields=.*official_benchmark' <<<"$selftest"
+grep -q 'summary_fields=.*metric_scope' <<<"$selftest"
+grep -q 'summary_fields=.*within_task_efficiency_metric_admissible' <<<"$selftest"
 grep -q 'summary_fields=.*task_provenance_ok' <<<"$selftest"
 grep -q 'summary_fields=.*deepseek_control_resolved' <<<"$selftest"
+grep -q 'summary_fields=.*student_solve_rate' <<<"$selftest"
+grep -q 'summary_fields=.*deepseek_control_solve_rate' <<<"$selftest"
 grep -q 'summary_fields=.*elevation_vs_frontier' <<<"$selftest"
+grep -q 'summary_fields=.*elevation_vs_frontier_solve_rate' <<<"$selftest"
 grep -q 'summary_fields=.*elevation_vs_deepseek_control' <<<"$selftest"
+grep -q 'summary_fields=.*elevation_vs_deepseek_control_solve_rate' <<<"$selftest"
 grep -q 'summary_fields=.*teacher_atomic' <<<"$selftest"
 grep -q 'summary_fields=.*teacher_model' <<<"$selftest"
 grep -q 'summary_fields=.*frontier_baseline_provenance_ok' <<<"$selftest"
 grep -q 'summary_fields=.*frontier_baseline_evidence_receipt_ok' <<<"$selftest"
+grep -q 'summary_fields=.*frontier_baseline_role' <<<"$selftest"
+grep -q 'summary_fields=.*frontier_baseline_frozen' <<<"$selftest"
+grep -q 'summary_fields=.*frontier_baseline_official_docker' <<<"$selftest"
+grep -q 'summary_fields=.*frontier_baseline_benchmark_label' <<<"$selftest"
 grep -q 'summary_fields=.*anti_replay' <<<"$selftest"
 grep -q 'summary_fields=.*elevation_vs_atomic_base' <<<"$selftest"
 grep -q 'summary_fields=.*elevation_vs_native' <<<"$selftest"
@@ -151,6 +229,35 @@ JSON
 no_atomic="$("$SCRIPT" --selftest "$WEIGHTS" "$tmp/native_no_atomic.json" psf__requests-1921)"
 grep -q '^teacher_atomic=false$' <<<"$no_atomic"
 grep -q '^elevation_valid_if_run=false$' <<<"$no_atomic"
+
+write_frontier_baseline "$tmp/native_non_atomic_frontier.json" psf__requests-1921:true
+python3 - "$tmp/native_non_atomic_frontier.json" <<'PYNONATOMICFRONTIER'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    data = json.load(handle)
+data["atomic"] = False
+data.pop("tooling", None)
+data.pop("protocol", None)
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PYNONATOMICFRONTIER
+non_atomic_frontier_selftest="$("$SCRIPT" --selftest "$WEIGHTS" "$tmp/native_non_atomic_frontier.json" psf__requests-1921)"
+grep -q '^frontier_baseline_provenance_ok=true$' <<<"$non_atomic_frontier_selftest"
+grep -q '^teacher_atomic=false$' <<<"$non_atomic_frontier_selftest"
+grep -q '^elevation_valid_if_run=false$' <<<"$non_atomic_frontier_selftest"
+if "$SCRIPT" ELEVTEST "$tmp/native_non_atomic_frontier.json" "$WEIGHTS" psf__requests-1921 >"$tmp/non_atomic_frontier.out" 2>"$tmp/non_atomic_frontier.err"; then
+  echo "expected non-atomic frontier teacher baseline to be rejected before run" >&2
+  exit 1
+fi
+grep -q 'atomic frontier teacher baseline required for Elevação' "$tmp/non_atomic_frontier.err"
+if grep -q 'official SWE-Bench Pro task provenance required' "$tmp/non_atomic_frontier.err"; then
+  echo "teacher-atomic rejection must happen before task workspace/provenance checks" >&2
+  exit 1
+fi
 
 cat >"$tmp/native_no_frontier.json" <<'JSON'
 {
@@ -200,6 +307,61 @@ if "$SCRIPT" ELEVTEST "$tmp/native_no_receipt.json" "$WEIGHTS" psf__requests-192
   exit 1
 fi
 grep -q 'evidence_receipt=false' "$tmp/no_receipt.err"
+
+write_frontier_baseline "$tmp/native_replay.json" psf__requests-1921:true
+python3 - "$tmp/native_replay.json" <<'PYREPLAYBASELINE'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    data = json.load(handle)
+data["teach_task_ids"] = ["psf__requests-1921"]
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PYREPLAYBASELINE
+replay_selftest="$("$SCRIPT" --selftest "$WEIGHTS" "$tmp/native_replay.json" psf__requests-1921)"
+grep -q '^frontier_baseline_provenance_ok=true$' <<<"$replay_selftest"
+grep -q '^anti_replay=false$' <<<"$replay_selftest"
+grep -q '^elevation_valid_if_run=false$' <<<"$replay_selftest"
+if "$SCRIPT" ELEVTEST "$tmp/native_replay.json" "$WEIGHTS" psf__requests-1921 >"$tmp/replay.out" 2>"$tmp/replay.err"; then
+  echo "expected replayed teach/held-out task overlap to be rejected before run" >&2
+  exit 1
+fi
+grep -q 'held-out anti-replay required for Elevação' "$tmp/replay.err"
+if grep -q 'official SWE-Bench Pro task provenance required' "$tmp/replay.err"; then
+  echo "anti-replay rejection must happen before task workspace/provenance checks" >&2
+  exit 1
+fi
+
+write_frontier_baseline "$tmp/native_no_teach_baseline.json" psf__requests-1921:true
+python3 - "$tmp/native_no_teach_baseline.json" <<'PYNOTEACHBASELINE'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    data = json.load(handle)
+data.pop("teach_task_ids", None)
+data.pop("teacher_task_ids", None)
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PYNOTEACHBASELINE
+no_teach_selftest="$("$SCRIPT" --selftest "$WEIGHTS" "$tmp/native_no_teach_baseline.json" psf__requests-1921)"
+grep -q '^anti_replay=false$' <<<"$no_teach_selftest"
+grep -q '^held_out=false$' <<<"$no_teach_selftest"
+grep -q '^elevation_valid_if_run=false$' <<<"$no_teach_selftest"
+if "$SCRIPT" ELEVTEST "$tmp/native_no_teach_baseline.json" "$WEIGHTS" psf__requests-1921 >"$tmp/no_teach.out" 2>"$tmp/no_teach.err"; then
+  echo "expected baseline without teach task ids to be rejected before run" >&2
+  exit 1
+fi
+grep -q 'held-out anti-replay required for Elevação' "$tmp/no_teach.err"
+if grep -q 'official SWE-Bench Pro task provenance required' "$tmp/no_teach.err"; then
+  echo "anti-replay gate should run before task provenance" >&2
+  exit 1
+fi
 
 verified_dataset="$(ATOMIC_ELEVATION_DATASET_NAME=princeton-nlp/SWE-bench_Verified "$SCRIPT" --selftest "$WEIGHTS" "$tmp/native_baseline.json" psf__requests-1921)"
 grep -q '^benchmark_dataset_name=princeton-nlp/SWE-bench_Verified$' <<<"$verified_dataset"
@@ -279,10 +441,38 @@ grep -q '"weights_snapshot_path"' "$SCRIPT"
 grep -q '"weights_sha256_initial"' "$SCRIPT"
 grep -q '"weights_sha256_final"' "$SCRIPT"
 grep -q '"frontier_baseline_resolved"' "$SCRIPT"
+grep -q '"frontier_solve_rate"' "$SCRIPT"
+grep -q '"selected_task_ids_sha256"' "$SCRIPT"
+grep -q '"selection_manifest_path"' "$SCRIPT"
+grep -q '"selection_manifest_sha256"' "$SCRIPT"
+grep -q '"selection_receipt_ok"' "$SCRIPT"
+grep -q '"anti_cherry_pick"' "$SCRIPT"
+grep -q 'deterministic SWE-Bench Pro selection receipt required' "$SCRIPT"
+grep -q '"frontier_baseline_path"' "$SCRIPT"
+grep -q '"frontier_baseline_sha256"' "$SCRIPT"
+grep -q '"frontier_baseline_role"' "$SCRIPT"
+grep -q '"frontier_baseline_frozen"' "$SCRIPT"
+grep -q '"frontier_baseline_official_docker"' "$SCRIPT"
+grep -q '"frontier_baseline_benchmark_label"' "$SCRIPT"
+grep -q '"metric_scope"' "$SCRIPT"
+grep -q '"within_task_efficiency_metric_admissible"' "$SCRIPT"
 grep -q '"deepseek_control_resolved"' "$SCRIPT"
+grep -q '"student_solve_rate"' "$SCRIPT"
+grep -q '"deepseek_control_solve_rate"' "$SCRIPT"
 grep -q '"elevation_vs_frontier"' "$SCRIPT"
+grep -q '"elevation_vs_frontier_solve_rate"' "$SCRIPT"
 grep -q '"elevation_vs_deepseek_control"' "$SCRIPT"
+grep -q '"elevation_vs_deepseek_control_solve_rate"' "$SCRIPT"
 grep -q '"anti_replay"' "$SCRIPT"
 grep -q '"elevation_valid"' "$SCRIPT"
+grep -q 'DEEPSEEK_API_KEY' "$SCRIPT"
+if grep -q '/tmp/.atomic_creds.sh' "$SCRIPT"; then
+  echo "elevation stream must not source credential files; use env only" >&2
+  exit 1
+fi
+if grep -q 'source /tmp' "$SCRIPT"; then
+  echo "elevation stream must not source credentials from /tmp; use env only" >&2
+  exit 1
+fi
 
 echo "Elevation stream contract ok"

@@ -40,7 +40,8 @@ function setupAgent(id) {
   const nwd = `${WFB}/${id}/native`, awd = `${WFB}/${id}/atomic`, td = `${LOOP}/tasks/SWE-${id}`
   return agent(
     `Run these EXACT bash commands in order (report failures, do not improvise):\n` +
-    `cd ${LOOP} && source /tmp/.atomic_creds.sh\n` +
+    `cd ${LOOP}\n` +
+    `[ -n "\${DEEPSEEK_API_KEY:-}" ] || { echo "DEEPSEEK_API_KEY is required in env"; exit 2; }\n` +
     `python3 swe_suite_setup.py ${id} 2>&1 | tail -2\n` +
     `rm -rf "${nwd}" "${awd}"; mkdir -p "${WFB}/${id}"\n` +
     `cp -R /private/tmp/swe/suite/${id}/pristine "${nwd}"\n` +
@@ -58,7 +59,7 @@ function atomicAgent(s) {
   const out = `${LOOP}/evidence/WFB/${s.id}__atomic.json`
   return agent(
     `You orchestrate the ATOMIC arm (DeepSeek-V4-Pro CLI). Run this EXACT bash command and WAIT for it (it can take 5-12 min):\n` +
-    `cd ${LOOP} && mkdir -p evidence/WFB && source /tmp/.atomic_creds.sh && export DEEPSEEK_MODEL=deepseek-v4-pro && export ATOMIC_CALL=${ACALL} && ` +
+    `cd ${LOOP} && mkdir -p evidence/WFB && if [ -z "\${DEEPSEEK_API_KEY:-}" ]; then echo "DEEPSEEK_API_KEY is required in env"; exit 2; fi; export DEEPSEEK_MODEL=deepseek-v4-pro && export ATOMIC_CALL=${ACALL} && ` +
     `python3 ${ISO} --workdir "${s.atomic_wd}" --task "${s.taskdir}/PROBLEM.md" --gate NONE --out "${out}" --max-steps 60 2>&1 | tail -3\n` +
     `Then read ${out} (JSON) and report: id="${s.id}", edits=edits_applied, diff_lines, tool_calls=sum of tool_calls values, ` +
     `files=the set of files in final_diff (paths after '+++ b/'), tokens. If the run produced no JSON, return edits=0 diff_lines=0 tool_calls=0 files=[] note="run failed".`,

@@ -186,7 +186,7 @@ export function createSession(issue: string, steps: AgentStep[]): AgentSession {
     trajectory: [],
     proposals: new Map(),
     attemptCount: 0,
-    maxAttempts: 5,
+    maxAttempts: computeAdaptiveMaxAttempts(plan.complexity),
     startedAt: Date.now(),
   };
 }
@@ -259,12 +259,75 @@ export function nextStep(session: AgentSession): number | null {
   return next;
 }
 
+export function computeAdaptiveMaxAttempts(complexity: AgentPlan['complexity']): number {
+  switch (complexity) {
+    case 'low': return 3;
+    case 'medium': return 5;
+    case 'high': return 8;
+    case 'critical': return 12;
+    default: return 5;
+  }
+}
+
+function assessProgress(session: AgentSession): boolean {
+  const decisions = session.trajectory
+    .filter((e) => e.payload && (e.payload as any).verdict !== undefined)
+    .map((e) => e.payload as AgentDecision);
+  
+  if (decisions.length < 2) return false;
+  
+  const current = decisions[decisions.length - 1];
+  const previous = decisions[decisions.length - 2];
+  
+  if (!current.evidence || !previous.evidence) return false;
+  
+  // 1. Test failures progress
+  const getFailCount = (text?: string): number => {
+    if (!text) return Infinity;
+    const matchPytest = text.match(/(\d+)\s+failed/i);
+    if (matchPytest) return parseInt(matchPytest[1], 10);
+    const matchErrors = text.match(/errors?:?\s*(\d+)/i);
+    if (matchErrors) return parseInt(matchErrors[1], 10);
+    if (text.includes('FAIL') || text.includes('failed')) return 999;
+    return 0;
+  };
+
+  const currFails = getFailCount(current.evidence.testResults);
+  const prevFails = getFailCount(previous.evidence.testResults);
+  
+  if (currFails < prevFails) {
+    return true;
+  }
+
+  // 2. Compilation / lint / typecheck progress
+  const getLineCount = (text?: string): number => {
+    if (!text) return 0;
+    return text.split('\n').filter(Boolean).length;
+  };
+
+  const currLintLines = getLineCount(current.evidence.lintResult || current.evidence.typecheckResult);
+  const prevLintLines = getLineCount(previous.evidence.lintResult || previous.evidence.typecheckResult);
+
+  if (currLintLines < prevLintLines) {
+    return true;
+  }
+
+  return false;
+}
+
 /**
  * Increment attempt count. Returns false when max attempts exceeded
  * (escalation needed — session should pause for human review).
  */
 export function incrementAttempt(session: AgentSession): boolean {
   session.attemptCount += 1;
+  try {
+    if (assessProgress(session) && session.attemptCount > session.maxAttempts && session.maxAttempts < 15) {
+      session.maxAttempts += 1;
+    }
+  } catch {
+    // fail-safe
+  }
   return session.attemptCount <= session.maxAttempts;
 }
 
@@ -306,6 +369,7 @@ export function persistTrajectory(repoRoot: string, session: AgentSession): stri
     phase: session.phase,
     currentStep: session.currentStep,
     attemptCount: session.attemptCount,
+    maxAttempts: session.maxAttempts,
     trajectoryLength: session.trajectory.length,
     startedAt: session.startedAt,
   };
@@ -330,15 +394,16 @@ export function loadSession(repoRoot: string, sessionId: string): AgentSession |
     const planEntry = trajectory.find((e) => e.phase === 'plan');
     if (!planEntry) return null;
 
+    const plan = planEntry.payload as AgentPlan;
     return {
       sessionId,
-      plan: planEntry.payload as AgentPlan,
+      plan,
       phase: state.phase,
       currentStep: state.currentStep,
       trajectory,
       proposals: new Map(),
       attemptCount: state.attemptCount,
-      maxAttempts: 5,
+      maxAttempts: state.maxAttempts ?? computeAdaptiveMaxAttempts(plan.complexity),
       startedAt: state.startedAt,
     };
   } catch {

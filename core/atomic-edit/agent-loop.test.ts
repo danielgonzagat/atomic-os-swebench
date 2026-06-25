@@ -8,6 +8,7 @@ import {
   requestRevision,
   proposalsForStep,
   AgentPhase,
+  incrementAttempt,
 } from './agent-loop.js';
 
 describe('agent-loop', () => {
@@ -88,6 +89,55 @@ describe('agent-loop', () => {
         { step: 1, description: 'A', expectedOutcome: 'OK' },
       ]);
       expect(proposalsForStep(session, 1)).toHaveLength(0);
+    });
+  });
+
+  describe('adaptive budget', () => {
+    it('calculates initial maxAttempts based on complexity', () => {
+      const sLow = createSession('issue', [{ step: 1, description: 'A', expectedOutcome: 'OK' }]);
+      expect(sLow.maxAttempts).toBe(3);
+
+      const sMedium = createSession('issue', [
+        { step: 1, description: 'A', expectedOutcome: 'OK' },
+        { step: 2, description: 'B', expectedOutcome: 'OK' },
+        { step: 3, description: 'C', expectedOutcome: 'OK' },
+        { step: 4, description: 'D', expectedOutcome: 'OK' },
+      ]);
+      expect(sMedium.maxAttempts).toBe(5);
+
+      const sHigh = createSession('issue', Array(8).fill({ step: 1, description: 'A', expectedOutcome: 'OK' }));
+      expect(sHigh.maxAttempts).toBe(8);
+
+      const sCritical = createSession('issue', Array(12).fill({ step: 1, description: 'A', expectedOutcome: 'OK' }));
+      expect(sCritical.maxAttempts).toBe(12);
+    });
+
+    it('grants adaptive maxAttempts bonus on test progress near exhaustion limit', () => {
+      const session = createSession('issue', [{ step: 1, description: 'A', expectedOutcome: 'OK' }]);
+      session.maxAttempts = 1;
+      session.attemptCount = 1;
+
+      // 1ª Decisão (mal sucedida)
+      recordEntry(session, {
+        verdict: 'needs_revision',
+        reason: 'fail',
+        detail: 'fail',
+        evidence: { testResults: '2 failed, 10 passed' }
+      });
+
+      // 2ª Decisão (mostra progresso)
+      recordEntry(session, {
+        verdict: 'needs_revision',
+        reason: 'fail',
+        detail: 'fail',
+        evidence: { testResults: '1 failed, 11 passed' }
+      });
+
+      const before = session.maxAttempts;
+      const ok = incrementAttempt(session);
+
+      expect(session.maxAttempts).toBe(before + 1);
+      expect(ok).toBe(true);
     });
   });
 });

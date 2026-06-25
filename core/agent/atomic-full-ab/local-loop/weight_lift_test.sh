@@ -15,7 +15,7 @@ LOOP="$PWD"; ISO=/private/tmp/swe/iso-driver-claude/laa_iso.py
 ACALL=/Users/danielpenin/atomic-os-swebench/core/atomic-edit/atomic-call.mjs
 WEIGHTS="$LOOP/.corpus/weights.jsonl"
 TD="$LOOP/tasks/SWE-$ID"
-source /tmp/.atomic_creds.sh
+[ -n "${DEEPSEEK_API_KEY:-}" ] || { echo "BLOCKED: DEEPSEEK_API_KEY is required in env; no claim made."; exit 3; }
 export DEEPSEEK_MODEL=deepseek-v4-pro ATOMIC_CALL="$ACALL"
 
 # --- self-gate on funds: refuse to run (and make no claim) if DeepSeek is broke ---

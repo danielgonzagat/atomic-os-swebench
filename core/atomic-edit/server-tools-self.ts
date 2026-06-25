@@ -25,6 +25,8 @@ import {
 } from './server-helpers-effect.js';
 import { requireNegativeActionProof, requireNegativeProofForRemovedBytes, type NegativeActionProof } from './server-helpers-negative-proof.js';
 import { registerToolsDispatch } from './server-tools-dispatch.js';
+import { recordLesson } from './server-helpers-lesson-ledger.js';
+import { updateMapElitesArchive } from './server-helpers-qd.js';
 
 interface SelfFileOp {
   op: 'create' | 'replace' | 'delete' | 'replace_text';
@@ -1718,6 +1720,44 @@ export function registerToolsSelf(server: McpServer): void {
               preflightDisproofBriefing: admittedPreflightDisproofBriefing,
               intent: a.intent ?? null,
             });
+
+            // Grava lições de rejeição por falha em testes no ledger
+            try {
+              for (const op of ops) {
+                const lesson = recordLesson(selfRoot, {
+                  decision: 'reject',
+                  operator: {
+                    file: op.file,
+                    op: op.op,
+                    oldText: op.oldText,
+                    newText: op.newText,
+                    occurrence: op.occurrence,
+                  },
+                  effect: {
+                    gatesFlipped: failed.map((p) => `${p.command}:GREEN->RED`),
+                    veredictDelta: 'GREEN->RED',
+                    floorDelta: effectsBeforeRejectRollback.effects.map((e) => ({
+                      file: e.file,
+                      bytesRemoved: e.bytesBefore > e.bytesAfter ? e.bytesBefore - e.bytesAfter : 0,
+                      bytesAdded: e.bytesAfter > e.bytesBefore ? e.bytesAfter - e.bytesBefore : 0,
+                      op: e.change,
+                    })),
+                  },
+                  context: {
+                    intent: a.intent ?? undefined,
+                    preflightError: formatFailedProofs(failed),
+                    durationMs: proofDurationMs,
+                    ts: Date.now(),
+                  },
+                });
+                if (lesson) {
+                  updateMapElitesArchive(selfRoot, lesson);
+                }
+              }
+            } catch (e) {
+              /* fail-safe */
+            }
+
             const restored = rollbackSelfExpansionSnapshotStrict(snap, effectsBeforeRejectRollback, 'atomic_expand_self');
             const selfEvolutionReject = recordSelfEvolutionRejection(selfRoot, {
               receipt: rejectionReceipt,
@@ -1748,6 +1788,44 @@ export function registerToolsSelf(server: McpServer): void {
           });
           if (promotionReceipt.decision !== 'promote') {
             const effectsBeforeRejectRollback = diffSelfExpansionSnapshot(snap);
+
+            // Grava lição de rejeição por política no ledger
+            try {
+              for (const op of ops) {
+                const lesson = recordLesson(selfRoot, {
+                  decision: 'reject',
+                  operator: {
+                    file: op.file,
+                    op: op.op,
+                    oldText: op.oldText,
+                    newText: op.newText,
+                    occurrence: op.occurrence,
+                  },
+                  effect: {
+                    gatesFlipped: [],
+                    veredictDelta: 'GREEN->RED',
+                    floorDelta: effectsBeforeRejectRollback.effects.map((e) => ({
+                      file: e.file,
+                      bytesRemoved: e.bytesBefore > e.bytesAfter ? e.bytesBefore - e.bytesAfter : 0,
+                      bytesAdded: e.bytesAfter > e.bytesBefore ? e.bytesAfter - e.bytesBefore : 0,
+                      op: e.change,
+                    })),
+                  },
+                  context: {
+                    intent: a.intent ?? undefined,
+                    preflightError: 'promotion rejected by policy',
+                    durationMs: proofDurationMs,
+                    ts: Date.now(),
+                  },
+                });
+                if (lesson) {
+                  updateMapElitesArchive(selfRoot, lesson);
+                }
+              }
+            } catch (e) {
+              /* fail-safe */
+            }
+
             const restored = rollbackSelfExpansionSnapshotStrict(snap, effectsBeforeRejectRollback, 'atomic_expand_self');
             const selfEvolutionReject = recordSelfEvolutionRejection(selfRoot, {
               receipt: promotionReceipt,
@@ -1764,6 +1842,44 @@ export function registerToolsSelf(server: McpServer): void {
                 `selfEvolutionReject=${stableJson({ rejections: selfEvolutionReject.rejections, archive: selfEvolutionReject.archive, disproofCorpus: selfEvolutionReject.disproofCorpus, nextDisproofBriefing: selfEvolutionReject.nextDisproofBriefing })}`,
             );
           }
+
+          // Grava lição de sucesso no ledger (aceito/promovido)
+          try {
+            const passedGates = proofs.filter((p) => p.ok).map((p) => p.command);
+            for (const op of ops) {
+              const lesson = recordLesson(selfRoot, {
+                decision: 'accept',
+                operator: {
+                  file: op.file,
+                  op: op.op,
+                  oldText: op.oldText,
+                  newText: op.newText,
+                  occurrence: op.occurrence,
+                },
+                effect: {
+                  gatesFlipped: passedGates.map((g) => `${g}:RED->GREEN`),
+                  veredictDelta: 'RED->GREEN',
+                  floorDelta: effectsBeforePromotion.effects.map((e) => ({
+                    file: e.file,
+                    bytesRemoved: e.bytesBefore > e.bytesAfter ? e.bytesBefore - e.bytesAfter : 0,
+                    bytesAdded: e.bytesAfter > e.bytesBefore ? e.bytesAfter - e.bytesBefore : 0,
+                    op: e.change,
+                  })),
+                },
+                context: {
+                  intent: a.intent ?? undefined,
+                  durationMs: proofDurationMs,
+                  ts: Date.now(),
+                },
+              });
+              if (lesson) {
+                updateMapElitesArchive(selfRoot, lesson);
+              }
+            }
+          } catch (e) {
+            /* fail-safe */
+          }
+
           const selfEvolutionArchive = appendRealSelfExpansionArchive(selfRoot, promotionReceipt);
           // All proofs passed and the Darwin-Godel admission receipt was archived.
           // RATCHET the security baseline so any strengthening of the engine's own

@@ -10,7 +10,7 @@ when the FULL FAIL_TO_PASS+PASS_TO_PASS suite is green, or the model truly gives
 
 Concurrency: a thread pool drives many sandboxes at once. Patches -> predictions.jsonl.
 
-Usage: DEEPSEEK_API_KEY + MODAL token set;
+Usage: DEEPSEEK_API_KEY plus MODAL_TOKEN_ID/MODAL_TOKEN_SECRET in env;
   python3 swe_modal_agent.py --ids-file ids50.txt --out preds-modal.jsonl --concurrency 12
 """
 import json, os, re, argparse, shlex, threading, time, base64

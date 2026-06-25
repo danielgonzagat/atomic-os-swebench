@@ -85,12 +85,9 @@ if [ -z "${MODAL_TOKEN_ID:-}" ] || [ -z "${MODAL_TOKEN_SECRET:-}" ]; then
     exit 1
 fi
 
-modal token set --token-id "$MODAL_TOKEN_ID" --token-secret "$MODAL_TOKEN_SECRET" 2>/dev/null || {
-    echo -e "${YELLOW}Modal token set via CLI failed — using env vars instead.${NC}"
-    export MODAL_TOKEN_ID
-    export MODAL_TOKEN_SECRET
-}
-echo -e "${GREEN}✓ Modal authentication configured${NC}"
+export MODAL_TOKEN_ID
+export MODAL_TOKEN_SECRET
+echo -e "${GREEN}✓ Modal authentication available from environment${NC}"
 
 # ── Clone SWE-bench ────────────────────────────────────────────────────────
 

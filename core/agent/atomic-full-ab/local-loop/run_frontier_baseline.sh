@@ -21,6 +21,7 @@ usage() {
   cat >&2 <<'USAGE'
 Usage:
   run_frontier_baseline.sh --selftest [TASK_ID ...]
+  run_frontier_baseline.sh --verify-summary FRONTIER_BASELINE_SUMMARY_JSON
   run_frontier_baseline.sh RUN_TAG OUT_BASELINE_JSON TASK_ID [TASK_ID ...]
 
 Runtime uses ATOMIC_FRONTIER_AGENT_CMD when provided; otherwise it uses the
@@ -91,6 +92,15 @@ import sys
 payload = "\n".join(sys.argv[1:]).encode()
 print(hashlib.sha256(payload).hexdigest())
 PYHASH
+}
+
+report_field() {
+  local report="$1"
+  local key="$2"
+  local default="${3:-}"
+  local value
+  value="$(printf '%s\n' "$report" | awk -F= -v key="$key" '$1 == key {print $2}' | tail -1)"
+  printf '%s\n' "${value:-$default}"
 }
 
 tasks_are_distinct() {
@@ -361,6 +371,10 @@ task_provenance_ok() {
 task_provenance_sha256() {
   local task_id problem meta
   local args=()
+  if [[ "$#" -eq 0 ]]; then
+    printf '\n'
+    return 0
+  fi
   for task_id in "$@"; do
     if ! validate_task_provenance "$task_id" >/dev/null 2>&1; then
       printf '\n'
@@ -433,6 +447,7 @@ requires_model_credentials=true
 credential_source=env
 credential_file_allowed=false
 requires_official_scorer=true
+frontier_model=$FRONTIER_MODEL
 freezer_path=$FREEZER
 task_provenance_enforced=true
 suite_preflight_enforced=true
@@ -442,8 +457,196 @@ task_provenance_sha256=$task_provenance_sha
 suite_pristine_layout_ok=$suite_pristine_layout
 score_timeout_seconds=$SCORE_TIMEOUT_SECONDS
 sample_timeout_seconds=$SAMPLE_TIMEOUT_SECONDS
-summary_fields=metric,metric_claim,benchmark_suite,benchmark_dataset_name,official_benchmark,task_provenance_ok,task_provenance_sha256,suite_preflight_ok,frontier_baseline_path,frontier_baseline_evidence_receipt_ok,sample_failures,score_failures
+summary_fields=metric,metric_claim,baseline_role,frozen,official_docker,benchmark_suite,benchmark_dataset_name,benchmark_label,official_benchmark,frontier_model,task_provenance_ok,task_provenance_sha256,suite_preflight_ok,frontier_baseline_path,frontier_baseline_sha256,frontier_baseline_evidence_receipt_ok,sample_failures,score_failures
 EOF
+}
+
+frontier_summary_report() {
+  local summary_json="$1"
+  "$SWE_PYTHON" - "$summary_json" <<'PYFRONTIERSUMMARYREPORT'
+import json
+import sys
+
+summary_path = sys.argv[1]
+
+def bool_text(value):
+    return "true" if value else "false"
+
+def normalize(value):
+    if isinstance(value, bool):
+        return bool_text(value)
+    if isinstance(value, int):
+        return str(value)
+    if value is None:
+        return ""
+    return str(value)
+
+try:
+    with open(summary_path, encoding="utf-8") as handle:
+        data = json.load(handle)
+except Exception:
+    data = {}
+
+if not isinstance(data, dict):
+    data = {}
+
+required = [
+    "metric",
+    "metric_claim",
+    "baseline_role",
+    "frozen",
+    "official_docker",
+    "benchmark_suite",
+    "benchmark_dataset_name",
+    "benchmark_label",
+    "official_benchmark",
+    "frontier_model",
+    "task_ids",
+    "task_ids_sha256",
+    "task_provenance_ok",
+    "task_provenance_sha256",
+    "suite_preflight_ok",
+    "frontier_baseline_path",
+    "frontier_baseline_sha256",
+    "frontier_baseline_evidence_receipt_ok",
+    "sample_failures",
+    "score_failures",
+]
+task_ids = data.get("task_ids")
+if not isinstance(task_ids, list) or not all(isinstance(task, str) and task for task in task_ids):
+    task_ids = []
+missing = [key for key in required if key not in data]
+hex64_fields = ("task_ids_sha256", "task_provenance_sha256", "frontier_baseline_sha256")
+hex_ok = all(
+    isinstance(data.get(key), str)
+    and len(data.get(key)) == 64
+    and all(char in "0123456789abcdef" for char in data.get(key))
+    for key in hex64_fields
+)
+schema_ok = (
+    not missing
+    and data.get("metric") == "frontier_baseline_receipt"
+    and data.get("metric_claim") is False
+    and data.get("baseline_role") == "frontier"
+    and data.get("frozen") is True
+    and data.get("official_docker") is True
+    and data.get("benchmark_suite") == "swe_bench_pro"
+    and data.get("benchmark_dataset_name") == "ScaleAI/SWE-bench_Pro"
+    and data.get("benchmark_label") == "SWE-bench-Pro"
+    and data.get("official_benchmark") is True
+    and isinstance(data.get("frontier_model"), str)
+    and bool(data.get("frontier_model"))
+    and bool(task_ids)
+    and len(task_ids) == len(set(task_ids))
+    and data.get("task_provenance_ok") is True
+    and data.get("suite_preflight_ok") is True
+    and isinstance(data.get("frontier_baseline_path"), str)
+    and bool(data.get("frontier_baseline_path"))
+    and data.get("frontier_baseline_evidence_receipt_ok") is True
+    and data.get("sample_failures") == 0
+    and data.get("score_failures") == 0
+    and hex_ok
+)
+
+print(f"frontier_summary_schema_ok={bool_text(schema_ok)}")
+print(f"frontier_summary_missing_fields={','.join(missing)}")
+for key in required:
+    if key == "task_ids":
+        continue
+    print(f"{key}={normalize(data.get(key, ''))}")
+for task in task_ids:
+    print(f"task_id={task}")
+PYFRONTIERSUMMARYREPORT
+}
+
+verify_frontier_summary() {
+  local summary_json="${1:-}"
+  local exists=false report schema_ok task_ids_sha saved_provenance_ok saved_provenance_sha baseline_path saved_baseline_sha saved_evidence_ok
+  local current_task_hash current_provenance_ok current_provenance_sha current_baseline_sha baseline_sha_ok evidence_ok matches_current summary_ok
+  local tasks=()
+
+  if [[ -n "$summary_json" && -f "$summary_json" ]]; then
+    exists=true
+  fi
+
+  if [[ "$exists" != "true" ]]; then
+    cat <<EOF
+metric=frontier_baseline_summary_verification
+metric_claim=false
+frontier_summary_path=$summary_json
+frontier_summary_exists=false
+frontier_summary_schema_ok=false
+frontier_summary_matches_current=false
+frontier_summary_ok=false
+task_provenance_ok=false
+task_provenance_sha256=
+frontier_baseline_sha256_ok=false
+frontier_baseline_evidence_receipt_ok=false
+no_model_run=true
+no_scorer_run=true
+EOF
+    return 2
+  fi
+
+  report="$(frontier_summary_report "$summary_json")"
+  schema_ok="$(report_field "$report" frontier_summary_schema_ok false)"
+  task_ids_sha="$(report_field "$report" task_ids_sha256 '')"
+  saved_provenance_ok="$(report_field "$report" task_provenance_ok false)"
+  saved_provenance_sha="$(report_field "$report" task_provenance_sha256 '')"
+  baseline_path="$(report_field "$report" frontier_baseline_path '')"
+  saved_baseline_sha="$(report_field "$report" frontier_baseline_sha256 '')"
+  saved_evidence_ok="$(report_field "$report" frontier_baseline_evidence_receipt_ok false)"
+  while IFS= read -r task; do
+    [[ -n "$task" ]] && tasks+=("$task")
+  done < <(printf '%s\n' "$report" | awk -F= '/^task_id=/{print $2}')
+
+  current_task_hash="$(tasks_hash "${tasks[@]}")"
+  current_provenance_ok="$(task_provenance_ok "${tasks[@]}")"
+  current_provenance_sha="$(task_provenance_sha256 "${tasks[@]}")"
+  current_baseline_sha=""
+  baseline_sha_ok=false
+  if [[ -n "$baseline_path" && -f "$baseline_path" ]]; then
+    current_baseline_sha="$(sha256_file "$baseline_path")"
+    [[ "$current_baseline_sha" == "$saved_baseline_sha" ]] && baseline_sha_ok=true
+  fi
+  evidence_ok=false
+  if [[ -n "$baseline_path" && -f "$baseline_path" && "${#tasks[@]}" -gt 0 ]]; then
+    baseline_receipt_ok "$baseline_path" "${tasks[@]}" && evidence_ok=true
+  fi
+
+  matches_current=false
+  if [[ "$schema_ok" == "true" \
+    && "$task_ids_sha" == "$current_task_hash" \
+    && "$saved_provenance_ok" == "true" \
+    && "$current_provenance_ok" == "true" \
+    && "$saved_provenance_sha" == "$current_provenance_sha" \
+    && "$baseline_sha_ok" == "true" \
+    && "$saved_evidence_ok" == "true" \
+    && "$evidence_ok" == "true" ]]; then
+    matches_current=true
+  fi
+
+  summary_ok=false
+  if [[ "$schema_ok" == "true" && "$matches_current" == "true" ]]; then
+    summary_ok=true
+  fi
+
+  cat <<EOF
+metric=frontier_baseline_summary_verification
+metric_claim=false
+frontier_summary_path=$summary_json
+frontier_summary_exists=true
+frontier_summary_schema_ok=$schema_ok
+frontier_summary_matches_current=$matches_current
+frontier_summary_ok=$summary_ok
+task_provenance_ok=$current_provenance_ok
+task_provenance_sha256=$current_provenance_sha
+frontier_baseline_sha256_ok=$baseline_sha_ok
+frontier_baseline_evidence_receipt_ok=$evidence_ok
+no_model_run=true
+no_scorer_run=true
+EOF
+  [[ "$summary_ok" == "true" ]]
 }
 
 write_summary() {
@@ -453,6 +656,7 @@ import sys
 (
     out_path,
     baseline_path,
+    baseline_sha256,
     receipt_ok,
     task_provenance_ok,
     task_provenance_sha256,
@@ -468,8 +672,12 @@ import sys
 payload = {
     "metric": "frontier_baseline_receipt",
     "metric_claim": False,
+    "baseline_role": "frontier",
+    "frozen": True,
+    "official_docker": True,
     "benchmark_suite": benchmark_suite,
     "benchmark_dataset_name": dataset_name,
+    "benchmark_label": "SWE-bench-Pro",
     "official_benchmark": benchmark_suite == "swe_bench_pro" and dataset_name == "ScaleAI/SWE-bench_Pro",
     "frontier_model": frontier_model,
     "task_ids": tasks,
@@ -478,6 +686,7 @@ payload = {
     "task_provenance_sha256": task_provenance_sha256,
     "suite_preflight_ok": suite_preflight_ok == "true",
     "frontier_baseline_path": baseline_path,
+    "frontier_baseline_sha256": baseline_sha256,
     "frontier_baseline_evidence_receipt_ok": receipt_ok == "true",
     "sample_failures": int(sample_failures),
     "score_failures": int(score_failures),
@@ -497,6 +706,12 @@ if [[ "${1:-}" == "--selftest" ]]; then
   shift
   emit_selftest "$@"
   exit 0
+fi
+
+if [[ "${1:-}" == "--verify-summary" ]]; then
+  shift
+  verify_frontier_summary "${1:-}"
+  exit $?
 fi
 
 if [[ $# -lt 3 ]]; then
@@ -598,7 +813,8 @@ fi
 
 task_hash="$(tasks_hash "${TASKS[@]}")"
 task_provenance_sha256="$(task_provenance_sha256 "${TASKS[@]}")"
-write_summary "$OUTDIR/frontier_baseline_summary.json" "$OUT_BASELINE" "$receipt_ok" "$task_provenance_ok" "$task_provenance_sha256" "$suite_preflight_ok" "$sample_failures" "$score_failures" "$task_hash" "$DATASET_NAME" "$BENCHMARK_SUITE" "$FRONTIER_MODEL" "${TASKS[@]}"
+frontier_baseline_sha256="$(sha256_file "$OUT_BASELINE")"
+write_summary "$OUTDIR/frontier_baseline_summary.json" "$OUT_BASELINE" "$frontier_baseline_sha256" "$receipt_ok" "$task_provenance_ok" "$task_provenance_sha256" "$suite_preflight_ok" "$sample_failures" "$score_failures" "$task_hash" "$DATASET_NAME" "$BENCHMARK_SUITE" "$FRONTIER_MODEL" "${TASKS[@]}"
 
-printf 'metric=frontier_baseline_receipt metric_claim=false official_benchmark=true tasks=%s frontier_baseline_path=%s frontier_baseline_evidence_receipt_ok=%s sample_failures=%s score_failures=%s summary=%s\n' \
-  "${#TASKS[@]}" "$OUT_BASELINE" "$receipt_ok" "$sample_failures" "$score_failures" "$OUTDIR/frontier_baseline_summary.json"
+printf 'metric=frontier_baseline_receipt metric_claim=false official_benchmark=true tasks=%s frontier_baseline_path=%s frontier_baseline_sha256=%s frontier_baseline_evidence_receipt_ok=%s sample_failures=%s score_failures=%s summary=%s\n' \
+  "${#TASKS[@]}" "$OUT_BASELINE" "$frontier_baseline_sha256" "$receipt_ok" "$sample_failures" "$score_failures" "$OUTDIR/frontier_baseline_summary.json"

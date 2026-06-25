@@ -30,7 +30,7 @@ cat <<SCRIPT
 # AUTO-GENERATED (gen_ab_atomic_script.sh) for $ID — correct repo grep + unique paths
 set -uo pipefail
 cd "$PWD"   # absolute local-loop dir captured at GENERATION time (NOT \$0's dir — the generated script lives in /tmp)
-source /tmp/.atomic_creds.sh 2>/dev/null || true
+[ -n "\${DEEPSEEK_API_KEY:-}" ] || { echo "AB-ATOMIC requires DEEPSEEK_API_KEY in env" >&2; exit 2; }
 export DEEPSEEK_MODEL=deepseek-v4-pro
 ID=$ID; TD="\$PWD/tasks/SWE-\$ID"
 ls -d /private/tmp/swe/suite/\$ID/pristine >/dev/null 2>&1 || python3 swe_suite_setup.py "\$ID" >/dev/null 2>&1

@@ -191,7 +191,7 @@ if ! mkdir "$LOCKDIR" 2>/dev/null; then
 fi
 trap 'rm -rf "$LOCKDIR"' EXIT
 
-source /tmp/.atomic_creds.sh
+[ -n "${DEEPSEEK_API_KEY:-}" ] || { echo "DEEPSEEK_API_KEY is required in env for weight-lift run" >&2; exit 2; }
 export DEEPSEEK_MODEL="$STUDENT_MODEL" DEEPSEEK_TIMEOUT=120
 [ -d "$PRISTINE/.git" ] || { echo "no pristine $PRISTINE"; exit 2; }
 

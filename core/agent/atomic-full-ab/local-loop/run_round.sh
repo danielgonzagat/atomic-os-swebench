@@ -7,10 +7,10 @@ HERE="/Users/danielpenin/atomic-os-swebench/core/agent/atomic-full-ab/local-loop
 AGENT_PYTHON="${AGENT_PYTHON:-/opt/homebrew/bin/python3}"
 SWE_PYTHON="${SWE_PYTHON:-/opt/homebrew/bin/python3}"
 cd "$HERE"
-source /tmp/.atomic_creds.sh 2>/dev/null || true
 export DEEPSEEK_MODEL=deepseek-v4-pro
 export DEEPSEEK_TIMEOUT="${DEEPSEEK_TIMEOUT:-120}"
 export DEEPSEEK_TOTAL_TIMEOUT="${DEEPSEEK_TOTAL_TIMEOUT:-180}"
+[ -n "${DEEPSEEK_API_KEY:-}" ] || { echo "$RTAG requires DEEPSEEK_API_KEY in env" >&2; exit 2; }
 # CLASS-ROUND-WEIGHTS-ENABLED-BY-DEFAULT: the canonical Atomic A/B loop must run with
 # the proof-carrying learned-weight bank connected. Respect explicit caller overrides:
 # an already-set ATOMIC_WEIGHTS_FILE can point elsewhere or be intentionally empty.

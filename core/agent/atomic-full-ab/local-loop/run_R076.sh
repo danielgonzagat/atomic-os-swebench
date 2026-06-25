@@ -5,9 +5,9 @@
 set -uo pipefail
 HERE="/Users/danielpenin/atomic-os-swebench/core/agent/atomic-full-ab/local-loop"
 cd "$HERE"
-source /tmp/.atomic_creds.sh 2>/dev/null || true
 export DEEPSEEK_MODEL=deepseek-v4-pro
 export DEEPSEEK_TIMEOUT=120
+[ -n "${DEEPSEEK_API_KEY:-}" ] || { echo "R076 requires DEEPSEEK_API_KEY in env" >&2; exit 2; }
 
 ID=sympy__sympy-20438
 RTAG=R076

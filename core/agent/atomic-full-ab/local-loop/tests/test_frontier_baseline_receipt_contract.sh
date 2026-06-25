@@ -78,10 +78,40 @@ for iid, pred_name, score_name, resolved in [
     assert ev["score_log_sha256"] == hashlib.sha256(score.read_bytes()).hexdigest()
 PY
 
-selftest="$($STREAM --selftest "$WEIGHTS" "$out" pro__task-a pro__task-b)"
+cat >"$tmp/selection_manifest.json" <<'JSON'
+{
+  "anti_leakage": {
+    "patch": "omitted",
+    "problem_statement": "omitted",
+    "test_patch": "omitted"
+  },
+  "benchmark_label": "SWE-bench-Pro",
+  "benchmark_suite": "swe_bench_pro",
+  "dataset_name": "ScaleAI/SWE-bench_Pro",
+  "dataset_split": "test",
+  "eligible_count": 2,
+  "metric_claim": false,
+  "official_benchmark": true,
+  "purpose": "held_out_candidate_manifest_not_elevation_result",
+  "rows": [
+    {"instance_id": "pro__task-a", "selection_rank_sha256": "001"},
+    {"instance_id": "pro__task-b", "selection_rank_sha256": "002"}
+  ],
+  "selected_count": 2,
+  "selected_task_ids": ["pro__task-a", "pro__task-b"],
+  "selection_method": "sha256(seed + NUL + instance_id) over official dataset rows; excludes teach task ids",
+  "selection_seed": "contract-seed",
+  "teach_task_ids": ["teach__frontier-1"],
+  "total_count": 2
+}
+JSON
+
+selftest="$(ATOMIC_ELEVATION_SELECTION_MANIFEST="$tmp/selection_manifest.json" "$STREAM" --selftest "$WEIGHTS" "$out" pro__task-a pro__task-b)"
 grep -q '^frontier_baseline_paired_tasks=true$' <<<"$selftest"
 grep -q '^frontier_baseline_evidence_receipt_ok=true$' <<<"$selftest"
 grep -q '^frontier_baseline_provenance_ok=true$' <<<"$selftest"
+grep -q '^selection_receipt_ok=true$' <<<"$selftest"
+grep -q '^anti_cherry_pick=true$' <<<"$selftest"
 grep -q '^elevation_valid_if_run=true$' <<<"$selftest"
 
 cat >"$tmp/pred_wrong.jsonl" <<'JSONL'

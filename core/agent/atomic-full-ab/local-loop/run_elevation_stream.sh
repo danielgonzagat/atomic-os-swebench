@@ -16,6 +16,9 @@ BENCHMARK_SUITE="${ATOMIC_ELEVATION_BENCHMARK_SUITE:-swe_bench_pro}"
 DATASET_NAME="${ATOMIC_ELEVATION_DATASET_NAME:-ScaleAI/SWE-bench_Pro}"
 TASKROOT="${ATOMIC_ELEVATION_TASK_ROOT:-$HERE/tasks}"
 SUITEROOT="${ATOMIC_ELEVATION_SUITE_ROOT:-${ATOMIC_SWE_SUITE_ROOT:-/tmp/swe/suite}}"
+SELECTION_MANIFEST="${ATOMIC_ELEVATION_SELECTION_MANIFEST:-}"
+METRIC_SCOPE="paired_frontier_solve_rate_delta"
+WITHIN_TASK_EFFICIENCY_METRIC_ADMISSIBLE=false
 
 sha256_file(){ shasum -a 256 "$1" | awk '{print $1}'; }
 sanitize(){ printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_'; }
@@ -251,8 +254,24 @@ from pathlib import Path
 baseline, benchmark_suite, dataset_name = sys.argv[1:4]
 tasks = sys.argv[4:]
 
-def emit(*values):
-    print(" ".join("true" if v else "false" for v in values))
+def bool_text(value):
+    return "true" if value else "false"
+
+def metadata_text(value):
+    if isinstance(value, str) and value:
+        return value.replace(" ", "_")
+    return "unknown"
+
+def emit(ok, frozen, official, paired, receipt, role="unknown", benchmark_label="unknown"):
+    print(" ".join([
+        bool_text(ok),
+        bool_text(frozen),
+        bool_text(official),
+        bool_text(paired),
+        bool_text(receipt),
+        metadata_text(role),
+        metadata_text(benchmark_label),
+    ]))
 
 try:
     baseline_path = Path(baseline).resolve()
@@ -277,8 +296,7 @@ baseline_tasks = data.get("task_ids") or data.get("held_out_task_ids") or []
 paired_ok = (
     isinstance(baseline_tasks, list)
     and bool(tasks)
-    and len(baseline_tasks) == len(tasks)
-    and set(baseline_tasks) == set(tasks)
+    and baseline_tasks == tasks
 )
 
 instances = data.get("instances") or {}
@@ -367,7 +385,11 @@ if receipt_ok:
             break
 
 ok = role_ok and frozen_ok and official_ok and dataset_ok and paired_ok and receipt_ok
-emit(ok, frozen_ok, official_ok, paired_ok, receipt_ok)
+role = data.get("baseline_role") or ("frontier" if data.get("frontier_baseline") is True else "unknown")
+benchmark_label = data.get("benchmark_label") or (
+    receipt.get("benchmark_label") if isinstance(receipt, dict) else "unknown"
+) or "unknown"
+emit(ok, frozen_ok, official_ok, paired_ok, receipt_ok, role, benchmark_label)
 PY
 }
 
@@ -381,8 +403,98 @@ except Exception:
     print("false")
     raise SystemExit
 tasks = set(sys.argv[2:])
-teach = set(data.get("teach_task_ids") or data.get("teacher_task_ids") or [])
-print("true" if tasks and (not teach or tasks.isdisjoint(teach)) else "false")
+teach_raw = data.get("teach_task_ids")
+if teach_raw is None:
+    teach_raw = data.get("teacher_task_ids")
+teach = set(teach_raw) if isinstance(teach_raw, list) and all(isinstance(t, str) and t for t in teach_raw) else set()
+print("true" if tasks and teach and tasks.isdisjoint(teach) else "false")
+PY
+}
+
+selection_manifest_sha(){
+  if [ -n "$SELECTION_MANIFEST" ] && [ -f "$SELECTION_MANIFEST" ]; then
+    sha256_file "$SELECTION_MANIFEST"
+  fi
+}
+
+selection_receipt_report(){
+  python3 - "$SELECTION_MANIFEST" "$BENCHMARK_SUITE" "$DATASET_NAME" "$@" <<'PY'
+import json, sys
+from pathlib import Path
+
+manifest, benchmark_suite, dataset_name = sys.argv[1:4]
+tasks = sys.argv[4:]
+
+def emit(ok):
+    value = "true" if ok else "false"
+    print(f"{value} {value}")
+
+if not manifest:
+    emit(False)
+    raise SystemExit
+path = Path(manifest)
+try:
+    data = json.loads(path.read_text(encoding="utf-8"))
+except Exception:
+    emit(False)
+    raise SystemExit
+
+selected = data.get("selected_task_ids")
+rows = data.get("rows")
+teach = data.get("teach_task_ids")
+anti = data.get("anti_leakage") or {}
+method = data.get("selection_method") or ""
+seed = data.get("selection_seed")
+row_ids = [r.get("instance_id") for r in rows] if isinstance(rows, list) and all(isinstance(r, dict) for r in rows) else []
+
+counts_ok = (
+    isinstance(data.get("total_count"), int)
+    and isinstance(data.get("eligible_count"), int)
+    and isinstance(data.get("selected_count"), int)
+    and data["total_count"] >= data["eligible_count"] >= data["selected_count"] > 0
+)
+ids_ok = (
+    isinstance(selected, list)
+    and selected == tasks
+    and len(selected) == len(set(selected))
+    and data.get("selected_count") == len(selected)
+    and row_ids == selected
+)
+rows_ok = isinstance(rows, list) and all(
+    isinstance(r, dict)
+    and isinstance(r.get("instance_id"), str)
+    and isinstance(r.get("selection_rank_sha256"), str)
+    and r.get("selection_rank_sha256")
+    and "problem_statement" not in r
+    and "patch" not in r
+    and "test_patch" not in r
+    for r in rows
+)
+teach_ok = isinstance(teach, list) and all(isinstance(t, str) and t for t in teach) and set(tasks).isdisjoint(teach)
+anti_leakage_ok = (
+    anti.get("problem_statement") == "omitted"
+    and anti.get("patch") == "omitted"
+    and anti.get("test_patch") == "omitted"
+)
+ok = (
+    data.get("metric_claim") is False
+    and data.get("purpose") == "held_out_candidate_manifest_not_elevation_result"
+    and data.get("official_benchmark") is True
+    and data.get("benchmark_suite") == benchmark_suite
+    and data.get("dataset_name") == dataset_name
+    and data.get("dataset_split") == "test"
+    and data.get("benchmark_label") == "SWE-bench-Pro"
+    and isinstance(seed, str)
+    and bool(seed)
+    and "sha256" in method
+    and "excludes teach task ids" in method
+    and counts_ok
+    and ids_ok
+    and rows_ok
+    and teach_ok
+    and anti_leakage_ok
+)
+emit(ok)
 PY
 }
 
@@ -498,9 +610,11 @@ if [ "${1:-}" = "--selftest" ]; then
   teacher_atomic="$(baseline_teacher_atomic "$BASELINE")"
   anti_replay="$(tasks_anti_replay "$BASELINE" "${TASKS[@]}")"
   held_out="$anti_replay"
+  selection_manifest_sha256="$(selection_manifest_sha)"
+  read -r selection_receipt_ok anti_cherry_pick <<<"$(selection_receipt_report "${TASKS[@]}")"
   official_benchmark=false
   if is_official_benchmark; then official_benchmark=true; fi
-  read -r frontier_baseline_provenance_ok frontier_baseline_frozen frontier_baseline_official_docker frontier_baseline_paired_tasks frontier_baseline_evidence_receipt_ok <<<"$(baseline_frontier_report "$BASELINE" "${TASKS[@]}")"
+  read -r frontier_baseline_provenance_ok frontier_baseline_frozen frontier_baseline_official_docker frontier_baseline_paired_tasks frontier_baseline_evidence_receipt_ok frontier_baseline_role frontier_baseline_benchmark_label <<<"$(baseline_frontier_report "$BASELINE" "${TASKS[@]}")"
   read -r substrate_weight_count accumulation_index <<<"$(substrate_stats "$WEIGHTS")"
   echo "metric=elevation"
   echo "benchmark_suite=$BENCHMARK_SUITE"
@@ -521,8 +635,16 @@ if [ "${1:-}" = "--selftest" ]; then
   echo "frontier_baseline_official_docker=$frontier_baseline_official_docker"
   echo "frontier_baseline_paired_tasks=$frontier_baseline_paired_tasks"
   echo "frontier_baseline_evidence_receipt_ok=$frontier_baseline_evidence_receipt_ok"
+  echo "frontier_baseline_role=$frontier_baseline_role"
+  echo "frontier_baseline_benchmark_label=$frontier_baseline_benchmark_label"
   echo "held_out=$held_out"
   echo "anti_replay=$anti_replay"
+  echo "selection_manifest_path=$SELECTION_MANIFEST"
+  echo "selection_manifest_sha256=$selection_manifest_sha256"
+  echo "selection_receipt_ok=$selection_receipt_ok"
+  echo "anti_cherry_pick=$anti_cherry_pick"
+  echo "metric_scope=$METRIC_SCOPE"
+  echo "within_task_efficiency_metric_admissible=$WITHIN_TASK_EFFICIENCY_METRIC_ADMISSIBLE"
   echo "substrate_mode=accumulated_canonical_act"
   echo "control_arm=deepseek_v4_pro_without_substrate"
   echo "substrate_arm=deepseek_v4_pro_with_substrate"
@@ -534,8 +656,8 @@ if [ "${1:-}" = "--selftest" ]; then
   echo "accumulation_index=$accumulation_index"
   echo "swebench_import_timeout_seconds=${ATOMIC_ELEVATION_IMPORT_TIMEOUT_SECONDS:-20}"
   if validate_swebench_python; then echo "swebench_importable=true"; else echo "swebench_importable=false"; fi
-  echo "summary_fields=metric,run_id,benchmark_suite,benchmark_dataset_name,official_benchmark,task_provenance_ok,suite_preflight_ok,frontier_baseline_provenance_ok,frontier_baseline_evidence_receipt_ok,task_ids,distinct_tasks,native_resolved,frontier_baseline_resolved,atomic_base_resolved,deepseek_control_resolved,atomic_substrate_resolved,elevation_vs_atomic_base,elevation_vs_native,elevation_vs_frontier,elevation_vs_deepseek_control,accumulation_index,substrate_weight_count,weights_sha256,weights_sha256_initial,weights_sha256_final,weights_snapshot_path,canonical_act,student_model,teacher_model,teacher_atomic,held_out,anti_replay,sample_timeouts,score_failures,reused_samples,rerun_timeout_samples,elevation_valid"
-  if [ "$canonical_act" = true ] && [ "$native_fields" = true ] && [ "$distinct" = true ] && [ "$teacher_atomic" = true ] && [ "$anti_replay" = true ] && [ "$official_benchmark" = true ] && [ "$frontier_baseline_provenance_ok" = true ] && [ "$frontier_baseline_evidence_receipt_ok" = true ]; then
+  echo "summary_fields=metric,run_id,metric_claim,benchmark_suite,benchmark_dataset_name,official_benchmark,metric_scope,within_task_efficiency_metric_admissible,task_provenance_ok,suite_preflight_ok,frontier_baseline_provenance_ok,frontier_baseline_evidence_receipt_ok,frontier_baseline_role,frontier_baseline_frozen,frontier_baseline_official_docker,frontier_baseline_benchmark_label,task_ids,task_count,selected_task_ids_sha256,selection_manifest_path,selection_manifest_sha256,selection_receipt_ok,anti_cherry_pick,distinct_tasks,native_resolved,frontier_baseline_resolved,frontier_solve_rate,frontier_baseline_path,frontier_baseline_sha256,atomic_base_resolved,deepseek_control_resolved,deepseek_control_solve_rate,atomic_substrate_resolved,student_solve_rate,elevation_vs_atomic_base,elevation_vs_native,elevation_vs_frontier,elevation_vs_frontier_solve_rate,elevation_vs_deepseek_control,elevation_vs_deepseek_control_solve_rate,accumulation_index,substrate_weight_count,weights_sha256,weights_sha256_initial,weights_sha256_final,weights_snapshot_path,canonical_act,student_model,teacher_model,teacher_atomic,held_out,anti_replay,sample_timeouts,score_failures,reused_samples,rerun_timeout_samples,elevation_valid"
+  if [ "$canonical_act" = true ] && [ "$native_fields" = true ] && [ "$distinct" = true ] && [ "$teacher_atomic" = true ] && [ "$anti_replay" = true ] && [ "$selection_receipt_ok" = true ] && [ "$anti_cherry_pick" = true ] && [ "$official_benchmark" = true ] && [ "$frontier_baseline_provenance_ok" = true ] && [ "$frontier_baseline_evidence_receipt_ok" = true ] && [ "$frontier_baseline_role" = frontier ] && [ "$frontier_baseline_frozen" = true ] && [ "$frontier_baseline_official_docker" = true ] && [ "$frontier_baseline_benchmark_label" = SWE-bench-Pro ] && [ "$METRIC_SCOPE" = paired_frontier_solve_rate_delta ] && [ "$WITHIN_TASK_EFFICIENCY_METRIC_ADMISSIBLE" = false ]; then
     echo "elevation_valid_if_run=true"
   else
     echo "elevation_valid_if_run=false"
@@ -558,9 +680,11 @@ teacher_model="$(baseline_teacher_model "$BASELINE")"
 teacher_atomic="$(baseline_teacher_atomic "$BASELINE")"
 anti_replay="$(tasks_anti_replay "$BASELINE" "${TASKS[@]}")"
 held_out="$anti_replay"
+selection_manifest_sha256="$(selection_manifest_sha)"
+read -r selection_receipt_ok anti_cherry_pick <<<"$(selection_receipt_report "${TASKS[@]}")"
 official_benchmark=false
 if is_official_benchmark; then official_benchmark=true; fi
-read -r frontier_baseline_provenance_ok frontier_baseline_frozen frontier_baseline_official_docker frontier_baseline_paired_tasks frontier_baseline_evidence_receipt_ok <<<"$(baseline_frontier_report "$BASELINE" "${TASKS[@]}")"
+read -r frontier_baseline_provenance_ok frontier_baseline_frozen frontier_baseline_official_docker frontier_baseline_paired_tasks frontier_baseline_evidence_receipt_ok frontier_baseline_role frontier_baseline_benchmark_label <<<"$(baseline_frontier_report "$BASELINE" "${TASKS[@]}")"
 read -r substrate_weight_count accumulation_index <<<"$(substrate_stats "$WEIGHTS")"
 SAMPLE_TIMEOUT_SECONDS="${ATOMIC_ELEVATION_SAMPLE_TIMEOUT_SECONDS:-900}"
 SCORE_TIMEOUT_SECONDS="${ATOMIC_ELEVATION_SCORE_TIMEOUT_SECONDS:-1200}"
@@ -576,7 +700,15 @@ if [ "$official_benchmark" != true ]; then
   exit 2
 fi
 if [ "$frontier_baseline_provenance_ok" != true ]; then
-  echo "paired official SWE-Bench Pro frontier baseline required: baseline=$BASELINE dataset=$DATASET_NAME frozen=$frontier_baseline_frozen official_docker=$frontier_baseline_official_docker paired_tasks=$frontier_baseline_paired_tasks evidence_receipt=$frontier_baseline_evidence_receipt_ok" >&2
+  echo "paired official SWE-Bench Pro frontier baseline required: baseline=$BASELINE dataset=$DATASET_NAME role=$frontier_baseline_role frozen=$frontier_baseline_frozen official_docker=$frontier_baseline_official_docker paired_tasks=$frontier_baseline_paired_tasks benchmark_label=$frontier_baseline_benchmark_label evidence_receipt=$frontier_baseline_evidence_receipt_ok" >&2
+  exit 2
+fi
+if [ "$anti_replay" != true ]; then
+  echo "held-out anti-replay required for Elevação: baseline=$BASELINE anti_replay=$anti_replay" >&2
+  exit 2
+fi
+if [ "$teacher_atomic" != true ]; then
+  echo "atomic frontier teacher baseline required for Elevação: baseline=$BASELINE teacher_atomic=$teacher_atomic" >&2
   exit 2
 fi
 task_provenance_ok=false
@@ -589,6 +721,10 @@ if ! validate_suite_preflight "${TASKS[@]}"; then
   exit 2
 fi
 suite_preflight_ok=true
+if [ "$selection_receipt_ok" != true ] || [ "$anti_cherry_pick" != true ]; then
+  echo "deterministic SWE-Bench Pro selection receipt required for Elevação: selection_manifest=$SELECTION_MANIFEST selection_receipt_ok=$selection_receipt_ok anti_cherry_pick=$anti_cherry_pick" >&2
+  exit 2
+fi
 if ! validate_swebench_python; then
   echo "swebench import failed for SWE_PYTHON=$SWE_PYTHON; refusing elevation run" >&2
   exit 2
@@ -597,7 +733,6 @@ if ! validate_docker_api; then
   echo "docker API unavailable for official SWE-bench scoring; refusing elevation run" >&2
   exit 2
 fi
-source /tmp/.atomic_creds.sh 2>/dev/null || true
 if [ -z "${DEEPSEEK_API_KEY:-}" ]; then
   echo "DEEPSEEK_API_KEY is required in env for elevation run" >&2
   exit 2
@@ -754,8 +889,10 @@ echo "tasks=${TASKS[*]}"
 echo "weights_sha256_initial=$weights_sha_initial canonical_act=$canonical_act accumulation_index=$accumulation_index"
 echo "weights_snapshot_path=$WEIGHTS_SNAPSHOT"
 echo "frontier_baseline_resolved_fields=$native_fields teacher_model=$teacher_model teacher_atomic=$teacher_atomic held_out=$held_out anti_replay=$anti_replay baseline=$BASELINE"
-echo "frontier_baseline_provenance_ok=$frontier_baseline_provenance_ok frozen=$frontier_baseline_frozen official_docker=$frontier_baseline_official_docker paired_tasks=$frontier_baseline_paired_tasks evidence_receipt=$frontier_baseline_evidence_receipt_ok"
+echo "frontier_baseline_provenance_ok=$frontier_baseline_provenance_ok role=$frontier_baseline_role frozen=$frontier_baseline_frozen official_docker=$frontier_baseline_official_docker paired_tasks=$frontier_baseline_paired_tasks benchmark_label=$frontier_baseline_benchmark_label evidence_receipt=$frontier_baseline_evidence_receipt_ok"
+echo "metric_scope=$METRIC_SCOPE within_task_efficiency_metric_admissible=$WITHIN_TASK_EFFICIENCY_METRIC_ADMISSIBLE"
 echo "task_root=$TASKROOT suite_root=$SUITEROOT task_provenance_ok=$task_provenance_ok suite_preflight_ok=$suite_preflight_ok"
+echo "selection_manifest_path=$SELECTION_MANIFEST selection_manifest_sha256=$selection_manifest_sha256 selection_receipt_ok=$selection_receipt_ok anti_cherry_pick=$anti_cherry_pick"
 
 atomic_base_resolved=0; atomic_substrate_resolved=0; sample_timeouts=0; score_failures=0; reused_samples=0; rerun_timeout_samples=0
 idx=0
@@ -784,43 +921,78 @@ if [ "$native_fields" = true ]; then
   native_resolved_value="$(native_resolved_count "$BASELINE" "${TASKS[@]}")"
 fi
 weights_sha_final="$(sha256_file "$WEIGHTS_SNAPSHOT")"
+frontier_baseline_sha256="$(sha256_file "$BASELINE")"
 
-python3 - "$OUTDIR/elevation_summary.json" "$RUN_ID" "$BENCHMARK_SUITE" "$DATASET_NAME" "$official_benchmark" "$task_provenance_ok" "$suite_preflight_ok" "$frontier_baseline_provenance_ok" "$frontier_baseline_evidence_receipt_ok" "$weights_sha_initial" "$weights_sha_final" "$canonical_act" "$MODEL" \
+python3 - "$OUTDIR/elevation_summary.json" "$RUN_ID" "$BENCHMARK_SUITE" "$DATASET_NAME" "$official_benchmark" "$METRIC_SCOPE" "$WITHIN_TASK_EFFICIENCY_METRIC_ADMISSIBLE" "$task_provenance_ok" "$suite_preflight_ok" "$frontier_baseline_provenance_ok" "$frontier_baseline_evidence_receipt_ok" "$frontier_baseline_role" "$frontier_baseline_frozen" "$frontier_baseline_official_docker" "$frontier_baseline_benchmark_label" "$weights_sha_initial" "$weights_sha_final" "$canonical_act" "$MODEL" \
   "$teacher_model" "$teacher_atomic" "$held_out" "$anti_replay" \
+  "$task_hash" "$BASELINE" "$frontier_baseline_sha256" \
+  "$SELECTION_MANIFEST" "$selection_manifest_sha256" "$selection_receipt_ok" "$anti_cherry_pick" \
   "$native_fields" "$native_resolved_value" "$atomic_base_resolved" "$atomic_substrate_resolved" \
   "$accumulation_index" "$substrate_weight_count" "$sample_timeouts" "$score_failures" \
   "$reused_samples" "$rerun_timeout_samples" "$WEIGHTS_SNAPSHOT" "${TASKS[@]}" <<'PY'
 import json, sys
-out, run_id, benchmark_suite, benchmark_dataset_name, official_benchmark, task_provenance_ok, suite_preflight_ok, frontier_baseline_provenance_ok, frontier_baseline_evidence_receipt_ok, weights_sha_initial, weights_sha_final, canonical_act, model = sys.argv[1:14]
-teacher_model, teacher_atomic, held_out, anti_replay = sys.argv[14:18]
-native_fields, native_resolved_raw, atomic_base, atomic_substrate = sys.argv[18:22]
-accumulation_index, substrate_weight_count, sample_timeouts, score_failures = map(int, sys.argv[22:26])
-reused_samples, rerun_timeout_samples = map(int, sys.argv[26:28])
-weights_snapshot_path = sys.argv[28]
-tasks = sys.argv[29:]
+out, run_id, benchmark_suite, benchmark_dataset_name, official_benchmark, metric_scope, within_task_efficiency_metric_admissible, task_provenance_ok, suite_preflight_ok, frontier_baseline_provenance_ok, frontier_baseline_evidence_receipt_ok, frontier_baseline_role, frontier_baseline_frozen, frontier_baseline_official_docker, frontier_baseline_benchmark_label, weights_sha_initial, weights_sha_final, canonical_act, model = sys.argv[1:20]
+teacher_model, teacher_atomic, held_out, anti_replay = sys.argv[20:24]
+selected_task_ids_sha256, frontier_baseline_path, frontier_baseline_sha256 = sys.argv[24:27]
+selection_manifest_path, selection_manifest_sha256, selection_receipt_ok, anti_cherry_pick = sys.argv[27:31]
+native_fields, native_resolved_raw, atomic_base, atomic_substrate = sys.argv[31:35]
+accumulation_index, substrate_weight_count, sample_timeouts, score_failures = map(int, sys.argv[35:39])
+reused_samples, rerun_timeout_samples = map(int, sys.argv[39:41])
+weights_snapshot_path = sys.argv[41]
+tasks = sys.argv[42:]
 atomic_base = int(atomic_base); atomic_substrate = int(atomic_substrate)
 native_resolved = None if native_resolved_raw == "null" else int(native_resolved_raw)
+task_count = len(tasks)
+
+def solve_rate(resolved):
+    if resolved is None or task_count == 0:
+        return None
+    return resolved / task_count
+
+frontier_solve_rate = solve_rate(native_resolved)
+student_solve_rate = solve_rate(atomic_substrate)
+deepseek_control_solve_rate = solve_rate(atomic_base)
 data = {
     "metric": "elevation",
+    "metric_claim": False,
     "run_id": run_id,
     "benchmark_suite": benchmark_suite,
     "benchmark_dataset_name": benchmark_dataset_name,
     "official_benchmark": official_benchmark == "true",
+    "metric_scope": metric_scope,
+    "within_task_efficiency_metric_admissible": within_task_efficiency_metric_admissible == "true",
     "task_provenance_ok": task_provenance_ok == "true",
     "suite_preflight_ok": suite_preflight_ok == "true",
     "frontier_baseline_provenance_ok": frontier_baseline_provenance_ok == "true",
     "frontier_baseline_evidence_receipt_ok": frontier_baseline_evidence_receipt_ok == "true",
+    "frontier_baseline_role": frontier_baseline_role,
+    "frontier_baseline_frozen": frontier_baseline_frozen == "true",
+    "frontier_baseline_official_docker": frontier_baseline_official_docker == "true",
+    "frontier_baseline_benchmark_label": frontier_baseline_benchmark_label,
     "task_ids": tasks,
+    "task_count": task_count,
+    "selected_task_ids_sha256": selected_task_ids_sha256,
+    "selection_manifest_path": selection_manifest_path,
+    "selection_manifest_sha256": selection_manifest_sha256,
+    "selection_receipt_ok": selection_receipt_ok == "true",
+    "anti_cherry_pick": anti_cherry_pick == "true",
     "distinct_tasks": len(tasks) == len(set(tasks)) and bool(tasks),
     "native_resolved": native_resolved,
     "frontier_baseline_resolved": native_resolved,
+    "frontier_solve_rate": frontier_solve_rate,
+    "frontier_baseline_path": frontier_baseline_path,
+    "frontier_baseline_sha256": frontier_baseline_sha256,
     "atomic_base_resolved": atomic_base,
     "deepseek_control_resolved": atomic_base,
+    "deepseek_control_solve_rate": deepseek_control_solve_rate,
     "atomic_substrate_resolved": atomic_substrate,
+    "student_solve_rate": student_solve_rate,
     "elevation_vs_atomic_base": atomic_substrate - atomic_base,
     "elevation_vs_native": None if native_resolved is None else atomic_substrate - native_resolved,
     "elevation_vs_frontier": None if native_resolved is None else atomic_substrate - native_resolved,
+    "elevation_vs_frontier_solve_rate": None if frontier_solve_rate is None else student_solve_rate - frontier_solve_rate,
     "elevation_vs_deepseek_control": atomic_substrate - atomic_base,
+    "elevation_vs_deepseek_control_solve_rate": student_solve_rate - deepseek_control_solve_rate,
     "accumulation_index": accumulation_index,
     "substrate_weight_count": substrate_weight_count,
     "weights_sha256": weights_sha_initial,
@@ -844,13 +1016,25 @@ data = {
         and suite_preflight_ok == "true"
         and frontier_baseline_provenance_ok == "true"
         and frontier_baseline_evidence_receipt_ok == "true"
+        and frontier_baseline_role == "frontier"
+        and frontier_baseline_frozen == "true"
+        and frontier_baseline_official_docker == "true"
+        and frontier_baseline_benchmark_label == "SWE-bench-Pro"
+        and metric_scope == "paired_frontier_solve_rate_delta"
+        and within_task_efficiency_metric_admissible == "false"
         and native_fields == "true"
         and teacher_atomic == "true"
         and anti_replay == "true"
+        and selection_receipt_ok == "true"
+        and anti_cherry_pick == "true"
+        and len(selected_task_ids_sha256) == 64
+        and len(frontier_baseline_sha256) == 64
         and len(tasks) == len(set(tasks))
         and bool(tasks)
         and sample_timeouts == 0
         and score_failures == 0
+        and reused_samples == 0
+        and rerun_timeout_samples == 0
     ),
 }
 open(out, "w").write(json.dumps(data, indent=2, sort_keys=True) + "\n")

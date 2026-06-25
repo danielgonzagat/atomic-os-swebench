@@ -4,8 +4,10 @@
 # per run; local_pass/steps come from <out>.detail. Governance signals are grepped from the ON log.
 set -uo pipefail
 cd /Users/danielpenin/atomic-os-swebench/core/agent
-set -a; source /tmp/ds.env; set +a
-export MODAL_TOML=~/.modal.toml USE_PREBUILT=1
+: "${DEEPSEEK_API_KEY:?DEEPSEEK_API_KEY is required in env}"
+: "${MODAL_TOKEN_ID:?MODAL_TOKEN_ID is required in env}"
+: "${MODAL_TOKEN_SECRET:?MODAL_TOKEN_SECRET is required in env}"
+export USE_PREBUILT=1
 export MAX_STEPS=${MAX_STEPS:-40}
 export SANDBOX_TIMEOUT=${SANDBOX_TIMEOUT:-3600}
 export DEEPSEEK_TEMP=0

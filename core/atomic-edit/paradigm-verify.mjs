@@ -78,6 +78,9 @@ const CHECKS = [
   { prop: 'P9+P10', label: 'truth-funnel: verifier-gated answers + byte-positive monotone convergence (mechanism)', cmd: 'node gates/truth-funnel.proof.mjs --json' },
   // ── hardening campaign (2026-06-18): discriminating regression proof for the 14 defect fixes ──
   { prop: 'H-fixes', label: 'session hardening fixes hold (negative-byte multiset, RCE safeRequire, routing, outline, wasm-guard, trace-gc, .atomic guard)', cmd: 'node gates/session-fixes-regression.proof.mjs' },
+  { prop: 'L-ledger', label: 'lesson-ledger: cryptographically chained and effect-indexed (precision-tested)', cmd: 'node gates/lesson-ledger.proof.mjs --json' },
+  { prop: 'G-nonllm', label: 'generator-nonllm: autonomous combinatorial mutation without LLM (validated)', cmd: 'node gates/generator-nonllm.proof.mjs --json' },
+  { prop: 'QD-select', label: 'qd-select: Quality-Diversity MAP-Elites cell filling and optimization (proven)', cmd: 'node gates/map-elites-qd.proof.mjs --json' },
   { prop: 'P1', label: 'the production write path is green end-to-end (47 smoke checks)', cmd: 'node smoke.mjs' },
 ];
 
