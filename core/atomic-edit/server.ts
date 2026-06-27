@@ -61,6 +61,7 @@ import { registerToolsDisproof } from './server-tools-disproof.js';
 import { registerToolsChromeDevtools } from './server-tools-chrome-devtools.js';
 import { registerToolsAffectedTests } from './server-tools-affected-tests.js';
 import { registerToolsLessonLedger } from './server-tools-lesson-ledger.js';
+import { registerToolsMetaSynth } from './server-tools-meta-synth.js';
 
 type RegisteredToolForList = {
   title?: string;
@@ -207,6 +208,7 @@ registerToolsDisproof(server);
 registerToolsChromeDevtools(server);
 registerToolsAffectedTests(server);
 registerToolsLessonLedger(server);
+registerToolsMetaSynth(server);
 installCodexSafeToolList(server);
 
 async function main(): Promise<void> {
