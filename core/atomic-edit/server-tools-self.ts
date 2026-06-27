@@ -269,6 +269,7 @@ const MANDATORY_SELF_EXPANSION_VALIDATORS: readonly SelfExpansionValidator[] = [
   { phase: 'no-bypass', command: 'node gates/atomic-exec-indirection-denial.proof.mjs --json' },
   { phase: 'host-shell', command: 'node gates/atsh-host-boundary.proof.mjs --json' },
   { phase: 'effect-scope', command: 'node gates/self-expansion-unexpected-effects.proof.mjs --json' },
+  { phase: 'effect-scope', command: 'node gates/self-expansion-abort-rollback.proof.mjs --json' },
   { phase: 'agent-driver-self-scope', command: 'node gates/atomic-agent-self-expansion-scope.proof.mjs --json' },
   { phase: 'self-evolution-real', command: 'node gates/self-expansion-real-self-evolution.proof.mjs --json' },
   { phase: 'generative', command: 'node gates/hypothesis-generator.proof.mjs --json' },
@@ -419,6 +420,10 @@ interface SelfExpansionEffectBundle {
   effects: FileEffect[];
 }
 
+interface SelfExpansionAbortRollback {
+  disarm(): void;
+}
+
 function capturePrimarySelfExpansionSnapshot(selfRoot: string): EffectSnapshot {
   return captureEffectSnapshot(selfRoot, {
     maxFileBytes: SELF_EXPANSION_SNAPSHOT_MAX_FILE_BYTES,
@@ -473,6 +478,62 @@ function rollbackSelfExpansionSnapshotStrict(snap: SelfExpansionSnapshotBundle, 
   }
   if (failures.length > 0) throw new Error(failures.join('; '));
   return restored;
+}
+
+function installSelfExpansionAbortRollback(snap: SelfExpansionSnapshotBundle): SelfExpansionAbortRollback {
+  let armed = true;
+  let rollingBack = false;
+  const cleanup = () => {
+    process.off('exit', onExit);
+    process.off('SIGTERM', onSigterm);
+    process.off('SIGINT', onSigint);
+    process.off('SIGHUP', onSighup);
+  };
+  const rollbackNow = (reason: string): number => {
+    if (!armed || rollingBack) return 0;
+    rollingBack = true;
+    try {
+      const effects = diffSelfExpansionSnapshot(snap);
+      if (effects.effects.length === 0) return 0;
+      const restored = rollbackSelfExpansionSnapshotStrict(snap, effects, `atomic_expand_self:abort:${reason}`);
+      process.stderr.write(`[atomic_expand_self] abort rollback restored ${restored} file effect(s): ${reason}\n`);
+      return restored;
+    } catch (error) {
+      process.stderr.write(
+        `[atomic_expand_self] abort rollback failed: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+      return 0;
+    } finally {
+      rollingBack = false;
+    }
+  };
+  const disarm = () => {
+    armed = false;
+    cleanup();
+  };
+  const exitForSignal = (signal: NodeJS.Signals): never => {
+    rollbackNow(`signal:${signal}`);
+    disarm();
+    const code = signal === 'SIGINT' ? 130 : signal === 'SIGTERM' ? 143 : 129;
+    process.exit(code);
+  };
+  function onExit(): void {
+    rollbackNow('process-exit');
+  }
+  function onSigterm(): never {
+    return exitForSignal('SIGTERM');
+  }
+  function onSigint(): never {
+    return exitForSignal('SIGINT');
+  }
+  function onSighup(): never {
+    return exitForSignal('SIGHUP');
+  }
+  process.once('exit', onExit);
+  process.once('SIGTERM', onSigterm);
+  process.once('SIGINT', onSigint);
+  process.once('SIGHUP', onSighup);
+  return { disarm };
 }
 
 function selfExpansionSnapshotLimitReached(snap: SelfExpansionSnapshotBundle): boolean {
@@ -1743,9 +1804,11 @@ export function registerToolsSelf(server: McpServer): void {
             claimedPreflightDisproofBriefingDigest === computedPreflightDisproofBriefingDigest,
         };
         const snap = captureSelfExpansionSnapshot(selfRoot, ops);
+        let abortRollback: SelfExpansionAbortRollback | null = null;
         try {
           const guardedSelfPaths = new Set<string>();
           const applied = withSelfExpansionAdmission(() => ops.map((op) => applySelfFileOp(op, guardedSelfPaths)));
+          abortRollback = installSelfExpansionAbortRollback(snap);
           // Proof #5 - capability monotonicity: AFTER the bytes land, BEFORE proofs,
           // refuse (and roll back) any expansion that reduced the engine's own
           // security surface. Mandatory and non-skippable (not a caller proofCommand).
@@ -1817,6 +1880,7 @@ export function registerToolsSelf(server: McpServer): void {
             }
 
             const restored = rollbackSelfExpansionSnapshotStrict(snap, effectsBeforeRejectRollback, 'atomic_expand_self');
+            abortRollback.disarm();
             const selfEvolutionReject = recordSelfEvolutionRejection(selfRoot, {
               receipt: rejectionReceipt,
               reason: 'proof failed',
@@ -1885,6 +1949,7 @@ export function registerToolsSelf(server: McpServer): void {
             }
 
             const restored = rollbackSelfExpansionSnapshotStrict(snap, effectsBeforeRejectRollback, 'atomic_expand_self');
+            abortRollback.disarm();
             const selfEvolutionReject = recordSelfEvolutionRejection(selfRoot, {
               receipt: promotionReceipt,
               reason: 'promotion rejected',
@@ -1949,6 +2014,7 @@ export function registerToolsSelf(server: McpServer): void {
           const effects = diffSelfExpansionSnapshot(snap);
           assertNoUnexpectedSelfExpansionEffects(effects.effects, applied);
           const selfEvolutionArchive = appendRealSelfExpansionArchive(selfRoot, promotionReceipt);
+          abortRollback.disarm();
           return ok({
             ok: true,
             changed: true,
@@ -1974,7 +2040,12 @@ export function registerToolsSelf(server: McpServer): void {
           });
         } catch (e) {
           const effects = diffSelfExpansionSnapshot(snap);
-          const restored = rollbackSelfExpansionSnapshotStrict(snap, effects, 'atomic_expand_self');
+          let restored = 0;
+          try {
+            restored = rollbackSelfExpansionSnapshotStrict(snap, effects, 'atomic_expand_self');
+          } finally {
+            abortRollback?.disarm();
+          }
           const message = e instanceof Error ? e.message : String(e);
           return fail(`atomic_expand_self rolled back ${restored} file effect(s): ${message}`);
         }
