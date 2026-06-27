@@ -7,15 +7,21 @@ import { ok, fail } from './server-helpers-result.js';
 const ExampleSchema = z.object({ input: z.string(), output: z.string() });
 
 export function registerToolsMetaSynth(server: McpServer): void {
-  server.tool(
+  server.registerTool(
     'atomic_meta_synth',
     {
-      name: z.string().optional().describe('Optional synthesis island name'),
-      train: z.array(ExampleSchema).optional().describe('Training examples for a string rewrite island'),
-      heldOut: z.array(ExampleSchema).optional().describe('Held-out examples for the same string rewrite island'),
-      allowCvc5: z.boolean().optional().describe('Run CVC5 when reachable; false still returns honest receipt data'),
-      cvc5Bin: z.string().optional().describe('Explicit cvc5 executable path'),
-      verifyReceipt: z.record(z.string(), z.unknown()).optional().describe('Receipt to verify without synthesizing a new island'),
+      title: 'Atomic meta-synthesis kernel',
+      description:
+        'Runs the neuro-symbolic synthesis kernel over a bounded string-rewrite island and returns canonical receipts. ' +
+        'Heuristic candidates are never promotion eligible; only verified formal PROVEN receipts can be considered by self-evolution.',
+      inputSchema: {
+        name: z.string().optional().describe('Optional synthesis island name'),
+        train: z.array(ExampleSchema).optional().describe('Training examples for a string rewrite island'),
+        heldOut: z.array(ExampleSchema).optional().describe('Held-out examples for the same string rewrite island'),
+        allowCvc5: z.boolean().optional().describe('Run CVC5 when reachable; false still returns honest receipt data'),
+        cvc5Bin: z.string().optional().describe('Explicit cvc5 executable path'),
+        verifyReceipt: z.record(z.string(), z.unknown()).optional().describe('Receipt to verify without synthesizing a new island'),
+      },
     },
     async (a) => {
       try {
