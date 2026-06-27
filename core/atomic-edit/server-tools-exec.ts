@@ -648,6 +648,13 @@ function autoBootstrapBrokerSync(): string | null {
       /* best effort */
     }
     try {
+      const statePath = path.join(root, '.atomic', 'codex-broker-current.json');
+      const state = JSON.parse(fs.readFileSync(statePath, 'utf8')) as { socket?: unknown };
+      if (state?.socket === socket) fs.rmSync(statePath, { force: true });
+    } catch {
+      /* best effort */
+    }
+    try {
       fs.rmSync(brokerDir, { recursive: true, force: true });
     } catch {
       /* best effort */
