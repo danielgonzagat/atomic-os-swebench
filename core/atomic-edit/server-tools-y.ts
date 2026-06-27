@@ -374,11 +374,19 @@ function runJsonScript(
   args: string[],
   timeoutMs = 15000,
 ): { ok: true; value: Record<string, unknown> } | { ok: false; error: string } {
+  const trace = process.env.ATOMIC_Y_CERTIFICATE_TRACE === '1';
+  const started = Date.now();
+  if (trace) process.stderr.write(`[atomic-y-certificate] start ${name} timeout=${timeoutMs}\n`);
+  let result: { ok: true; value: Record<string, unknown> } | { ok: false; error: string };
   if (!jsonScriptMustRunHostDirect(name)) {
     const brokered = runJsonScriptViaBroker(name, args, timeoutMs);
-    if (brokered) return brokered;
+    if (brokered) result = brokered;
+    else result = runJsonScriptDirect(name, args, timeoutMs);
+  } else {
+    result = runJsonScriptDirect(name, args, timeoutMs);
   }
-  return runJsonScriptDirect(name, args, timeoutMs);
+  if (trace) process.stderr.write(`[atomic-y-certificate] done ${name} ok=${String(result.ok)} ms=${Date.now() - started}\n`);
+  return result;
 }
 
 function hostSandboxMarkersActive(): boolean {
@@ -936,7 +944,7 @@ export function registerToolsY(server: McpServer): void {
         const sandboxProof = runJsonScript(
           'gates/atomic-exec-sandbox.proof.mjs',
           ['--json'],
-          hostSandboxActiveForProof ? 300000 : 30000,
+          hostSandboxActiveForProof ? 300000 : 120000,
         );
         const sandboxGreen = sandboxProof.ok && sandboxProof.value.ok === true;
         domains.push({
@@ -952,7 +960,7 @@ export function registerToolsY(server: McpServer): void {
             : 'Wrap spawned commands in a real filesystem/process/network sandbox and prove denied trace-only writes, denied outside-cwd/temp writes, plus denied network.',
           detail: sandboxProof.ok ? sandboxProof.value : undefined,
         });
-        const externalProof = runJsonScript('gates/external-runtime-denial.proof.mjs', ['--json']);
+        const externalProof = runJsonScript('gates/external-runtime-denial.proof.mjs', ['--json'], 120000);
         const externalGreen = externalProof.ok && externalProof.value.ok === true;
         domains.push({
           domain: 'externalRuntimeState',

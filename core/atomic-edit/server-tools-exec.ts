@@ -639,7 +639,28 @@ function autoBootstrapBrokerSync(): string | null {
   const child = childProcess.spawn(process.execPath, [brokerScript, socket], {
     cwd: root,
     env: { ...process.env, ATOMIC_EXEC_BROKER_ROOT: root },
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', 'ignore', 'ignore'],
+  });
+  const cleanupAutoBroker = () => {
+    try {
+      if (child.pid) process.kill(child.pid, 'SIGTERM');
+    } catch {
+      /* best effort */
+    }
+    try {
+      fs.rmSync(brokerDir, { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
+  };
+  process.once('exit', cleanupAutoBroker);
+  process.once('SIGINT', () => {
+    cleanupAutoBroker();
+    process.exit(130);
+  });
+  process.once('SIGTERM', () => {
+    cleanupAutoBroker();
+    process.exit(143);
   });
 
   const start = Date.now();

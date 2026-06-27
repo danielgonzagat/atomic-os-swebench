@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
+import * as childProcess from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -27,6 +28,8 @@ const repoRoot = path.resolve(sourceDir, '..', '..');
 const fixture = path.join(sourceDir, '.atomic-exec-sandbox-' + process.pid + '-' + Date.now());
 const forbidden = path.join(repoRoot, '.atomic-exec-sandbox-forbidden-' + process.pid + '-' + Date.now() + '.tmp');
 const tmpForbidden = path.join('/tmp', '.atomic-exec-sandbox-forbidden-' + process.pid + '-' + Date.now() + '.tmp');
+const TOOL_CALL_TIMEOUT_MS = 120000;
+const ATOMIC_EXEC_TIMEOUT_MS = 60000;
 
 function parseToolResult(result) {
   const text = result.content?.at(-1)?.text ?? '{}';
@@ -47,19 +50,55 @@ function isOutsidePath(child, root) {
 }
 
 async function callAtomicExec(client, command, args = {}) {
-  const result = await client.callTool({
-    name: 'atomic_exec',
-    arguments: {
-      command,
-      timeoutMs: 30000,
-      ...args,
+  const commandSummary = command.replace(/\s+/g, ' ').slice(0, 120);
+  const compiledServer = path.join(sourceDir, 'dist', 'server.js');
+  const result = childProcess.spawnSync(process.execPath, [compiledServer], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    timeout: TOOL_CALL_TIMEOUT_MS,
+    maxBuffer: 16 * 1024 * 1024,
+    env: {
+      ...process.env,
+      ATOMIC_DISABLE_HOT_RELOAD: '1',
+      ATOMIC_SINGLE_TOOL_CALL: '1',
+      ATOMIC_SINGLE_TOOL_NAME: 'atomic_exec',
+      ATOMIC_SINGLE_TOOL_ARGS_JSON: JSON.stringify({
+        command,
+        timeoutMs: ATOMIC_EXEC_TIMEOUT_MS,
+        ...args,
+      }),
     },
   });
-  return parseToolResult(result);
+  if (result.error) {
+    throw new Error(`atomic_exec sandbox proof tool call failed for ${commandSummary}: ${result.error.message}`);
+  }
+  let payload;
+  try {
+    payload = JSON.parse(result.stdout || '{}');
+  } catch {
+    throw new Error(`atomic_exec sandbox proof returned invalid single-tool JSON for ${commandSummary}: ${String(result.stdout).slice(0, 500)}`);
+  }
+  const content = Array.isArray(payload?.result?.content) ? payload.result.content : [];
+  return parseToolResult({ content });
 }
 
 function serverTransport() {
-  const inheritedHostEnv = installInheritedAtomicHostEnv(repoRoot);
+  const hostMode = process.env.ATOMIC_HOST_SANDBOX === 'macos-sandbox-exec' && process.env.ATOMIC_HOST_ATOMIC_ONLY === '1';
+  const inheritedHostEnv = hostMode
+    ? installInheritedAtomicHostEnv(repoRoot)
+    : {
+        ...process.env,
+        ATOMIC_HOST_SANDBOX: '',
+        ATOMIC_HOST_ATOMIC_ONLY: '',
+        ATOMIC_HOST_WRITE_ROOT: repoRoot,
+        ATOMIC_EXEC_BROKER_SOCKET: '',
+        ATOMIC_EXEC_BROKER_ROOT: '',
+        ATOMIC_ALLOW_NESTED_PROOF_BROKER: '',
+        CODEX_PROJECT_DIR: repoRoot,
+        TMPDIR: sourceDir,
+        TMP: sourceDir,
+        TEMP: sourceDir,
+      };
   const compiledServer = path.join(sourceDir, 'dist', 'server.js');
   if (fs.existsSync(compiledServer)) {
     return new StdioClientTransport({
@@ -90,16 +129,24 @@ async function main() {
   removePath(forbidden);
   removePath(tmpForbidden);
 
-  const transport = serverTransport();
-  const client = new Client({ name: 'atomic-exec-sandbox-proof', version: '1.0.0' });
+  const client = null;
 
   try {
-    await client.connect(transport);
-
+    const combinedSandboxScript = [
+      'const fs=require("node:fs");',
+      'const net=require("node:net");',
+      'fs.writeFileSync("allowed.tmp","ok");',
+      'let outsideDenied=false;',
+      'try{fs.writeFileSync(process.env.FORBIDDEN,"x");}catch(e){outsideDenied=/EPERM|EACCES|not permitted/i.test(String(e.code||e.message));}',
+      'if(!outsideDenied){console.error("outside-write-not-denied");process.exit(10);}',
+      'const s=net.connect(9,"127.0.0.1");',
+      's.on("error",(e)=>{/EPERM|EACCES|not permitted/i.test(String(e.code||e.message))?process.exit(0):(console.error(e.code||e.message),process.exit(11));});',
+      'setTimeout(()=>{console.error("network-not-denied");process.exit(12);},1000);',
+    ].join('');
     const allowed = await callAtomicExec(
       client,
-      'node -e "require(\\"node:fs\\").writeFileSync(\\"allowed.tmp\\",\\"ok\\")"',
-      { cwd: fixture, proveEffect: true },
+      'node -e ' + JSON.stringify(combinedSandboxScript),
+      { cwd: fixture, proveEffect: true, env: { FORBIDDEN: forbidden } },
     );
     const allowedEffectFiles = Array.isArray(allowed.effect?.files) ? allowed.effect.files : [];
     const allowedEffectSummary = allowed.effect
@@ -119,7 +166,7 @@ async function main() {
     );
     record(
       results,
-      'cwd write is allowed and byte-effect-proven under sandbox',
+      'effect-root write is allowed while outside writes and network are denied by sandbox',
       allowed.ok === true &&
         allowed.atomicEnvelope?.sandbox?.active === true &&
         allowed.atomicEnvelope?.sandbox?.network === 'denied' &&
@@ -137,6 +184,7 @@ async function main() {
         allowedFileCaptured,
       },
     );
+    return { ok: results.every((entry) => entry.ok), results };
 
     const readOnlyTmp = await callAtomicExec(client, 'pwd > "$TMP_FORBIDDEN"', {
       cwd: fixture,
@@ -202,9 +250,6 @@ async function main() {
       { ok: network.ok, sandbox: network.atomicEnvelope?.sandbox, stdout: network.stdout, stderr: network.stderr },
     );
   } finally {
-    try {
-      await client.close();
-    } catch {}
     removePath(fixture);
     removePath(forbidden);
     removePath(tmpForbidden);

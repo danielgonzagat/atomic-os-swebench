@@ -9,6 +9,7 @@
 import * as childProcess from 'node:child_process';
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildPromotionReceipt, buildArchiveEntry, promotionReceiptHash } from '../self-evolution-harness.mjs';
@@ -26,38 +27,85 @@ function record(name, ok, detail = {}) {
 function sha(value) {
   return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
+function compactHarness(harness) {
+  if (!harness || typeof harness !== 'object') return harness;
+  return {
+    ok: harness.ok,
+    accepted: harness.accepted,
+    error: harness.error,
+    format: harness.format,
+    entryCount: harness.entryCount,
+    headArchiveEntrySha256: harness.headArchiveEntrySha256,
+    receipt: harness.receipt,
+    entry: harness.entry
+      ? {
+          sequence: harness.entry.sequence,
+          receiptSha256: harness.entry.receiptSha256,
+          archiveEntrySha256: harness.entry.archiveEntrySha256,
+        }
+      : undefined,
+    chain: harness.chain
+      ? {
+          entryCount: harness.chain.entryCount,
+          headArchiveEntrySha256: harness.chain.headArchiveEntrySha256,
+        }
+      : undefined,
+  };
+}
+
+function compactMachine(machine) {
+  if (!machine || typeof machine !== 'object') return machine;
+  return {
+    ok: machine.ok,
+    accepted: machine.accepted,
+    parseError: machine.parseError,
+    harness: compactHarness(machine.harness),
+  };
+}
+
 function singleTool(args) {
-  const child = childProcess.spawnSync(process.execPath, [path.join(sourceDir, 'dist', 'server.js')], {
-    cwd: repoRoot,
-    env: {
-      ...process.env,
-      ATOMIC_SINGLE_TOOL_CALL: '1',
-      ATOMIC_SINGLE_TOOL_NAME: 'atomic_self_evolution',
-      ATOMIC_SINGLE_TOOL_ARGS_JSON: JSON.stringify(args),
-      ATOMIC_DISABLE_HOT_RELOAD: '1',
-      CODEX_PROJECT_DIR: repoRoot,
-      TMPDIR: repoRoot,
-      TMP: repoRoot,
-      TEMP: repoRoot,
-    },
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  let payload = null;
+  const proofTmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'atomic-self-evolution-mcp-proof-'));
   try {
-    payload = JSON.parse(child.stdout.trim() || '{}');
-  } catch {
-    payload = { parseError: child.stdout };
+    const child = childProcess.spawnSync(process.execPath, [path.join(sourceDir, 'dist', 'server.js')], {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        ATOMIC_SINGLE_TOOL_CALL: '1',
+        ATOMIC_SINGLE_TOOL_NAME: 'atomic_self_evolution',
+        ATOMIC_SINGLE_TOOL_ARGS_JSON: JSON.stringify(args),
+        ATOMIC_DISABLE_HOT_RELOAD: '1',
+        CODEX_PROJECT_DIR: repoRoot,
+        TMPDIR: proofTmpRoot,
+        TMP: proofTmpRoot,
+        TEMP: proofTmpRoot,
+      },
+      encoding: 'utf8',
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    let payload = null;
+    try {
+      payload = JSON.parse(child.stdout.trim() || '{}');
+    } catch {
+      payload = { parseError: (child.stdout || '').slice(-4000) };
+    }
+    const content = Array.isArray(payload?.result?.content) ? payload.result.content : [];
+    let machine = null;
+    try {
+      const text = content.length > 0 ? content[content.length - 1].text : '{}';
+      machine = JSON.parse(text || '{}');
+    } catch {
+      machine = { parseError: content.length };
+    }
+    return {
+      status: child.status,
+      signal: child.signal,
+      stderr: (child.stderr || '').slice(-4000),
+      payload: { ok: payload?.ok === true },
+      machine: compactMachine(machine),
+    };
+  } finally {
+    fs.rmSync(proofTmpRoot, { recursive: true, force: true });
   }
-  const content = Array.isArray(payload?.result?.content) ? payload.result.content : [];
-  let machine = null;
-  try {
-    const text = content.length > 0 ? content[content.length - 1].text : '{}';
-    machine = JSON.parse(text || '{}');
-  } catch {
-    machine = { parseError: content };
-  }
-  return { status: child.status, stderr: child.stderr, payload, machine };
 }
 
 const policy = {

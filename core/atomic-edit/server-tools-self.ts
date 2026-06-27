@@ -163,6 +163,7 @@ const MANDATORY_SELF_EXPANSION_VALIDATORS: readonly SelfExpansionValidator[] = [
   // 100k-LOC-class system (~94k LOC), matching Nidus's scale claim on atomic's own ground. The full chain
   // (floor + algebra + disproof + router + observatory + fusion) loads and operates on atomic's real corpus.
   { phase: 'self-host-slice', command: 'node gates/self-host-slice.proof.mjs --json' },
+  { phase: 'self-improve-runtime', command: 'node gates/self-improve-loop-runtime.proof.mjs --json' },
   // E3/D.3 — organization-scale self-improving correctness: inheritable guidebooks × monotonic admission ×
   // recomputable-witness PSR ⇒ an org "broken" that grows by proof, is inherited monotonically, and feeds
   // generation a recomputable disproof. The triple no constituent (RLVR / Nidus-PSR / atomic-alone) owns.
@@ -208,6 +209,7 @@ const MANDATORY_SELF_EXPANSION_VALIDATORS: readonly SelfExpansionValidator[] = [
   // helpers) or ACCOUNTED (additive/rollback/firewall-regated/infra, with a verified reason). Removal-family
   // tools have teeth; a future tool that writes bytes without wiring the disproof reds this gate.
   { phase: 'negative-proof-coverage', command: 'node gates/negative-proof-entrypoint-coverage.proof.mjs --json' },
+  { phase: 'negative-create-overwrite', command: 'node gates/create-file-overwrite-negative-proof.proof.mjs --json' },
   // L09 — every WRITE/DYNAMIC gate wired into the floor has a PAIRED ADVERSARIAL proof (RED-only-when-real
   // ∧ GREEN-only-when-safe). Catches a gate that is vacuously green or trigger-happy with no counter-direction.
   { phase: 'per-gate-pairs', command: 'node gates/per-gate-soundness-completeness.proof.mjs --json' },
@@ -265,6 +267,7 @@ const MANDATORY_SELF_EXPANSION_VALIDATORS: readonly SelfExpansionValidator[] = [
   { phase: 'effect-metadata', command: 'node gates/effect-snapshot-honest-ceiling.proof.mjs --json' },
   { phase: 'effect-admission', command: 'node gates/atomic-exec-prove-effect-required.proof.mjs --json' },
   { phase: 'no-bypass', command: 'node gates/atomic-exec-indirection-denial.proof.mjs --json' },
+  { phase: 'host-shell', command: 'node gates/atsh-host-boundary.proof.mjs --json' },
   { phase: 'effect-scope', command: 'node gates/self-expansion-unexpected-effects.proof.mjs --json' },
   { phase: 'agent-driver-self-scope', command: 'node gates/atomic-agent-self-expansion-scope.proof.mjs --json' },
   { phase: 'self-evolution-real', command: 'node gates/self-expansion-real-self-evolution.proof.mjs --json' },
@@ -419,6 +422,7 @@ function capturePrimarySelfExpansionSnapshot(selfRoot: string): EffectSnapshot {
   return captureEffectSnapshot(selfRoot, {
     maxFileBytes: SELF_EXPANSION_SNAPSHOT_MAX_FILE_BYTES,
     maxBytes: SELF_EXPANSION_SNAPSHOT_MAX_BYTES,
+    includeSelfEvolutionArchive: true,
   });
 }
 
@@ -480,6 +484,25 @@ function appendProofOutput(current: string, chunk: Buffer | string, maxBytes = P
   if (next.length <= maxBytes) return next;
   return next.slice(0, maxBytes) + '\n[atomic proof output truncated]';
 }
+
+
+function terminateProofProcessTree(child: childProcess.ChildProcess, signal: NodeJS.Signals): void {
+  const pid = child.pid;
+  if (typeof pid === 'number') {
+    try {
+      process.kill(-pid, signal);
+      return;
+    } catch {
+      /* process group unavailable; fall back to direct child */
+    }
+  }
+  try {
+    child.kill(signal);
+  } catch {
+    /* best-effort */
+  }
+}
+
 
 function proofCommandConcurrency(): number {
   const raw = Number(process.env.ATOMIC_SELF_EXPANSION_PROOF_CONCURRENCY ?? '');
@@ -547,6 +570,7 @@ function runProofCommandDirect(
     const child = childProcess.spawn('/bin/bash', ['-c', command], {
       cwd,
       env,
+      detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '';
@@ -561,7 +585,7 @@ function runProofCommandDirect(
     };
     const forceKill = () => {
       try {
-        child.kill('SIGKILL');
+        terminateProofProcessTree(child, 'SIGKILL');
       } catch {
         /* best-effort */
       }
@@ -569,7 +593,7 @@ function runProofCommandDirect(
     timer = setTimeout(() => {
       stderr = appendProofOutput(stderr, '\n[atomic proof timed out after ' + timeoutMs + 'ms]');
       try {
-        child.kill('SIGTERM');
+        terminateProofProcessTree(child, 'SIGTERM');
       } catch {
         /* best-effort */
       }
@@ -627,6 +651,7 @@ function runProofCommandViaBroker(
   return new Promise((resolve) => {
     const child = childProcess.spawn(process.execPath, [client, socket], {
       cwd,
+      detached: true,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stdout = '';
@@ -641,7 +666,7 @@ function runProofCommandViaBroker(
     };
     const forceKill = () => {
       try {
-        child.kill('SIGKILL');
+        terminateProofProcessTree(child, 'SIGKILL');
       } catch {
         /* best-effort */
       }
@@ -649,7 +674,7 @@ function runProofCommandViaBroker(
     timer = setTimeout(() => {
       stderr = appendProofOutput(stderr, '\n[atomic proof broker timed out after ' + (timeoutMs + 5000) + 'ms]');
       try {
-        child.kill('SIGTERM');
+        terminateProofProcessTree(child, 'SIGTERM');
       } catch {
         /* best-effort */
       }
@@ -741,9 +766,12 @@ function selfExpansionProofSuppressesNestedBroker(command: string): boolean {
 
 function selfExpansionProofEnv(socket: string | null, command: string): NodeJS.ProcessEnv {
   const hostRoot = selfExpansionProofRoot();
-  const tempRoot = selfExpansionProofTempRoot(hostRoot);
   const suppressNestedBroker = selfExpansionProofSuppressesNestedBroker(command);
   const inheritBroker = Boolean(socket && !suppressNestedBroker);
+  const tempRoot = inheritBroker
+    ? path.join(path.resolve(hostRoot), '.atomic', 'self-expansion-proof-tmp')
+    : selfExpansionProofTempRoot(hostRoot);
+  fs.mkdirSync(tempRoot, { recursive: true });
   // SCRUB single-tool delegation env so it cannot leak into gate subprocesses. This env is built for
   // a gate running inside an atomic_expand_self validation lattice, which may itself be delegated through
   // a fresh single-tool runtime (ATOMIC_SINGLE_TOOL_CALL=1). If those vars reach a gate that spawns

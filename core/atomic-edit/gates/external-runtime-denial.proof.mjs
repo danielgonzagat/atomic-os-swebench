@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import * as childProcess from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,16 +38,38 @@ function record(results, name, ok, detail) {
   results.push({ name, ok: Boolean(ok), detail });
 }
 
-async function callAtomicExec(client, command, args = {}) {
-  const result = await client.callTool({
-    name: 'atomic_exec',
-    arguments: {
-      command,
-      timeoutMs: 30000,
-      ...args,
+async function callAtomicExec(_client, command, args = {}) {
+  const commandSummary = command.replace(/\s+/g, ' ').slice(0, 120);
+  const compiledServer = path.join(sourceDir, 'dist', 'server.js');
+  const result = childProcess.spawnSync(process.execPath, [compiledServer], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    timeout: 120000,
+    maxBuffer: 16 * 1024 * 1024,
+    env: {
+      ...process.env,
+      ATOMIC_Y_CERTIFICATE_TRACE: '',
+      ATOMIC_DISABLE_HOT_RELOAD: '1',
+      ATOMIC_SINGLE_TOOL_CALL: '1',
+      ATOMIC_SINGLE_TOOL_NAME: 'atomic_exec',
+      ATOMIC_SINGLE_TOOL_ARGS_JSON: JSON.stringify({
+        command,
+        timeoutMs: 30000,
+        ...args,
+      }),
     },
   });
-  return { result, payload: parseToolResult(result) };
+  if (result.error) {
+    throw new Error('atomic_exec external-runtime proof tool call failed for ' + commandSummary + ': ' + result.error.message);
+  }
+  let payload;
+  try {
+    payload = JSON.parse(result.stdout || '{}');
+  } catch {
+    throw new Error('atomic_exec external-runtime proof returned invalid single-tool JSON for ' + commandSummary + ': ' + String(result.stdout).slice(0, 500));
+  }
+  const content = Array.isArray(payload?.result?.content) ? payload.result.content : [];
+  return { result: payload?.result ?? {}, payload: parseToolResult({ content }) };
 }
 
 function serverTransport() {
@@ -87,11 +110,9 @@ async function main() {
   removePath(fixture);
   mkdirPath(fixture);
 
-  const transport = serverTransport();
-  const client = new Client({ name: 'external-runtime-denial-proof', version: '1.0.0' });
+  const client = null;
 
   try {
-    await client.connect(transport);
 
     await expectExternalRefusal(client, results, 'network CLI refused before spawn', 'curl https://example.com');
     await expectExternalRefusal(client, results, 'database CLI refused before spawn', 'psql -c "select 1"');
@@ -119,9 +140,6 @@ async function main() {
       },
     );
   } finally {
-    try {
-      await client.close();
-    } catch {}
     removePath(fixture);
   }
 

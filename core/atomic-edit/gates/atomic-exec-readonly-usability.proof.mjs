@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import path from 'node:path';
+import * as childProcess from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -22,6 +23,7 @@ let hostMode = false;
 const readOnlyArgs = {};
 const readOnlyCwd = hostVisibleRepoRoot;
 const protectedReadCommand = "sed -n '1,1p' core/atomic-edit/package.json";
+const TOOL_CALL_TIMEOUT_MS = 60000;
 
 function parseToolResult(result) {
   const text = result.content?.at(-1)?.text ?? '{}';
@@ -37,16 +39,29 @@ function record(results, name, ok, detail) {
 }
 
 async function callAtomicExec(client, command, args = {}) {
-  const result = await client.callTool({
-    name: 'atomic_exec',
-    arguments: {
-      command,
-      cwd: readOnlyCwd,
-      timeoutMs: 30000,
-      ...args,
+  const compiledServer = path.join(sourceDir, 'dist', 'server.js');
+  const result = childProcess.spawnSync(process.execPath, [compiledServer], {
+    cwd: hostVisibleRepoRoot,
+    encoding: 'utf8',
+    timeout: TOOL_CALL_TIMEOUT_MS,
+    maxBuffer: 16 * 1024 * 1024,
+    env: {
+      ...process.env,
+      ATOMIC_DISABLE_HOT_RELOAD: '1',
+      ATOMIC_SINGLE_TOOL_CALL: '1',
+      ATOMIC_SINGLE_TOOL_NAME: 'atomic_exec',
+      ATOMIC_SINGLE_TOOL_ARGS_JSON: JSON.stringify({
+        command,
+        cwd: readOnlyCwd,
+        timeoutMs: 30000,
+        ...args,
+      }),
     },
   });
-  return parseToolResult(result);
+  if (result.error) throw new Error(`atomic_exec read-only proof call failed: ${result.error.message}`);
+  const payload = JSON.parse(result.stdout || '{}');
+  const content = Array.isArray(payload?.result?.content) ? payload.result.content : [];
+  return parseToolResult({ content });
 }
 
 function serverTransport() {
@@ -78,8 +93,7 @@ function readOnlySandboxOk(result) {
 
 async function main() {
   const results = [];
-  const client = new Client({ name: 'atomic-exec-readonly-usability-proof', version: '1.0.0' });
-  await client.connect(serverTransport());
+  const client = null;
 
   try {
     const protectedRead = await callAtomicExec(
@@ -158,9 +172,7 @@ async function main() {
         hostMode,
       },
     );
-  } finally {
-    await client.close().catch(() => {});
-  }
+  } finally {}
 
   return { ok: results.every((entry) => entry.ok), results };
 }
