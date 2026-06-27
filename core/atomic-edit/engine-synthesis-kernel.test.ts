@@ -117,6 +117,10 @@ describe('neuro-symbolic synthesis kernel receipts', () => {
     const result = synthesizeMetaOperator(undefined, { allowCvc5: false });
     expect(result.problem.problemSha256).toMatch(hex64);
     expect(result.problem.kind).toBe('rewrite');
+    expect(result.operator?.pattern).toBe('colour');
+    expect(result.operator?.replacement).toBe('color');
+    expect(result.train.passed).toBe(result.train.total);
+    expect(result.heldOut.passed).toBe(result.heldOut.total);
     expect(result.receipts.length).toBeGreaterThan(0);
     expect(result.receipts.map((receipt: any) => receipt.verdict)).toContain('HEURISTIC_UNPROVEN');
     for (const receipt of result.receipts) {

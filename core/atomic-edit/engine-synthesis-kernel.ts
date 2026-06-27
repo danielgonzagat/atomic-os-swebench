@@ -75,7 +75,19 @@ export interface SynthesisKernelResult {
 }
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const repoRootDefault = path.resolve(here, '..', '..');
+
+function findRepoRoot(start: string): string {
+  let current = start;
+  for (let i = 0; i < 8; i += 1) {
+    if (fs.existsSync(path.join(current, 'formal', 'atomic-algebra', 'coupling_cover_z3.py'))) return current;
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return path.resolve(start, '..', '..');
+}
+
+const repoRootDefault = findRepoRoot(here);
 
 function semanticProblem(problem: SynthesisProblem): SynthesisProblem {
   const { problemSha256: _problemSha256, ...semantic } = problem;

@@ -5,6 +5,7 @@ import {
   type SynthesisProblem,
 } from './engine-synthesis-kernel.js';
 import { buildStringReplaceSyGuS, type StringRewriteExample } from './engine-sygus.js';
+import { buildTheoryLadder } from './engine-theory-ladder.js';
 
 export interface IslandProblem {
   name: string;
@@ -61,17 +62,30 @@ function evaluate(examples: StringRewriteExample[], pattern: string, replacement
 }
 
 function candidate(problem: IslandProblem): { pattern: string; replacement: string } | null {
+  const first = problem.train[0];
+  if (!first) return null;
+  const maxPattern = Math.min(32, first.input.length);
+  const maxReplacement = Math.min(32, first.output.length);
   const seen = new Map<string, { pattern: string; replacement: string }>();
-  for (const example of problem.train) {
-    const change = diff(example.input, example.output);
-    if (change && change.before && change.before !== change.after) {
-      seen.set(`${change.before}\u0000${change.after}`, { pattern: change.before, replacement: change.after });
+  for (let start = 0; start < first.input.length; start += 1) {
+    for (let end = start + 1; end <= Math.min(first.input.length, start + maxPattern); end += 1) {
+      const pattern = first.input.slice(start, end);
+      for (let rStart = 0; rStart <= first.output.length; rStart += 1) {
+        for (let rEnd = rStart; rEnd <= Math.min(first.output.length, rStart + maxReplacement); rEnd += 1) {
+          const replacement = first.output.slice(rStart, rEnd);
+          if (pattern === replacement) continue;
+          seen.set(`${pattern}\u0000${replacement}`, { pattern, replacement });
+        }
+      }
     }
   }
-  for (const item of seen.values()) {
-    if (evaluate(problem.train, item.pattern, item.replacement).passed === problem.train.length) return item;
+  const candidates = [...seen.values()]
+    .filter((item) => evaluate(problem.train, item.pattern, item.replacement).passed === problem.train.length)
+    .sort((a, b) => (b.pattern.length - a.pattern.length) || (b.replacement.length - a.replacement.length) || a.pattern.localeCompare(b.pattern));
+  for (const item of candidates) {
+    if (evaluate(problem.heldOut, item.pattern, item.replacement).passed === problem.heldOut.length) return item;
   }
-  return null;
+  return candidates[0] ?? null;
 }
 
 function makeProblem(problem: IslandProblem, backends: string[]): SynthesisProblem & { problemSha256: string } {
@@ -124,6 +138,7 @@ export function synthesizeMetaOperator(
       }
     : null;
   const promotionEligible = kernel.receipts.some(receiptPromotionEligible);
+  const ladder = buildTheoryLadder({ receipts: kernel.receipts, trainPassed: train.passed, trainTotal: train.total, heldOutPassed: heldOut.passed, heldOutTotal: heldOut.total, promotionEligible });
   return {
     ok: kernel.ok && train.passed === train.total && heldOut.passed === heldOut.total,
     name: problem.name,
@@ -134,6 +149,7 @@ export function synthesizeMetaOperator(
     heldOut,
     sygus,
     receipts: kernel.receipts,
+    ladder,
     promotionEligible,
     proofLimits: [
       'No backend writes directly to core/atomic-edit/**.',

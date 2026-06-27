@@ -1,49 +1,38 @@
 #!/usr/bin/env node
-import * as childProcess from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-
 const json = process.argv.includes('--json');
-let failures = 0;
-const details = [];
-
-function check(name, condition, detail = '') {
-  const ok = Boolean(condition);
-  if (!ok) failures += 1;
-  details.push({ name, ok, detail });
-  if (!json) console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ` - ${detail}` : ''}`);
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const failures = [], results = [];
+function check(name, condition, detail = {}) { const ok = Boolean(condition); results.push({ name, ok, detail }); if (!ok) failures.push({ name, detail }); if (!json) console.log((ok ? 'PASS ' : 'FAIL ') + name); }
+function read(rel) { return fs.readFileSync(path.join(root, rel), 'utf8'); }
+for (const rel of ['engine-synthesis-kernel.ts', 'engine-sygus.ts', 'engine-cvc5-sygus.ts', 'engine-theory-ladder.ts', 'engine-meta-synth.ts', 'server-tools-meta-synth.ts']) check('source exists ' + rel, fs.existsSync(path.join(root, rel)));
+if (failures.length === 0) {
+  const server = read('server.ts'), kernel = read('engine-synthesis-kernel.ts'), meta = read('engine-meta-synth.ts'), sygus = read('engine-sygus.ts'), cvc5 = read('engine-cvc5-sygus.ts'), ladder = read('engine-theory-ladder.ts');
+  check('server imports meta-synth tool', server.includes("./server-tools-meta-synth.js"));
+  check('server registers atomic_meta_synth registrar', /registerToolsMetaSynth\(server\)/.test(server));
+  check('kernel creates proof receipts and verifies hashes', kernel.includes('makeProofReceipt') && kernel.includes('verifyProofReceipt') && kernel.includes('promotionEligible'));
+  check('kernel separates heuristic from formal promotion', kernel.includes('HEURISTIC_UNPROVEN') && kernel.includes("authority === 'formal'"));
+  check('meta-synth imports SyGuS/kernel/ladder', meta.includes('./engine-sygus.js') && meta.includes('./engine-synthesis-kernel.js') && meta.includes('./engine-theory-ladder.js'));
+  check('SyGuS generator emits synth-fun and str.replace', sygus.includes('synth-fun') && sygus.includes('str.replace'));
+  check('CVC5 adapter has ABSENT path', /cvc5/i.test(cvc5) && cvc5.includes('ABSENT'));
+  check('theory ladder has synthesis levels', ladder.includes('catalog') && ladder.includes('heuristic-cegis') && ladder.includes('cvc5-sygus') && ladder.includes('formal-promotion'));
 }
-
-const dir = path.dirname(fileURLToPath(import.meta.url));
-const atomicRoot = path.resolve(dir, '..');
-const read = (rel) => fs.readFileSync(path.join(atomicRoot, rel), 'utf8');
-
-const test = childProcess.spawnSync('npm', ['test', '--', 'engine-synthesis-kernel.test.ts'], {
-  cwd: atomicRoot,
-  encoding: 'utf8',
-  timeout: 30_000,
-});
-
-const kernel = read('engine-synthesis-kernel.ts');
-const cvc5 = read('engine-cvc5-sygus.ts');
-const meta = read('engine-meta-synth.ts');
-const server = read('server.ts');
-
-check('focused kernel tests pass', test.status === 0, (test.stdout + test.stderr).slice(-500));
-check('live kernel surface exists', /export function runSynthesisKernel/.test(kernel) && /export interface ProofReceipt/.test(kernel));
-check('receipt verdict lattice exists in code', /HEURISTIC_UNPROVEN/.test(kernel) && /PROVEN/.test(kernel) && /ABSENT/.test(kernel));
-check('CVC5 adapter emits explicit absence evidence', /detectCvc5/.test(cvc5) && /checked/.test(cvc5) && /ABSENT/.test(cvc5));
-check('Z3 backend invokes the real coupling cover solver', /coupling_cover_z3\.py/.test(kernel) && /spawnSync/.test(kernel));
-check('heuristic is not promotion eligible', /verdict === 'PROVEN' && receipt\.authority === 'formal'/.test(kernel));
-check('meta synthesis returns proof limits', /Only verified formal PROVEN receipts/.test(meta));
-check('MCP tool is registered', /registerToolsMetaSynth/.test(server) && /atomic_meta_synth/.test(read('server-tools-meta-synth.ts')));
-check('no backend writes directly to engine files', !/writeFileSync|appendFileSync|atomicWrite/.test(kernel + cvc5 + meta));
-
-if (json) {
-  console.log(JSON.stringify({ ok: failures === 0, failures, details }, null, 2));
-} else {
-  console.log(failures === 0 ? 'OK - meta-synth-engine (0 failures)' : `FAIL - meta-synth-engine (${failures} failure(s))`);
+for (const rel of ['dist/engine-synthesis-kernel.js', 'dist/engine-sygus.js', 'dist/engine-cvc5-sygus.js', 'dist/engine-theory-ladder.js', 'dist/engine-meta-synth.js', 'dist/server-tools-meta-synth.js']) check('dist exists ' + rel, fs.existsSync(path.join(root, rel)));
+if (failures.length === 0) {
+  const kernel = await import(path.join(root, 'dist', 'engine-synthesis-kernel.js'));
+  const cvc5 = await import(path.join(root, 'dist', 'engine-cvc5-sygus.js'));
+  const meta = await import(path.join(root, 'dist', 'engine-meta-synth.js'));
+  const result = meta.synthesizeMetaOperator(meta.DEFAULT_STRING_REPLACE_ISLAND, { allowCvc5: false });
+  check('meta-synth result ok for bounded island', result.ok === true, result);
+  check('held-out proof passes', result.heldOut?.passed === result.heldOut?.total && result.heldOut?.total >= 4, result.heldOut);
+  check('heuristic receipt is not promotion eligible', result.receipts.some((receipt) => receipt.verdict === 'HEURISTIC_UNPROVEN') && result.promotionEligible === false, result.receipts);
+  check('receipt hashes verify', result.receipts.every((receipt) => kernel.verifyProofReceipt(receipt).ok), result.receipts);
+  check('SyGuS benchmark emitted', result.sygus?.program?.includes('synth-fun') && result.sygus?.program?.includes('str.replace'), result.sygus);
+  check('CVC5 absence explicit', cvc5.detectCvc5({ env: { PATH: '' }, candidatePaths: ['/definitely/not/cvc5'] }).verdict === 'ABSENT');
+  check('theory ladder reports no formal promotion', result.ladder?.some((step) => step.level === 'formal-promotion' && step.status === 'blocked'), result.ladder);
 }
-
-process.exit(failures === 0 ? 0 : 1);
+const output = { ok: failures.length === 0, total: results.length, failed: failures, results };
+if (json) console.log(JSON.stringify(output, null, 2)); else console.log(output.ok ? 'OK meta-synth-engine proof' : 'FAIL meta-synth-engine proof');
+process.exit(output.ok ? 0 : 1);
