@@ -47,6 +47,8 @@ async function callAtomicExec(client, command, args = {}) {
     maxBuffer: 16 * 1024 * 1024,
     env: {
       ...process.env,
+      ATOMIC_Y_CERTIFICATE_TRACE: '',
+      ATOMIC_USE_BROKER_STATE: '',
       ATOMIC_DISABLE_HOT_RELOAD: '1',
       ATOMIC_SINGLE_TOOL_CALL: '1',
       ATOMIC_SINGLE_TOOL_NAME: 'atomic_exec',

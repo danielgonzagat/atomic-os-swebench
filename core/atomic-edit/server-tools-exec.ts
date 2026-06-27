@@ -710,22 +710,27 @@ function autoBootstrapBrokerSync(): string | null {
 }
 
 function brokerSocketPath(): string | null {
-  const envEndpoint = brokerEndpointIfPresent(process.env.ATOMIC_EXEC_BROKER_SOCKET ?? '');
+  const envSocket = process.env.ATOMIC_EXEC_BROKER_SOCKET;
+  const envEndpoint = brokerEndpointIfPresent(envSocket ?? '');
   if (envEndpoint) return envEndpoint;
+  const explicitBrokerRequested = typeof envSocket === 'string' && envSocket.trim().length > 0;
+  const useBrokerState = process.env.ATOMIC_USE_BROKER_STATE === '1';
   const statePath = path.join(REPO_ROOT, '.atomic', 'codex-broker-current.json');
   let hasStateFile = false;
-  try {
-    if (fs.existsSync(statePath)) {
-      hasStateFile = true;
-      const state = JSON.parse(fs.readFileSync(statePath, 'utf8')) as { socket?: unknown };
-      const stateEndpoint = typeof state.socket === 'string' ? brokerEndpointIfPresent(state.socket) : null;
-      if (stateEndpoint) return stateEndpoint;
+  if (useBrokerState) {
+    try {
+      if (fs.existsSync(statePath)) {
+        hasStateFile = true;
+        const state = JSON.parse(fs.readFileSync(statePath, 'utf8')) as { socket?: unknown };
+        const stateEndpoint = typeof state.socket === 'string' ? brokerEndpointIfPresent(state.socket) : null;
+        if (stateEndpoint) return stateEndpoint;
+      }
+    } catch {
+      // Broker state is optional outside host-admitted Codex sessions.
     }
-  } catch {
-    // Broker state is optional outside host-admitted Codex sessions.
   }
 
-  if (hostSandboxActive() || process.env.ATOMIC_EXEC_BROKER_SOCKET !== undefined || hasStateFile) {
+  if (hostSandboxActive() || explicitBrokerRequested || (useBrokerState && hasStateFile)) {
     return autoBootstrapBrokerSync();
   }
   return null;
