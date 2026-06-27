@@ -54,6 +54,10 @@ function launcherSourceAssertions() {
       source.includes('atomic-file-broker-v1') &&
       source.includes('fileBrokerMarkerAlive') &&
       source.includes('process.kill(marker.pid, 0)'),
+    usesPackageLocalBrokerClient:
+      implSource.includes('"${SRC_DIR}/atomic-exec-broker-client.mjs"') &&
+      !implSource.includes('path.join(repoRoot, "atomic-exec-broker-client.mjs")') &&
+      !implSource.includes('path.join(repoRootReal, "atomic-exec-broker-client.mjs")'),
   };
 }
 

@@ -89,6 +89,7 @@ const { fileURLToPath } = require("node:url");
 
 const statePath = process.argv[1];
 const repoRoot = process.argv[2];
+const brokerClient = process.argv[3];
 function fail() {
   process.exit(1);
 }
@@ -115,7 +116,7 @@ function containsPath(root, target) {
   return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
 function brokerResponds(endpoint) {
-  const client = path.join(repoRootReal, "atomic-exec-broker-client.mjs");
+  const client = brokerClient;
   if (!fs.existsSync(client)) return false;
   const probe = childProcess.spawnSync(process.execPath, [client, endpoint], {
     cwd: repoRootReal,
@@ -176,7 +177,7 @@ console.log("export ATOMIC_HOST_ATOMIC_ONLY=" + quote("1"));
 console.log("export ATOMIC_HOST_WRITE_ROOT=" + quote(repoRoot));
 console.log("export ATOMIC_HOST_AGENT=" + quote("codex"));
 console.log("export ATOMIC_EXEC_BROKER_SOCKET=" + quote(endpoint));
-' "${state}" "${REPO_ROOT}"
+' "${state}" "${REPO_ROOT}" "${SRC_DIR}/atomic-exec-broker-client.mjs"
   )" || return 1
 
   eval "${recovered}"
@@ -285,7 +286,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const repoRoot = process.argv[1];
 const endpoint = process.argv[2];
-const client = path.join(repoRoot, "atomic-exec-broker-client.mjs");
+const client = process.argv[3];
 if (!endpoint || !fs.existsSync(client)) process.exit(1);
 const probe = childProcess.spawnSync(process.execPath, [client, endpoint], {
   cwd: repoRoot,
@@ -301,7 +302,7 @@ try {
 } catch {
   process.exit(1);
 }
-' "${REPO_ROOT}" "${ATOMIC_EXEC_BROKER_SOCKET}"; then
+' "${REPO_ROOT}" "${ATOMIC_EXEC_BROKER_SOCKET}" "${SRC_DIR}/atomic-exec-broker-client.mjs"; then
     echo "[atomic-edit-launcher] REFUSED: atomic host mode broker socket is stale or unreachable." >&2
     exit 80
   fi
