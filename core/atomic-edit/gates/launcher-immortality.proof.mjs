@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // launcher-immortality.proof.mjs — proves the atomic-edit MCP entry chain
 // survives every "agent broke it" scenario without the host ever seeing the
-// server go away. Runs against a SANDBOXED CLONE of the launch chain (never
-// the live tree): bootstrap + impl + supervisor + a copy of dist, with
-// dist-freshness/build stubbed so only supervision mechanics are under test
-// (freshness/build behavior is owned by mcp-launcher-host-boundary.proof.mjs).
+// server go away. Runs against a SANDBOXED CLONE of the flattened package
+// launch chain (never the live tree): bootstrap + impl + supervisor + a copy
+// of dist, with dist-freshness/build stubbed so only supervision mechanics are
+// under test (freshness/build behavior is owned by mcp-launcher-host-boundary.proof.mjs).
 //
 // Scenarios:
 //   1. healthy boot through bootstrap→supervisor→impl→server; blessing seeds
@@ -25,19 +25,18 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
 const jsonMode = process.argv.includes('--json');
 const sourceDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); // atomic-edit
-const scriptsMcpDir = path.resolve(sourceDir, '..');
+const packageSourceDir = sourceDir;
 
 const CLONE_ROOT = path.join(sourceDir, `probe-gate-immortality-${process.pid}`);
 const C = {
   root: CLONE_ROOT,
-  scriptsMcp: path.join(CLONE_ROOT, 'scripts', 'mcp'),
-  src: path.join(CLONE_ROOT, 'scripts', 'mcp', 'atomic-edit'),
-  bootstrap: path.join(CLONE_ROOT, 'scripts', 'mcp', 'atomic-edit-mcp-launcher.sh'),
-  impl: path.join(CLONE_ROOT, 'scripts', 'mcp', 'atomic-edit-mcp-launcher-impl.sh'),
-  supervisor: path.join(CLONE_ROOT, 'scripts', 'mcp', 'atomic-edit', 'launcher-supervisor.mjs'),
-  dist: path.join(CLONE_ROOT, 'scripts', 'mcp', 'atomic-edit', 'dist'),
-  lkg: path.join(CLONE_ROOT, 'scripts', 'mcp', 'atomic-edit', 'dist-lkg'),
-  blessed: path.join(CLONE_ROOT, 'scripts', 'mcp', 'atomic-edit', 'launcher-blessed'),
+  src: path.join(CLONE_ROOT, 'atomic-edit'),
+  bootstrap: path.join(CLONE_ROOT, 'atomic-edit', 'atomic-edit-mcp-launcher.sh'),
+  impl: path.join(CLONE_ROOT, 'atomic-edit', 'atomic-edit-mcp-launcher-impl.sh'),
+  supervisor: path.join(CLONE_ROOT, 'atomic-edit', 'launcher-supervisor.mjs'),
+  dist: path.join(CLONE_ROOT, 'atomic-edit', 'dist'),
+  lkg: path.join(CLONE_ROOT, 'atomic-edit', 'dist-lkg'),
+  blessed: path.join(CLONE_ROOT, 'atomic-edit', 'launcher-blessed'),
   atomic: path.join(CLONE_ROOT, '.atomic'),
 };
 
@@ -49,15 +48,19 @@ function record(results, name, ok, detail) {
 function buildClone() {
   fs.rmSync(CLONE_ROOT, { recursive: true, force: true });
   fs.mkdirSync(C.src, { recursive: true });
-  fs.copyFileSync(path.join(scriptsMcpDir, 'atomic-edit-mcp-launcher.sh'), C.bootstrap);
-  fs.copyFileSync(path.join(scriptsMcpDir, 'atomic-edit-mcp-launcher-impl.sh'), C.impl);
+  for (const file of [
+    'atomic-edit-mcp-launcher.sh',
+    'atomic-edit-mcp-launcher-impl.sh',
+    'launcher-supervisor.mjs',
+    'atomic-exec-broker.mjs',
+    'atomic-exec-broker-client.mjs',
+    'network-proxy.mjs',
+  ]) {
+    fs.copyFileSync(path.join(packageSourceDir, file), path.join(C.src, file));
+  }
   fs.chmodSync(C.bootstrap, 0o755);
   fs.chmodSync(C.impl, 0o755);
-  fs.copyFileSync(path.join(sourceDir, 'launcher-supervisor.mjs'), C.supervisor);
-  for (const helper of ['atomic-exec-broker.mjs', 'atomic-exec-broker-client.mjs', 'network-proxy.mjs']) {
-    fs.copyFileSync(path.join(sourceDir, helper), path.join(C.src, helper));
-  }
-  fs.cpSync(path.join(sourceDir, 'dist'), C.dist, { recursive: true });
+  fs.cpSync(path.join(packageSourceDir, 'dist'), C.dist, { recursive: true });
   // stubs: freshness always passes, build always fails — supervision only
   fs.writeFileSync(path.join(C.src, 'dist-freshness.mjs'), 'process.exit(0);\n');
   fs.writeFileSync(path.join(C.src, 'build.mjs'), 'console.error("clone build stub: refusing"); process.exit(1);\n');
@@ -67,6 +70,7 @@ function buildClone() {
 function cloneEnv(extra = {}) {
   return {
     ...process.env,
+    ATOMIC_EDIT_REPO_ROOT: CLONE_ROOT,
     ATOMIC_SINGLE_TOOL_CALL: '', ATOMIC_SINGLE_TOOL_NAME: '', ATOMIC_SINGLE_TOOL_ARGS_JSON: '',
     ATOMIC_HOST_SANDBOX: '', ATOMIC_HOST_ATOMIC_ONLY: '', ATOMIC_HOST_WRITE_ROOT: '',
     ATOMIC_EXEC_BROKER_SOCKET: '',
@@ -234,7 +238,7 @@ async function main() {
     // re-seed the armor (healthy impl back, fresh bless + lkg snapshot) for
     // the destructive scenarios below
     {
-      fs.copyFileSync(path.join(scriptsMcpDir, 'atomic-edit-mcp-launcher-impl.sh'), C.impl);
+      fs.copyFileSync(path.join(packageSourceDir, 'atomic-edit-mcp-launcher-impl.sh'), C.impl);
       fs.chmodSync(C.impl, 0o755);
       fs.rmSync(C.lkg, { recursive: true, force: true });
       const client = await connect();
@@ -303,9 +307,9 @@ async function main() {
         record(results, 'apocalypse (impl+blessed+dist+lkg gone): rescue mode answers initialize/tools with diagnostics', rescueToolsOnly && statusOk, { tools: listed.tools?.map((t) => t.name) });
 
         // repair in place, then recover within the SAME session
-        fs.copyFileSync(path.join(scriptsMcpDir, 'atomic-edit-mcp-launcher-impl.sh'), C.impl);
+        fs.copyFileSync(path.join(packageSourceDir, 'atomic-edit-mcp-launcher-impl.sh'), C.impl);
         fs.chmodSync(C.impl, 0o755);
-        fs.cpSync(path.join(sourceDir, 'dist'), C.dist, { recursive: true });
+        fs.cpSync(path.join(packageSourceDir, 'dist'), C.dist, { recursive: true });
         const retry = await client.callTool({ name: 'atomic_rescue_retry', arguments: {} });
         await sleep(800);
         const relisted = await client.listTools();

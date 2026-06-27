@@ -445,6 +445,44 @@ grep -q '^stable_projection_mismatch_paths=$' <<<"$verify_curve"
 grep -q '^schema_issue_count=0$' <<<"$verify_curve"
 grep -q '^schema_issue_paths=$' <<<"$verify_curve"
 grep -q '^no_model_run=true$' <<<"$verify_curve"
+
+if "$CURVE" --verify-curve-receipt "$tmp/missing-curve.json" >"$tmp/missing-curve.out" 2>"$tmp/missing-curve.err"; then
+  echo "expected missing curve receipt to fail verification" >&2
+  exit 1
+fi
+grep -q '^curve_receipt_exists=false$' "$tmp/missing-curve.out"
+grep -q '^curve_receipt_schema_ok=false$' "$tmp/missing-curve.out"
+grep -q '^schema_issue_count=1$' "$tmp/missing-curve.out"
+grep -Fqx 'schema_issue_paths=curve_receipt_exists' "$tmp/missing-curve.out"
+grep -q '^curve_receipt_ok=false$' "$tmp/missing-curve.out"
+grep -q '^no_model_run=true$' "$tmp/missing-curve.out"
+grep -q '^no_scorer_run=true$' "$tmp/missing-curve.out"
+
+printf '{"broken"' >"$tmp/curve-invalid-json.json"
+if "$CURVE" --verify-curve-receipt "$tmp/curve-invalid-json.json" >"$tmp/curve-invalid-json.out" 2>"$tmp/curve-invalid-json.err"; then
+  echo "expected invalid curve receipt JSON to fail verification" >&2
+  exit 1
+fi
+grep -q '^curve_receipt_exists=true$' "$tmp/curve-invalid-json.out"
+grep -q '^curve_receipt_schema_ok=false$' "$tmp/curve-invalid-json.out"
+grep -q '^schema_issue_count=1$' "$tmp/curve-invalid-json.out"
+grep -Fqx 'schema_issue_paths=curve_receipt_json' "$tmp/curve-invalid-json.out"
+grep -q '^curve_receipt_ok=false$' "$tmp/curve-invalid-json.out"
+grep -q '^no_model_run=true$' "$tmp/curve-invalid-json.out"
+grep -q '^no_scorer_run=true$' "$tmp/curve-invalid-json.out"
+
+printf '[]\n' >"$tmp/curve-non-object.json"
+if "$CURVE" --verify-curve-receipt "$tmp/curve-non-object.json" >"$tmp/curve-non-object.out" 2>"$tmp/curve-non-object.err"; then
+  echo "expected non-object curve receipt to fail verification" >&2
+  exit 1
+fi
+grep -q '^curve_receipt_exists=true$' "$tmp/curve-non-object.out"
+grep -q '^curve_receipt_schema_ok=false$' "$tmp/curve-non-object.out"
+grep -q '^schema_issue_count=1$' "$tmp/curve-non-object.out"
+grep -Fqx 'schema_issue_paths=curve_receipt_object' "$tmp/curve-non-object.out"
+grep -q '^curve_receipt_ok=false$' "$tmp/curve-non-object.out"
+grep -q '^no_model_run=true$' "$tmp/curve-non-object.out"
+grep -q '^no_scorer_run=true$' "$tmp/curve-non-object.out"
 grep -q '^no_scorer_run=true$' <<<"$verify_curve"
 
 python3 - "$tmp/curve.json" "$tmp/curve-tampered.json" <<'PY'
@@ -606,6 +644,8 @@ if "$CURVE" --verify-curve-receipt "$tmp/curve-task-vector-mismatch-schema.json"
 fi
 grep -q '^curve_receipt_schema_ok=false$' "$tmp/curve-task-vector-mismatch-schema.out"
 grep -q '^same_task_vector=false$' "$tmp/curve-task-vector-mismatch-schema.out"
+grep -q '^schema_issue_count=2$' "$tmp/curve-task-vector-mismatch-schema.out"
+grep -Fqx 'schema_issue_paths=points[0].selected_task_ids_sha256,points[0].task_ids' "$tmp/curve-task-vector-mismatch-schema.out"
 grep -q '^curve_receipt_ok=false$' "$tmp/curve-task-vector-mismatch-schema.out"
 
 python3 - "$tmp/curve.json" "$tmp/curve-frontier-baseline-mismatch-schema.json" <<'PY'
@@ -626,6 +666,8 @@ if "$CURVE" --verify-curve-receipt "$tmp/curve-frontier-baseline-mismatch-schema
 fi
 grep -q '^curve_receipt_schema_ok=false$' "$tmp/curve-frontier-baseline-mismatch-schema.out"
 grep -q '^same_frontier_baseline=false$' "$tmp/curve-frontier-baseline-mismatch-schema.out"
+grep -q '^schema_issue_count=1$' "$tmp/curve-frontier-baseline-mismatch-schema.out"
+grep -Fqx 'schema_issue_paths=points[0].frontier_baseline_sha256' "$tmp/curve-frontier-baseline-mismatch-schema.out"
 grep -q '^curve_receipt_ok=false$' "$tmp/curve-frontier-baseline-mismatch-schema.out"
 
 python3 - "$tmp/curve.json" "$tmp/curve-benchmark-schema.json" <<'PY'
@@ -688,6 +730,8 @@ if "$CURVE" --verify-curve-receipt "$tmp/curve-rate-formula-schema.json" >"$tmp/
 fi
 grep -q '^curve_receipt_schema_ok=false$' "$tmp/curve-rate-formula-schema.out"
 grep -q '^rate_formulas_ok=false$' "$tmp/curve-rate-formula-schema.out"
+grep -q '^schema_issue_count=1$' "$tmp/curve-rate-formula-schema.out"
+grep -Fqx 'schema_issue_paths=points[0].elevation_vs_frontier_solve_rate' "$tmp/curve-rate-formula-schema.out"
 grep -q '^curve_receipt_ok=false$' "$tmp/curve-rate-formula-schema.out"
 
 python3 - "$tmp/curve.json" "$tmp/curve-margin-schema.json" <<'PY'
@@ -710,6 +754,8 @@ if "$CURVE" --verify-curve-receipt "$tmp/curve-margin-schema.json" >"$tmp/curve-
 fi
 grep -q '^curve_receipt_schema_ok=false$' "$tmp/curve-margin-schema.out"
 grep -q '^margin_growing=false$' "$tmp/curve-margin-schema.out"
+grep -q '^schema_issue_count=1$' "$tmp/curve-margin-schema.out"
+grep -Fqx 'schema_issue_paths=points[1].elevation_vs_frontier_solve_rate' "$tmp/curve-margin-schema.out"
 grep -q '^curve_receipt_ok=false$' "$tmp/curve-margin-schema.out"
 
 python3 - "$tmp/curve.json" "$tmp/curve-accumulation-schema.json" <<'PY'
@@ -731,6 +777,8 @@ if "$CURVE" --verify-curve-receipt "$tmp/curve-accumulation-schema.json" >"$tmp/
 fi
 grep -q '^curve_receipt_schema_ok=false$' "$tmp/curve-accumulation-schema.out"
 grep -q '^strictly_increasing_accumulation=false$' "$tmp/curve-accumulation-schema.out"
+grep -q '^schema_issue_count=1$' "$tmp/curve-accumulation-schema.out"
+grep -Fqx "schema_issue_paths=points[1].accumulation_index" "$tmp/curve-accumulation-schema.out"
 grep -q '^curve_receipt_ok=false$' "$tmp/curve-accumulation-schema.out"
 
 python3 - "$tmp/curve.json" "$tmp/curve-axis-schema.json" <<'PY'
@@ -750,6 +798,8 @@ if "$CURVE" --verify-curve-receipt "$tmp/curve-axis-schema.json" >"$tmp/curve-ax
   exit 1
 fi
 grep -q '^curve_receipt_schema_ok=false$' "$tmp/curve-axis-schema.out"
+grep -q '^schema_issue_count=1$' "$tmp/curve-axis-schema.out"
+grep -Fqx 'schema_issue_paths=accumulation_indices' "$tmp/curve-axis-schema.out"
 grep -q '^curve_receipt_ok=false$' "$tmp/curve-axis-schema.out"
 
 python3 - "$tmp/curve.json" "$tmp/curve-missing-round-verifications-schema.json" <<'PY'
@@ -770,6 +820,48 @@ if "$CURVE" --verify-curve-receipt "$tmp/curve-missing-round-verifications-schem
 fi
 grep -q '^curve_receipt_schema_ok=false$' "$tmp/curve-missing-round-verifications-schema.out"
 grep -q '^curve_receipt_ok=false$' "$tmp/curve-missing-round-verifications-schema.out"
+
+python3 - "$tmp/curve.json" "$tmp/curve-short-round-verifications-schema.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+src = Path(sys.argv[1])
+dst = Path(sys.argv[2])
+payload = json.loads(src.read_text(encoding="utf-8"))
+payload["round_verifications"].pop()
+payload["curve_valid"] = True
+dst.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+PY
+if "$CURVE" --verify-curve-receipt "$tmp/curve-short-round-verifications-schema.json" >"$tmp/curve-short-round-verifications-schema.out" 2>"$tmp/curve-short-round-verifications-schema.err"; then
+  echo "expected curve receipt with truncated round verification logs to fail schema" >&2
+  exit 1
+fi
+grep -q '^curve_receipt_schema_ok=false$' "$tmp/curve-short-round-verifications-schema.out"
+grep -q '^schema_issue_count=1$' "$tmp/curve-short-round-verifications-schema.out"
+grep -Fqx 'schema_issue_paths=round_verifications.count' "$tmp/curve-short-round-verifications-schema.out"
+grep -q '^curve_receipt_ok=false$' "$tmp/curve-short-round-verifications-schema.out"
+
+python3 - "$tmp/curve.json" "$tmp/curve-duplicate-round-verification-schema.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+src = Path(sys.argv[1])
+dst = Path(sys.argv[2])
+payload = json.loads(src.read_text(encoding="utf-8"))
+payload["round_verifications"][1] = dict(payload["round_verifications"][0])
+payload["curve_valid"] = True
+dst.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+PY
+if "$CURVE" --verify-curve-receipt "$tmp/curve-duplicate-round-verification-schema.json" >"$tmp/curve-duplicate-round-verification-schema.out" 2>"$tmp/curve-duplicate-round-verification-schema.err"; then
+  echo "expected curve receipt with duplicate round verification log coverage to fail schema" >&2
+  exit 1
+fi
+grep -q '^curve_receipt_schema_ok=false$' "$tmp/curve-duplicate-round-verification-schema.out"
+grep -q '^schema_issue_count=2$' "$tmp/curve-duplicate-round-verification-schema.out"
+grep -Fqx 'schema_issue_paths=round_verifications[1].round_receipt_path,round_verifications.missing_round_receipt_path' "$tmp/curve-duplicate-round-verification-schema.out"
+grep -q '^curve_receipt_ok=false$' "$tmp/curve-duplicate-round-verification-schema.out"
 
 python3 - "$tmp/curve.json" "$tmp/curve-round-verification-claim-schema.json" <<'PY'
 import json

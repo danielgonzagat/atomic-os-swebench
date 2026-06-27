@@ -99,6 +99,8 @@ grep -q 'summary_fields=.*round_receipt_path' <<<"$selftest"
 grep -q 'summary_fields=.*round_receipt_sha256' <<<"$selftest"
 grep -q 'summary_fields=.*round_receipt_verification_ok' <<<"$selftest"
 grep -q 'summary_fields=.*production_ready_to_run' <<<"$selftest"
+grep -q 'summary_fields=.*ready_blockers' <<<"$selftest"
+grep -q 'summary_fields=.*production_ready_blockers' <<<"$selftest"
 grep -q 'summary_fields=.*production_toolchain_ok' <<<"$selftest"
 grep -q 'summary_fields=.*metric_admissible' <<<"$selftest"
 grep -q 'summary_fields=.*metric_scope' <<<"$selftest"
@@ -165,6 +167,10 @@ grep -q '^official_scorer_preflight_ok=' <<<"$preflight"
 grep -q '^scorer_preflight_ok=' <<<"$preflight"
 grep -q '^ready_to_run=false$' <<<"$preflight"
 grep -q '^production_ready_to_run=false$' <<<"$preflight"
+grep -q '^ready_blockers=.*deepseek_api_key_present' <<<"$preflight"
+grep -q '^ready_blockers=.*modal_credentials_present' <<<"$preflight"
+grep -q '^ready_blockers=.*credential_rotation_attestation_ok' <<<"$preflight"
+grep -q '^production_ready_blockers=.*ready_to_run' <<<"$preflight"
 grep -q '^no_model_run=true$' <<<"$preflight"
 grep -q '^no_scorer_run=true$' <<<"$preflight"
 grep -q '"metric": "pro_elevation_preflight"' "$preflight_json"
@@ -201,6 +207,10 @@ grep -q '"task_provenance_ok": false' "$preflight_json"
 grep -q '"task_provenance_sha256": ""' "$preflight_json"
 grep -q '"ready_to_run": false' "$preflight_json"
 grep -q '"production_ready_to_run": false' "$preflight_json"
+grep -q '"ready_blockers": ' "$preflight_json"
+grep -q '"production_ready_blockers": ' "$preflight_json"
+grep -q 'deepseek_api_key_present' "$preflight_json"
+grep -q 'modal_credentials_present' "$preflight_json"
 if grep -q 'DEEPSEEK_API_KEY\|MODAL_TOKEN' "$preflight_json"; then
   echo "preflight receipt must not serialize secret names or values" >&2
   exit 1
@@ -499,8 +509,16 @@ grep -q "^task_provenance_sha256=$fake_provenance_sha$" <<<"$ready_preflight"
 grep -q '^suite_pristine_layout_ok=true$' <<<"$ready_preflight"
 grep -q '^ready_to_run=true$' <<<"$ready_preflight"
 grep -q '^production_ready_to_run=false$' <<<"$ready_preflight"
+grep -q '^ready_blockers=$' <<<"$ready_preflight"
+grep -q '^production_ready_blockers=.*test_runner_override_allowed' <<<"$ready_preflight"
+grep -q '^production_ready_blockers=.*official_deepseek_api_preflight_ok' <<<"$ready_preflight"
+grep -q '^production_ready_blockers=.*official_modal_preflight_ok' <<<"$ready_preflight"
+grep -q '^production_ready_blockers=.*official_scorer_preflight_ok' <<<"$ready_preflight"
 grep -q '"ready_to_run": true' "$ready_preflight_json"
 grep -q '"production_ready_to_run": false' "$ready_preflight_json"
+grep -q '"ready_blockers": ""' "$ready_preflight_json"
+grep -q '"production_ready_blockers": ' "$ready_preflight_json"
+grep -q 'test_runner_override_allowed' "$ready_preflight_json"
 grep -q "\"selection_manifest_path\": \"$manifest\"" "$ready_preflight_json"
 grep -q "\"selection_manifest_sha256\": \"$manifest_sha\"" "$ready_preflight_json"
 grep -q '"modal_token_id_present": true' "$ready_preflight_json"
@@ -651,8 +669,91 @@ grep -q '^receipt_production_ready_to_run=false$' "$tmp/verify-production-ready.
 grep -q '^current_production_ready_to_run=false$' "$tmp/verify-production-ready.out"
 grep -q '^receipt_matches_current=true$' "$tmp/verify-production-ready.out"
 grep -q '^production_ready_receipt_ok=false$' "$tmp/verify-production-ready.out"
+grep -q '^production_ready_receipt_blockers=receipt_production_ready_to_run,current_production_ready_to_run$' "$tmp/verify-production-ready.out"
 grep -q '^no_model_run=true$' "$tmp/verify-production-ready.out"
 grep -q '^no_scorer_run=true$' "$tmp/verify-production-ready.out"
+
+missing_preflight_verify_json="$tmp/missing-preflight-receipt.json"
+if "$ROUND" --verify-preflight "$missing_preflight_verify_json" >"$tmp/missing-preflight-verify.out" 2>"$tmp/missing-preflight-verify.err"; then
+  echo "expected missing preflight receipt verification to fail" >&2
+  exit 1
+fi
+grep -q '^metric=pro_elevation_preflight_verification$' "$tmp/missing-preflight-verify.out"
+grep -q '^preflight_receipt_exists=false$' "$tmp/missing-preflight-verify.out"
+grep -q '^preflight_receipt_schema_ok=false$' "$tmp/missing-preflight-verify.out"
+grep -q '^preflight_receipt_schema_issue_paths=preflight_receipt_exists$' "$tmp/missing-preflight-verify.out"
+grep -q '^ready_blockers=preflight_receipt_exists$' "$tmp/missing-preflight-verify.out"
+grep -q '^production_ready_blockers=preflight_receipt_ok$' "$tmp/missing-preflight-verify.out"
+grep -q '^preflight_receipt_ok=false$' "$tmp/missing-preflight-verify.out"
+
+printf '{"broken"' >"$tmp/malformed-preflight-receipt.json"
+if "$ROUND" --verify-preflight "$tmp/malformed-preflight-receipt.json" >"$tmp/malformed-preflight-verify.out" 2>"$tmp/malformed-preflight-verify.err"; then
+  echo "expected malformed preflight receipt verification to fail" >&2
+  exit 1
+fi
+grep -q '^preflight_receipt_exists=true$' "$tmp/malformed-preflight-verify.out"
+grep -q '^preflight_receipt_schema_ok=false$' "$tmp/malformed-preflight-verify.out"
+grep -q '^preflight_receipt_missing_fields=$' "$tmp/malformed-preflight-verify.out"
+grep -q '^preflight_receipt_schema_issue_paths=preflight_receipt_json$' "$tmp/malformed-preflight-verify.out"
+grep -q '^ready_blockers=preflight_receipt_json$' "$tmp/malformed-preflight-verify.out"
+grep -q '^production_ready_blockers=preflight_receipt_ok$' "$tmp/malformed-preflight-verify.out"
+grep -q '^preflight_receipt_ok=false$' "$tmp/malformed-preflight-verify.out"
+grep -q '^no_model_run=true$' "$tmp/malformed-preflight-verify.out"
+grep -q '^no_scorer_run=true$' "$tmp/malformed-preflight-verify.out"
+
+printf '[]\n' >"$tmp/non-object-preflight-receipt.json"
+if "$ROUND" --verify-preflight "$tmp/non-object-preflight-receipt.json" >"$tmp/non-object-preflight-verify.out" 2>"$tmp/non-object-preflight-verify.err"; then
+  echo "expected non-object preflight receipt verification to fail" >&2
+  exit 1
+fi
+grep -q '^preflight_receipt_exists=true$' "$tmp/non-object-preflight-verify.out"
+grep -q '^preflight_receipt_schema_ok=false$' "$tmp/non-object-preflight-verify.out"
+grep -q '^preflight_receipt_missing_fields=$' "$tmp/non-object-preflight-verify.out"
+grep -q '^preflight_receipt_schema_issue_paths=preflight_receipt_object$' "$tmp/non-object-preflight-verify.out"
+grep -q '^ready_blockers=preflight_receipt_object$' "$tmp/non-object-preflight-verify.out"
+grep -q '^production_ready_blockers=preflight_receipt_ok$' "$tmp/non-object-preflight-verify.out"
+grep -q '^preflight_receipt_ok=false$' "$tmp/non-object-preflight-verify.out"
+grep -q '^no_model_run=true$' "$tmp/non-object-preflight-verify.out"
+grep -q '^no_scorer_run=true$' "$tmp/non-object-preflight-verify.out"
+
+if "$ROUND" --verify-production-ready "$tmp/malformed-preflight-receipt.json" >"$tmp/malformed-production-ready-verify.out" 2>"$tmp/malformed-production-ready-verify.err"; then
+  echo "expected malformed production-ready receipt verification to fail" >&2
+  exit 1
+fi
+grep -q '^metric=pro_elevation_production_ready_verification$' "$tmp/malformed-production-ready-verify.out"
+grep -q '^preflight_receipt_exists=true$' "$tmp/malformed-production-ready-verify.out"
+grep -q '^preflight_receipt_schema_ok=false$' "$tmp/malformed-production-ready-verify.out"
+grep -q '^preflight_receipt_schema_issue_paths=preflight_receipt_json$' "$tmp/malformed-production-ready-verify.out"
+grep -q '^ready_blockers=preflight_receipt_json$' "$tmp/malformed-production-ready-verify.out"
+grep -q '^production_ready_blockers=preflight_receipt_ok$' "$tmp/malformed-production-ready-verify.out"
+grep -q '^production_ready_receipt_ok=false$' "$tmp/malformed-production-ready-verify.out"
+grep -q '^production_ready_receipt_blockers=preflight_receipt_json,receipt_production_ready_to_run,current_production_ready_to_run,receipt_matches_current$' "$tmp/malformed-production-ready-verify.out"
+
+if "$ROUND" --verify-production-ready "$tmp/non-object-preflight-receipt.json" >"$tmp/non-object-production-ready-verify.out" 2>"$tmp/non-object-production-ready-verify.err"; then
+  echo "expected non-object production-ready receipt verification to fail" >&2
+  exit 1
+fi
+grep -q '^metric=pro_elevation_production_ready_verification$' "$tmp/non-object-production-ready-verify.out"
+grep -q '^preflight_receipt_exists=true$' "$tmp/non-object-production-ready-verify.out"
+grep -q '^preflight_receipt_schema_ok=false$' "$tmp/non-object-production-ready-verify.out"
+grep -q '^preflight_receipt_schema_issue_paths=preflight_receipt_object$' "$tmp/non-object-production-ready-verify.out"
+grep -q '^ready_blockers=preflight_receipt_object$' "$tmp/non-object-production-ready-verify.out"
+grep -q '^production_ready_blockers=preflight_receipt_ok$' "$tmp/non-object-production-ready-verify.out"
+grep -q '^production_ready_receipt_ok=false$' "$tmp/non-object-production-ready-verify.out"
+grep -q '^production_ready_receipt_blockers=preflight_receipt_object,receipt_production_ready_to_run,current_production_ready_to_run,receipt_matches_current$' "$tmp/non-object-production-ready-verify.out"
+
+if "$ROUND" --verify-production-ready "$missing_preflight_verify_json" >"$tmp/missing-production-ready-verify.out" 2>"$tmp/missing-production-ready-verify.err"; then
+  echo "expected missing production-ready receipt verification to fail" >&2
+  exit 1
+fi
+grep -q '^metric=pro_elevation_production_ready_verification$' "$tmp/missing-production-ready-verify.out"
+grep -q '^preflight_receipt_exists=false$' "$tmp/missing-production-ready-verify.out"
+grep -q '^preflight_receipt_schema_ok=false$' "$tmp/missing-production-ready-verify.out"
+grep -q '^preflight_receipt_schema_issue_paths=preflight_receipt_exists$' "$tmp/missing-production-ready-verify.out"
+grep -q '^ready_blockers=preflight_receipt_exists$' "$tmp/missing-production-ready-verify.out"
+grep -q '^production_ready_blockers=preflight_receipt_ok$' "$tmp/missing-production-ready-verify.out"
+grep -q '^production_ready_receipt_ok=false$' "$tmp/missing-production-ready-verify.out"
+grep -q '^production_ready_receipt_blockers=preflight_receipt_ok,receipt_production_ready_to_run,current_production_ready_to_run,receipt_matches_current$' "$tmp/missing-production-ready-verify.out"
 
 tampered_preflight_json="$tmp/tampered-preflight.json"
 sed 's/"selected_task_ids_sha256": "[^"]*"/"selected_task_ids_sha256": "stale"/' "$ready_preflight_json" >"$tampered_preflight_json"
@@ -667,6 +768,7 @@ DEEPSEEK_API_KEY=dummy \
 fi
 grep -q '^preflight_receipt_ok=false$' "$tmp/tampered-verify.out"
 grep -q '^receipt_matches_current=false$' "$tmp/tampered-verify.out"
+grep -q '^preflight_receipt_mismatch_paths=selected_task_ids_sha256$' "$tmp/tampered-verify.out"
 
 tampered_selection_manifest_json="$tmp/tampered-selection-manifest-preflight.json"
 sed 's/"selection_manifest_sha256": "[^"]*"/"selection_manifest_sha256": "stale"/' "$ready_preflight_json" >"$tampered_selection_manifest_json"
@@ -681,6 +783,7 @@ DEEPSEEK_API_KEY=dummy \
 fi
 grep -q '^preflight_receipt_ok=false$' "$tmp/tampered-selection-manifest-verify.out"
 grep -q '^receipt_matches_current=false$' "$tmp/tampered-selection-manifest-verify.out"
+grep -q '^preflight_receipt_mismatch_paths=selection_manifest_sha256$' "$tmp/tampered-selection-manifest-verify.out"
 
 tampered_toolchain_json="$tmp/tampered-toolchain-preflight.json"
 sed 's/"frontier_baseline_runner_sha256": "[^"]*"/"frontier_baseline_runner_sha256": "stale"/' "$ready_preflight_json" >"$tampered_toolchain_json"
@@ -695,6 +798,7 @@ DEEPSEEK_API_KEY=dummy \
 fi
 grep -q '^preflight_receipt_ok=false$' "$tmp/tampered-toolchain-verify.out"
 grep -q '^receipt_matches_current=false$' "$tmp/tampered-toolchain-verify.out"
+grep -q '^preflight_receipt_mismatch_paths=frontier_baseline_runner_sha256$' "$tmp/tampered-toolchain-verify.out"
 
 tampered_provenance_json="$tmp/tampered-provenance-preflight.json"
 sed 's/"task_provenance_sha256": "[^"]*"/"task_provenance_sha256": "stale"/' "$ready_preflight_json" >"$tampered_provenance_json"
@@ -709,6 +813,285 @@ DEEPSEEK_API_KEY=dummy \
 fi
 grep -q '^preflight_receipt_ok=false$' "$tmp/tampered-provenance-verify.out"
 grep -q '^receipt_matches_current=false$' "$tmp/tampered-provenance-verify.out"
+grep -q '^preflight_receipt_mismatch_paths=task_provenance_sha256$' "$tmp/tampered-provenance-verify.out"
+
+tampered_production_ready_preflight_json="$tmp/tampered-production-ready-preflight.json"
+python3 - "$ready_preflight_json" "$tampered_production_ready_preflight_json" <<'PYTAMPEREDPRODUCTIONREADYPREFLIGHT'
+import json
+import sys
+
+source, out = sys.argv[1:]
+with open(source, encoding="utf-8") as handle:
+    data = json.load(handle)
+data["production_ready_to_run"] = True
+with open(out, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PYTAMPEREDPRODUCTIONREADYPREFLIGHT
+if ATOMIC_PRO_ELEVATION_MANIFEST="$manifest" \
+ATOMIC_PRO_FRONTIER_RUNNER="$fake_frontier" \
+ATOMIC_PRO_ELEVATION_STREAM="$fake_stream" \
+ATOMIC_PRO_ELEVATION_ALLOW_TEST_RUNNERS=1 \
+DEEPSEEK_API_KEY=dummy \
+  "$ROUND" --verify-preflight "$tampered_production_ready_preflight_json" >"$tmp/tampered-production-ready-preflight-verify.out" 2>"$tmp/tampered-production-ready-preflight-verify.err"; then
+  echo "expected tampered preflight production readiness to be rejected" >&2
+  exit 1
+fi
+grep -q '^preflight_receipt_ok=false$' "$tmp/tampered-production-ready-preflight-verify.out"
+grep -q '^preflight_receipt_schema_ok=false$' "$tmp/tampered-production-ready-preflight-verify.out"
+grep -q '^preflight_receipt_schema_issue_paths=production_ready_to_run$' "$tmp/tampered-production-ready-preflight-verify.out"
+
+if ATOMIC_PRO_ELEVATION_MANIFEST="$manifest" \
+ATOMIC_PRO_FRONTIER_RUNNER="$fake_frontier" \
+ATOMIC_PRO_ELEVATION_STREAM="$fake_stream" \
+ATOMIC_PRO_ELEVATION_ALLOW_TEST_RUNNERS=1 \
+DEEPSEEK_API_KEY=dummy \
+  "$ROUND" --verify-production-ready "$tampered_production_ready_preflight_json" >"$tmp/tampered-production-ready-production-verify.out" 2>"$tmp/tampered-production-ready-production-verify.err"; then
+  echo "expected production-ready verifier to expose tampered preflight schema issue" >&2
+  exit 1
+fi
+grep -q '^metric=pro_elevation_production_ready_verification$' "$tmp/tampered-production-ready-production-verify.out"
+grep -q '^preflight_receipt_ok=false$' "$tmp/tampered-production-ready-production-verify.out"
+grep -q '^preflight_receipt_schema_ok=false$' "$tmp/tampered-production-ready-production-verify.out"
+grep -q '^preflight_receipt_schema_issue_paths=production_ready_to_run$' "$tmp/tampered-production-ready-production-verify.out"
+grep -q '^production_ready_receipt_ok=false$' "$tmp/tampered-production-ready-production-verify.out"
+grep -q '^production_ready_receipt_blockers=production_ready_to_run,receipt_production_ready_to_run,current_production_ready_to_run,receipt_matches_current$' "$tmp/tampered-production-ready-production-verify.out"
+
+tampered_ready_blockers_preflight_json="$tmp/tampered-ready-blockers-preflight.json"
+python3 - "$ready_preflight_json" "$tampered_ready_blockers_preflight_json" <<'PYTAMPEREDREADYBLOCKERSPREFLIGHT'
+import json
+import sys
+
+source, out = sys.argv[1:]
+with open(source, encoding="utf-8") as handle:
+    data = json.load(handle)
+data["ready_blockers"] = "stale-ready-blocker"
+with open(out, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PYTAMPEREDREADYBLOCKERSPREFLIGHT
+if ATOMIC_PRO_ELEVATION_MANIFEST="$manifest" \
+ATOMIC_PRO_FRONTIER_RUNNER="$fake_frontier" \
+ATOMIC_PRO_ELEVATION_STREAM="$fake_stream" \
+ATOMIC_PRO_ELEVATION_ALLOW_TEST_RUNNERS=1 \
+DEEPSEEK_API_KEY=dummy \
+  "$ROUND" --verify-preflight "$tampered_ready_blockers_preflight_json" >"$tmp/tampered-ready-blockers-preflight-verify.out" 2>"$tmp/tampered-ready-blockers-preflight-verify.err"; then
+  echo "expected tampered preflight ready blockers to be rejected" >&2
+  exit 1
+fi
+grep -q '^preflight_receipt_ok=false$' "$tmp/tampered-ready-blockers-preflight-verify.out"
+grep -q '^preflight_receipt_schema_ok=false$' "$tmp/tampered-ready-blockers-preflight-verify.out"
+grep -q '^preflight_receipt_schema_issue_paths=ready_blockers$' "$tmp/tampered-ready-blockers-preflight-verify.out"
+
+tampered_production_ready_blockers_preflight_json="$tmp/tampered-production-ready-blockers-preflight.json"
+python3 - "$ready_preflight_json" "$tampered_production_ready_blockers_preflight_json" <<'PYTAMPEREDPRODUCTIONREADYBLOCKERSPREFLIGHT'
+import json
+import sys
+
+source, out = sys.argv[1:]
+with open(source, encoding="utf-8") as handle:
+    data = json.load(handle)
+data["production_ready_blockers"] = "stale-production-ready-blocker"
+with open(out, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PYTAMPEREDPRODUCTIONREADYBLOCKERSPREFLIGHT
+if ATOMIC_PRO_ELEVATION_MANIFEST="$manifest" \
+ATOMIC_PRO_FRONTIER_RUNNER="$fake_frontier" \
+ATOMIC_PRO_ELEVATION_STREAM="$fake_stream" \
+ATOMIC_PRO_ELEVATION_ALLOW_TEST_RUNNERS=1 \
+DEEPSEEK_API_KEY=dummy \
+  "$ROUND" --verify-preflight "$tampered_production_ready_blockers_preflight_json" >"$tmp/tampered-production-ready-blockers-preflight-verify.out" 2>"$tmp/tampered-production-ready-blockers-preflight-verify.err"; then
+  echo "expected tampered preflight production-ready blockers to be rejected" >&2
+  exit 1
+fi
+grep -q '^preflight_receipt_ok=false$' "$tmp/tampered-production-ready-blockers-preflight-verify.out"
+grep -q '^preflight_receipt_schema_ok=false$' "$tmp/tampered-production-ready-blockers-preflight-verify.out"
+grep -q '^preflight_receipt_schema_issue_paths=production_ready_blockers$' "$tmp/tampered-production-ready-blockers-preflight-verify.out"
+
+tampered_ready_to_run_preflight_json="$tmp/tampered-ready-to-run-preflight.json"
+python3 - "$preflight_json" "$tampered_ready_to_run_preflight_json" <<'PYTAMPEREDREADYTORUNPREFLIGHT'
+import json
+import sys
+
+source, out = sys.argv[1:]
+with open(source, encoding="utf-8") as handle:
+    data = json.load(handle)
+data["ready_to_run"] = True
+production_ready_blockers = data.get("production_ready_blockers", "").split(",")
+data["production_ready_blockers"] = ",".join(
+    blocker for blocker in production_ready_blockers if blocker and blocker != "ready_to_run"
+)
+with open(out, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PYTAMPEREDREADYTORUNPREFLIGHT
+if ATOMIC_PRO_ELEVATION_MANIFEST="$manifest" \
+  "$ROUND" --verify-preflight "$tampered_ready_to_run_preflight_json" >"$tmp/tampered-ready-to-run-preflight-verify.out" 2>"$tmp/tampered-ready-to-run-preflight-verify.err"; then
+  echo "expected tampered preflight readiness to be rejected" >&2
+  exit 1
+fi
+grep -q '^preflight_receipt_ok=false$' "$tmp/tampered-ready-to-run-preflight-verify.out"
+grep -q '^preflight_receipt_schema_ok=false$' "$tmp/tampered-ready-to-run-preflight-verify.out"
+grep -q '^preflight_receipt_schema_issue_paths=ready_to_run$' "$tmp/tampered-ready-to-run-preflight-verify.out"
+
+tampered_credential_format_preflight_json="$tmp/tampered-credential-format-preflight.json"
+python3 - "$preflight_json" "$tampered_credential_format_preflight_json" <<'PYTAMPEREDCREDENTIALFORMATPREFLIGHT'
+import json
+import sys
+
+source, out = sys.argv[1:]
+with open(source, encoding="utf-8") as handle:
+    data = json.load(handle)
+data["credential_format_ok"] = True
+ready_blockers = data.get("ready_blockers", "").split(",")
+data["ready_blockers"] = ",".join(
+    blocker for blocker in ready_blockers if blocker and blocker != "credential_format_ok"
+)
+with open(out, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PYTAMPEREDCREDENTIALFORMATPREFLIGHT
+if ATOMIC_PRO_ELEVATION_MANIFEST="$manifest" \
+  "$ROUND" --verify-preflight "$tampered_credential_format_preflight_json" >"$tmp/tampered-credential-format-preflight-verify.out" 2>"$tmp/tampered-credential-format-preflight-verify.err"; then
+  echo "expected tampered preflight credential format verdict to be rejected" >&2
+  exit 1
+fi
+grep -q '^preflight_receipt_ok=false$' "$tmp/tampered-credential-format-preflight-verify.out"
+grep -q '^preflight_receipt_schema_ok=false$' "$tmp/tampered-credential-format-preflight-verify.out"
+grep -q '^preflight_receipt_schema_issue_paths=credential_format_ok$' "$tmp/tampered-credential-format-preflight-verify.out"
+
+tampered_rotation_attestation_preflight_json="$tmp/tampered-rotation-attestation-preflight.json"
+python3 - "$preflight_json" "$tampered_rotation_attestation_preflight_json" <<'PYTAMPEREDROTATIONATTESTATIONPREFLIGHT'
+import json
+import sys
+
+source, out = sys.argv[1:]
+with open(source, encoding="utf-8") as handle:
+    data = json.load(handle)
+data["credential_rotation_attestation_ok"] = True
+ready_blockers = data.get("ready_blockers", "").split(",")
+data["ready_blockers"] = ",".join(
+    blocker for blocker in ready_blockers if blocker and blocker != "credential_rotation_attestation_ok"
+)
+with open(out, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PYTAMPEREDROTATIONATTESTATIONPREFLIGHT
+if ATOMIC_PRO_ELEVATION_MANIFEST="$manifest" \
+  "$ROUND" --verify-preflight "$tampered_rotation_attestation_preflight_json" >"$tmp/tampered-rotation-attestation-preflight-verify.out" 2>"$tmp/tampered-rotation-attestation-preflight-verify.err"; then
+  echo "expected tampered preflight credential rotation attestation verdict to be rejected" >&2
+  exit 1
+fi
+grep -q '^preflight_receipt_ok=false$' "$tmp/tampered-rotation-attestation-preflight-verify.out"
+grep -q '^preflight_receipt_schema_ok=false$' "$tmp/tampered-rotation-attestation-preflight-verify.out"
+grep -q '^preflight_receipt_schema_issue_paths=credential_rotation_attestation_ok$' "$tmp/tampered-rotation-attestation-preflight-verify.out"
+
+tampered_deepseek_preflight_json="$tmp/tampered-deepseek-preflight.json"
+python3 - "$preflight_json" "$tampered_deepseek_preflight_json" <<'PYTAMPEREDDEEPSEEKPREFLIGHT'
+import json
+import sys
+
+source, out = sys.argv[1:]
+with open(source, encoding="utf-8") as handle:
+    data = json.load(handle)
+data["deepseek_api_preflight_ok"] = True
+ready_blockers = data.get("ready_blockers", "").split(",")
+data["ready_blockers"] = ",".join(
+    blocker for blocker in ready_blockers if blocker and blocker != "deepseek_api_preflight_ok"
+)
+with open(out, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PYTAMPEREDDEEPSEEKPREFLIGHT
+if ATOMIC_PRO_ELEVATION_MANIFEST="$manifest" \
+  "$ROUND" --verify-preflight "$tampered_deepseek_preflight_json" >"$tmp/tampered-deepseek-preflight-verify.out" 2>"$tmp/tampered-deepseek-preflight-verify.err"; then
+  echo "expected tampered preflight DeepSeek API verdict to be rejected" >&2
+  exit 1
+fi
+grep -q '^preflight_receipt_ok=false$' "$tmp/tampered-deepseek-preflight-verify.out"
+grep -q '^preflight_receipt_schema_ok=false$' "$tmp/tampered-deepseek-preflight-verify.out"
+grep -q '^preflight_receipt_schema_issue_paths=deepseek_api_preflight_ok$' "$tmp/tampered-deepseek-preflight-verify.out"
+
+tampered_modal_preflight_json="$tmp/tampered-modal-preflight.json"
+python3 - "$preflight_json" "$tampered_modal_preflight_json" <<'PYTAMPEREDMODALPREFLIGHT'
+import json
+import sys
+
+source, out = sys.argv[1:]
+with open(source, encoding="utf-8") as handle:
+    data = json.load(handle)
+data["modal_preflight_ok"] = True
+ready_blockers = data.get("ready_blockers", "").split(",")
+data["ready_blockers"] = ",".join(
+    blocker for blocker in ready_blockers if blocker and blocker != "modal_preflight_ok"
+)
+with open(out, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PYTAMPEREDMODALPREFLIGHT
+if ATOMIC_PRO_ELEVATION_MANIFEST="$manifest" \
+  "$ROUND" --verify-preflight "$tampered_modal_preflight_json" >"$tmp/tampered-modal-preflight-verify.out" 2>"$tmp/tampered-modal-preflight-verify.err"; then
+  echo "expected tampered preflight Modal verdict to be rejected" >&2
+  exit 1
+fi
+grep -q '^preflight_receipt_ok=false$' "$tmp/tampered-modal-preflight-verify.out"
+grep -q '^preflight_receipt_schema_ok=false$' "$tmp/tampered-modal-preflight-verify.out"
+grep -q '^preflight_receipt_schema_issue_paths=modal_preflight_ok$' "$tmp/tampered-modal-preflight-verify.out"
+
+tampered_scorer_preflight_json="$tmp/tampered-scorer-preflight.json"
+python3 - "$preflight_json" "$tampered_scorer_preflight_json" <<'PYTAMPEREDSCORERPREFLIGHT'
+import json
+import sys
+
+source, out = sys.argv[1:]
+with open(source, encoding="utf-8") as handle:
+    data = json.load(handle)
+expected = bool(data.get("official_scorer_preflight_ok")) or bool(
+    data.get("scorer_preflight_bypassed_by_test_runner")
+)
+data["scorer_preflight_ok"] = not expected
+ready_blocker_set = {blocker for blocker in data.get("ready_blockers", "").split(",") if blocker}
+if expected:
+    ready_blocker_set.add("scorer_preflight_ok")
+else:
+    ready_blocker_set.discard("scorer_preflight_ok")
+canonical_ready_blockers = [
+    "official_benchmark",
+    "selected_task_count",
+    "selection_receipt_ok",
+    "anti_cherry_pick",
+    "deepseek_api_key_present",
+    "modal_credentials_present",
+    "credential_format_ok",
+    "credential_rotation_attestation_ok",
+    "deepseek_api_preflight_ok",
+    "modal_preflight_ok",
+    "scorer_preflight_ok",
+    "runner_policy_ok",
+    "frontier_runner_ok",
+    "elevation_stream_ok",
+    "weights_ok",
+    "task_layout_ok",
+    "task_provenance_ok",
+    "task_provenance_sha256",
+    "suite_pristine_layout_ok",
+]
+data["ready_blockers"] = ",".join(
+    blocker for blocker in canonical_ready_blockers if blocker in ready_blocker_set
+)
+with open(out, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PYTAMPEREDSCORERPREFLIGHT
+if ATOMIC_PRO_ELEVATION_MANIFEST="$manifest" \
+  "$ROUND" --verify-preflight "$tampered_scorer_preflight_json" >"$tmp/tampered-scorer-preflight-verify.out" 2>"$tmp/tampered-scorer-preflight-verify.err"; then
+  echo "expected tampered preflight scorer verdict to be rejected" >&2
+  exit 1
+fi
+grep -q '^preflight_receipt_ok=false$' "$tmp/tampered-scorer-preflight-verify.out"
+grep -q '^preflight_receipt_schema_ok=false$' "$tmp/tampered-scorer-preflight-verify.out"
+grep -q '^preflight_receipt_schema_issue_paths=scorer_preflight_ok$' "$tmp/tampered-scorer-preflight-verify.out"
 
 if ATOMIC_PRO_ELEVATION_MANIFEST="$manifest" \
   "$ROUND" --verify-preflight "$preflight_json" >"$tmp/blocked-verify.out" 2>"$tmp/blocked-verify.err"; then
@@ -1159,6 +1542,135 @@ grep -q "^round_receipt_sha256=$round_receipt_sha$" <<<"$verify_round"
 grep -q '^no_model_run=true$' <<<"$verify_round"
 grep -q '^no_scorer_run=true$' <<<"$verify_round"
 
+tampered_frontier_summary="$tmp/tampered-frontier-summary.json"
+tampered_frontier_summary_receipt="$tmp/tampered-frontier-summary-receipt.json"
+python3 - "$round_receipt" "$tampered_frontier_summary" "$tampered_frontier_summary_receipt" <<'PYTAMPEREDFRONTIERSUMMARY'
+import hashlib
+import json
+import sys
+
+source, summary_out, receipt_out = sys.argv[1:]
+with open(source, encoding="utf-8") as handle:
+    receipt = json.load(handle)
+with open(receipt["frontier_baseline_summary_path"], encoding="utf-8") as handle:
+    summary = json.load(handle)
+summary["benchmark_dataset_name"] = "princeton-nlp/SWE-bench_Verified"
+with open(summary_out, "w", encoding="utf-8") as handle:
+    json.dump(summary, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+with open(summary_out, "rb") as handle:
+    receipt["frontier_baseline_summary_sha256"] = hashlib.sha256(handle.read()).hexdigest()
+receipt["frontier_baseline_summary_path"] = summary_out
+receipt["round_receipt_path"] = receipt_out
+with open(receipt_out, "w", encoding="utf-8") as handle:
+    json.dump(receipt, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PYTAMPEREDFRONTIERSUMMARY
+if "$ROUND" --verify-round-receipt "$tampered_frontier_summary_receipt" >"$tmp/tampered-frontier-summary-verify.out" 2>"$tmp/tampered-frontier-summary-verify.err"; then
+  echo "expected round receipt with non-Pro frontier summary dataset to fail verification" >&2
+  exit 1
+fi
+grep -q '^round_receipt_ok=false$' "$tmp/tampered-frontier-summary-verify.out"
+grep -q '^round_receipt_schema_ok=false$' "$tmp/tampered-frontier-summary-verify.out"
+grep -q '^frontier_summary_verification_ok=false$' "$tmp/tampered-frontier-summary-verify.out"
+grep -q '^round_receipt_schema_issue_paths=frontier_summary.benchmark_dataset_name$' "$tmp/tampered-frontier-summary-verify.out"
+
+tampered_elevation_summary="$tmp/tampered-elevation-summary.json"
+tampered_elevation_summary_receipt="$tmp/tampered-elevation-summary-receipt.json"
+python3 - "$round_receipt" "$tampered_elevation_summary" "$tampered_elevation_summary_receipt" <<'PYTAMPEREDELEVATIONSUMMARY'
+import hashlib
+import json
+import sys
+
+source, summary_out, receipt_out = sys.argv[1:]
+with open(source, encoding="utf-8") as handle:
+    receipt = json.load(handle)
+with open(receipt["elevation_summary_path"], encoding="utf-8") as handle:
+    summary = json.load(handle)
+summary["benchmark_dataset_name"] = "princeton-nlp/SWE-bench_Verified"
+with open(summary_out, "w", encoding="utf-8") as handle:
+    json.dump(summary, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+with open(summary_out, "rb") as handle:
+    receipt["elevation_summary_sha256"] = hashlib.sha256(handle.read()).hexdigest()
+receipt["elevation_summary_path"] = summary_out
+receipt["round_receipt_path"] = receipt_out
+with open(receipt_out, "w", encoding="utf-8") as handle:
+    json.dump(receipt, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PYTAMPEREDELEVATIONSUMMARY
+if "$ROUND" --verify-round-receipt "$tampered_elevation_summary_receipt" >"$tmp/tampered-elevation-summary-verify.out" 2>"$tmp/tampered-elevation-summary-verify.err"; then
+  echo "expected round receipt with non-Pro elevation summary dataset to fail verification" >&2
+  exit 1
+fi
+grep -q '^round_receipt_ok=false$' "$tmp/tampered-elevation-summary-verify.out"
+grep -q '^round_receipt_schema_ok=false$' "$tmp/tampered-elevation-summary-verify.out"
+grep -q '^round_receipt_schema_issue_paths=elevation_summary.benchmark_dataset_name$' "$tmp/tampered-elevation-summary-verify.out"
+
+tampered_elevation_task_count_summary="$tmp/tampered-elevation-task-count-summary.json"
+tampered_elevation_task_count_receipt="$tmp/tampered-elevation-task-count-receipt.json"
+python3 - "$round_receipt" "$tampered_elevation_task_count_summary" "$tampered_elevation_task_count_receipt" <<'PYTAMPEREDELEVATIONTASKCOUNT'
+import hashlib
+import json
+import sys
+
+source, summary_out, receipt_out = sys.argv[1:]
+with open(source, encoding="utf-8") as handle:
+    receipt = json.load(handle)
+with open(receipt["elevation_summary_path"], encoding="utf-8") as handle:
+    summary = json.load(handle)
+summary["task_count"] = len(summary["task_ids"]) + 1
+with open(summary_out, "w", encoding="utf-8") as handle:
+    json.dump(summary, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+with open(summary_out, "rb") as handle:
+    receipt["elevation_summary_sha256"] = hashlib.sha256(handle.read()).hexdigest()
+receipt["elevation_summary_path"] = summary_out
+receipt["round_receipt_path"] = receipt_out
+with open(receipt_out, "w", encoding="utf-8") as handle:
+    json.dump(receipt, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PYTAMPEREDELEVATIONTASKCOUNT
+if "$ROUND" --verify-round-receipt "$tampered_elevation_task_count_receipt" >"$tmp/tampered-elevation-task-count-verify.out" 2>"$tmp/tampered-elevation-task-count-verify.err"; then
+  echo "expected round receipt with elevation summary task-count drift to fail verification" >&2
+  exit 1
+fi
+grep -q '^round_receipt_ok=false$' "$tmp/tampered-elevation-task-count-verify.out"
+grep -q '^round_receipt_schema_ok=false$' "$tmp/tampered-elevation-task-count-verify.out"
+grep -q '^round_receipt_schema_issue_paths=elevation_summary.task_count$' "$tmp/tampered-elevation-task-count-verify.out"
+
+tampered_elevation_rate_summary="$tmp/tampered-elevation-rate-summary.json"
+tampered_elevation_rate_receipt="$tmp/tampered-elevation-rate-receipt.json"
+python3 - "$round_receipt" "$tampered_elevation_rate_summary" "$tampered_elevation_rate_receipt" <<'PYTAMPEREDELEVATIONRATE'
+import hashlib
+import json
+import sys
+
+source, summary_out, receipt_out = sys.argv[1:]
+with open(source, encoding="utf-8") as handle:
+    receipt = json.load(handle)
+with open(receipt["elevation_summary_path"], encoding="utf-8") as handle:
+    summary = json.load(handle)
+summary["frontier_solve_rate"] = 1.0
+with open(summary_out, "w", encoding="utf-8") as handle:
+    json.dump(summary, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+with open(summary_out, "rb") as handle:
+    receipt["elevation_summary_sha256"] = hashlib.sha256(handle.read()).hexdigest()
+receipt["elevation_summary_path"] = summary_out
+receipt["round_receipt_path"] = receipt_out
+with open(receipt_out, "w", encoding="utf-8") as handle:
+    json.dump(receipt, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PYTAMPEREDELEVATIONRATE
+if "$ROUND" --verify-round-receipt "$tampered_elevation_rate_receipt" >"$tmp/tampered-elevation-rate-verify.out" 2>"$tmp/tampered-elevation-rate-verify.err"; then
+  echo "expected round receipt with elevation summary frontier solve-rate drift to fail verification" >&2
+  exit 1
+fi
+grep -q '^round_receipt_ok=false$' "$tmp/tampered-elevation-rate-verify.out"
+grep -q '^round_receipt_schema_ok=false$' "$tmp/tampered-elevation-rate-verify.out"
+grep -q '^round_receipt_schema_issue_paths=elevation_summary.frontier_solve_rate$' "$tmp/tampered-elevation-rate-verify.out"
+
 tampered_metric_receipt="$tmp/tampered-metric-receipt.json"
 python3 - "$round_receipt" "$tampered_metric_receipt" <<'PYTAMPEREDMETRICRECEIPT'
 import json
@@ -1179,6 +1691,73 @@ if "$ROUND" --verify-round-receipt "$tampered_metric_receipt" >"$tmp/tampered-me
 fi
 grep -q '^round_receipt_ok=false$' "$tmp/tampered-metric-verify.out"
 grep -q '^round_receipt_schema_ok=false$' "$tmp/tampered-metric-verify.out"
+grep -q '^round_receipt_schema_issue_paths=elevation_vs_frontier_solve_rate$' "$tmp/tampered-metric-verify.out"
+
+tampered_production_ready_receipt="$tmp/tampered-production-ready-receipt.json"
+python3 - "$round_receipt" "$tampered_production_ready_receipt" <<'PYTAMPEREDPRODUCTIONREADYRECEIPT'
+import json
+import sys
+
+source, out = sys.argv[1:]
+with open(source, encoding="utf-8") as handle:
+    data = json.load(handle)
+data["production_ready_to_run"] = True
+data["round_receipt_path"] = out
+with open(out, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PYTAMPEREDPRODUCTIONREADYRECEIPT
+if "$ROUND" --verify-round-receipt "$tampered_production_ready_receipt" >"$tmp/tampered-production-ready-verify.out" 2>"$tmp/tampered-production-ready-verify.err"; then
+  echo "expected round receipt with stale production readiness to fail verification" >&2
+  exit 1
+fi
+grep -q '^round_receipt_ok=false$' "$tmp/tampered-production-ready-verify.out"
+grep -q '^round_receipt_schema_ok=false$' "$tmp/tampered-production-ready-verify.out"
+grep -q '^round_receipt_schema_issue_paths=production_ready_to_run$' "$tmp/tampered-production-ready-verify.out"
+
+tampered_production_toolchain_receipt="$tmp/tampered-production-toolchain-receipt.json"
+python3 - "$round_receipt" "$tampered_production_toolchain_receipt" <<'PYTAMPEREDPRODUCTIONTOOLCHAINRECEIPT'
+import json
+import sys
+
+source, out = sys.argv[1:]
+with open(source, encoding="utf-8") as handle:
+    data = json.load(handle)
+data["production_toolchain_ok"] = True
+data["round_receipt_path"] = out
+with open(out, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PYTAMPEREDPRODUCTIONTOOLCHAINRECEIPT
+if "$ROUND" --verify-round-receipt "$tampered_production_toolchain_receipt" >"$tmp/tampered-production-toolchain-verify.out" 2>"$tmp/tampered-production-toolchain-verify.err"; then
+  echo "expected round receipt with stale production toolchain verdict to fail verification" >&2
+  exit 1
+fi
+grep -q '^round_receipt_ok=false$' "$tmp/tampered-production-toolchain-verify.out"
+grep -q '^round_receipt_schema_ok=false$' "$tmp/tampered-production-toolchain-verify.out"
+grep -q '^round_receipt_schema_issue_paths=production_toolchain_ok$' "$tmp/tampered-production-toolchain-verify.out"
+
+tampered_metric_admissible_receipt="$tmp/tampered-metric-admissible-receipt.json"
+python3 - "$round_receipt" "$tampered_metric_admissible_receipt" <<'PYTAMPEREDMETRICADMISSIBLERECEIPT'
+import json
+import sys
+
+source, out = sys.argv[1:]
+with open(source, encoding="utf-8") as handle:
+    data = json.load(handle)
+data["metric_admissible"] = True
+data["round_receipt_path"] = out
+with open(out, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PYTAMPEREDMETRICADMISSIBLERECEIPT
+if "$ROUND" --verify-round-receipt "$tampered_metric_admissible_receipt" >"$tmp/tampered-metric-admissible-verify.out" 2>"$tmp/tampered-metric-admissible-verify.err"; then
+  echo "expected round receipt with stale metric admissibility verdict to fail verification" >&2
+  exit 1
+fi
+grep -q '^round_receipt_ok=false$' "$tmp/tampered-metric-admissible-verify.out"
+grep -q '^round_receipt_schema_ok=false$' "$tmp/tampered-metric-admissible-verify.out"
+grep -q '^round_receipt_schema_issue_paths=metric_admissible$' "$tmp/tampered-metric-admissible-verify.out"
 
 tampered_student_model_receipt="$tmp/tampered-student-model-receipt.json"
 python3 - "$round_receipt" "$tampered_student_model_receipt" <<'PYTAMPEREDSTUDENTMODELRECEIPT'
@@ -1200,6 +1779,7 @@ if "$ROUND" --verify-round-receipt "$tampered_student_model_receipt" >"$tmp/tamp
 fi
 grep -q '^round_receipt_ok=false$' "$tmp/tampered-student-model-verify.out"
 grep -q '^round_receipt_schema_ok=false$' "$tmp/tampered-student-model-verify.out"
+grep -q '^round_receipt_schema_issue_paths=student_model$' "$tmp/tampered-student-model-verify.out"
 
 tampered_frontier_model_receipt="$tmp/tampered-frontier-model-receipt.json"
 python3 - "$round_receipt" "$tampered_frontier_model_receipt" <<'PYTAMPEREDFRONTIERMODELRECEIPT'
@@ -1221,6 +1801,95 @@ if "$ROUND" --verify-round-receipt "$tampered_frontier_model_receipt" >"$tmp/tam
 fi
 grep -q '^round_receipt_ok=false$' "$tmp/tampered-frontier-model-verify.out"
 grep -q '^round_receipt_schema_ok=false$' "$tmp/tampered-frontier-model-verify.out"
+grep -q '^round_receipt_schema_issue_paths=frontier_model$' "$tmp/tampered-frontier-model-verify.out"
+
+tampered_frontier_label_receipt="$tmp/tampered-frontier-label-receipt.json"
+python3 - "$round_receipt" "$tampered_frontier_label_receipt" <<'PYTAMPEREDFRONTIERLABELRECEIPT'
+import json
+import sys
+
+source, out = sys.argv[1:]
+with open(source, encoding="utf-8") as handle:
+    data = json.load(handle)
+data["frontier_baseline_benchmark_label"] = "SWE-bench-Verified"
+data["round_receipt_path"] = out
+with open(out, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PYTAMPEREDFRONTIERLABELRECEIPT
+if "$ROUND" --verify-round-receipt "$tampered_frontier_label_receipt" >"$tmp/tampered-frontier-label-verify.out" 2>"$tmp/tampered-frontier-label-verify.err"; then
+  echo "expected round receipt with stale frontier benchmark label to fail verification" >&2
+  exit 1
+fi
+grep -q '^round_receipt_ok=false$' "$tmp/tampered-frontier-label-verify.out"
+grep -q '^round_receipt_schema_ok=false$' "$tmp/tampered-frontier-label-verify.out"
+grep -q '^round_receipt_schema_issue_paths=frontier_baseline_benchmark_label$' "$tmp/tampered-frontier-label-verify.out"
+
+tampered_frontier_docker_receipt="$tmp/tampered-frontier-docker-receipt.json"
+python3 - "$round_receipt" "$tampered_frontier_docker_receipt" <<'PYTAMPEREDFRONTIERDOCKERRECEIPT'
+import json
+import sys
+
+source, out = sys.argv[1:]
+with open(source, encoding="utf-8") as handle:
+    data = json.load(handle)
+data["frontier_baseline_official_docker"] = False
+data["round_receipt_path"] = out
+with open(out, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PYTAMPEREDFRONTIERDOCKERRECEIPT
+if "$ROUND" --verify-round-receipt "$tampered_frontier_docker_receipt" >"$tmp/tampered-frontier-docker-verify.out" 2>"$tmp/tampered-frontier-docker-verify.err"; then
+  echo "expected round receipt with non-official frontier Docker flag to fail verification" >&2
+  exit 1
+fi
+grep -q '^round_receipt_ok=false$' "$tmp/tampered-frontier-docker-verify.out"
+grep -q '^round_receipt_schema_ok=false$' "$tmp/tampered-frontier-docker-verify.out"
+grep -q '^round_receipt_schema_issue_paths=frontier_baseline_official_docker$' "$tmp/tampered-frontier-docker-verify.out"
+
+tampered_frontier_role_receipt="$tmp/tampered-frontier-role-receipt.json"
+python3 - "$round_receipt" "$tampered_frontier_role_receipt" <<'PYTAMPEREDFRONTIERROLERECEIPT'
+import json
+import sys
+
+source, out = sys.argv[1:]
+with open(source, encoding="utf-8") as handle:
+    data = json.load(handle)
+data["frontier_baseline_role"] = "student"
+data["round_receipt_path"] = out
+with open(out, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PYTAMPEREDFRONTIERROLERECEIPT
+if "$ROUND" --verify-round-receipt "$tampered_frontier_role_receipt" >"$tmp/tampered-frontier-role-verify.out" 2>"$tmp/tampered-frontier-role-verify.err"; then
+  echo "expected round receipt with non-frontier baseline role to fail verification" >&2
+  exit 1
+fi
+grep -q '^round_receipt_ok=false$' "$tmp/tampered-frontier-role-verify.out"
+grep -q '^round_receipt_schema_ok=false$' "$tmp/tampered-frontier-role-verify.out"
+grep -q '^round_receipt_schema_issue_paths=frontier_baseline_role$' "$tmp/tampered-frontier-role-verify.out"
+
+tampered_frontier_frozen_receipt="$tmp/tampered-frontier-frozen-receipt.json"
+python3 - "$round_receipt" "$tampered_frontier_frozen_receipt" <<'PYTAMPEREDFRONTIERFROZENRECEIPT'
+import json
+import sys
+
+source, out = sys.argv[1:]
+with open(source, encoding="utf-8") as handle:
+    data = json.load(handle)
+data["frontier_baseline_frozen"] = False
+data["round_receipt_path"] = out
+with open(out, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PYTAMPEREDFRONTIERFROZENRECEIPT
+if "$ROUND" --verify-round-receipt "$tampered_frontier_frozen_receipt" >"$tmp/tampered-frontier-frozen-verify.out" 2>"$tmp/tampered-frontier-frozen-verify.err"; then
+  echo "expected round receipt with non-frozen frontier baseline to fail verification" >&2
+  exit 1
+fi
+grep -q '^round_receipt_ok=false$' "$tmp/tampered-frontier-frozen-verify.out"
+grep -q '^round_receipt_schema_ok=false$' "$tmp/tampered-frontier-frozen-verify.out"
+grep -q '^round_receipt_schema_issue_paths=frontier_baseline_frozen$' "$tmp/tampered-frontier-frozen-verify.out"
 
 stale_round_path_receipt="$tmp/stale-round-path-receipt.json"
 python3 - "$round_receipt" "$stale_round_path_receipt" <<'PYSTALEROUNDPATH'
@@ -1241,6 +1910,72 @@ if "$ROUND" --verify-round-receipt "$stale_round_path_receipt" >"$tmp/stale-roun
 fi
 grep -q '^round_receipt_ok=false$' "$tmp/stale-round-path-verify.out"
 grep -q '^round_receipt_schema_ok=false$' "$tmp/stale-round-path-verify.out"
+
+tampered_dataset_receipt="$tmp/tampered-dataset-receipt.json"
+python3 - "$round_receipt" "$tampered_dataset_receipt" <<'PYTAMPEREDDATASETRECEIPT'
+import json
+import sys
+
+source, out = sys.argv[1:]
+with open(source, encoding="utf-8") as handle:
+    data = json.load(handle)
+data["benchmark_dataset_name"] = "princeton-nlp/SWE-bench_Verified"
+data["round_receipt_path"] = out
+with open(out, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PYTAMPEREDDATASETRECEIPT
+if "$ROUND" --verify-round-receipt "$tampered_dataset_receipt" >"$tmp/tampered-dataset-verify.out" 2>"$tmp/tampered-dataset-verify.err"; then
+  echo "expected round receipt with non-Pro dataset provenance to fail verification" >&2
+  exit 1
+fi
+grep -q '^round_receipt_ok=false$' "$tmp/tampered-dataset-verify.out"
+grep -q '^round_receipt_schema_ok=false$' "$tmp/tampered-dataset-verify.out"
+grep -q '^round_receipt_schema_issue_paths=benchmark_dataset_name$' "$tmp/tampered-dataset-verify.out"
+
+tampered_suite_receipt="$tmp/tampered-suite-receipt.json"
+python3 - "$round_receipt" "$tampered_suite_receipt" <<'PYTAMPEREDSUITERECEIPT'
+import json
+import sys
+
+source, out = sys.argv[1:]
+with open(source, encoding="utf-8") as handle:
+    data = json.load(handle)
+data["benchmark_suite"] = "swe_bench_verified"
+data["round_receipt_path"] = out
+with open(out, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PYTAMPEREDSUITERECEIPT
+if "$ROUND" --verify-round-receipt "$tampered_suite_receipt" >"$tmp/tampered-suite-verify.out" 2>"$tmp/tampered-suite-verify.err"; then
+  echo "expected round receipt with non-Pro benchmark suite to fail verification" >&2
+  exit 1
+fi
+grep -q '^round_receipt_ok=false$' "$tmp/tampered-suite-verify.out"
+grep -q '^round_receipt_schema_ok=false$' "$tmp/tampered-suite-verify.out"
+grep -q '^round_receipt_schema_issue_paths=benchmark_suite$' "$tmp/tampered-suite-verify.out"
+
+tampered_official_receipt="$tmp/tampered-official-receipt.json"
+python3 - "$round_receipt" "$tampered_official_receipt" <<'PYTAMPEREDOFFICIALRECEIPT'
+import json
+import sys
+
+source, out = sys.argv[1:]
+with open(source, encoding="utf-8") as handle:
+    data = json.load(handle)
+data["official_benchmark"] = False
+data["round_receipt_path"] = out
+with open(out, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PYTAMPEREDOFFICIALRECEIPT
+if "$ROUND" --verify-round-receipt "$tampered_official_receipt" >"$tmp/tampered-official-verify.out" 2>"$tmp/tampered-official-verify.err"; then
+  echo "expected round receipt with non-official benchmark flag to fail verification" >&2
+  exit 1
+fi
+grep -q '^round_receipt_ok=false$' "$tmp/tampered-official-verify.out"
+grep -q '^round_receipt_schema_ok=false$' "$tmp/tampered-official-verify.out"
+grep -q '^round_receipt_schema_issue_paths=official_benchmark$' "$tmp/tampered-official-verify.out"
 
 tampered_selection_receipt="$tmp/tampered-selection-receipt.json"
 python3 - "$round_receipt" "$tampered_selection_receipt" <<'PYTAMPEREDSELECTIONRECEIPT'
@@ -1571,6 +2306,16 @@ fi
 grep -q '^round_receipt_ok=false$' "$tmp/tampered-round-provenance-verify.out"
 grep -q '^round_receipt_schema_ok=false$' "$tmp/tampered-round-provenance-verify.out"
 
+tampered_round_task_hash_receipt="$tmp/tampered-round-task-hash-receipt.json"
+sed 's/"selected_task_ids_sha256": "[^"]*"/"selected_task_ids_sha256": "stale"/' "$round_receipt" >"$tampered_round_task_hash_receipt"
+if "$ROUND" --verify-round-receipt "$tampered_round_task_hash_receipt" >"$tmp/tampered-round-task-hash-verify.out" 2>"$tmp/tampered-round-task-hash-verify.err"; then
+  echo "expected tampered round task vector hash to fail verification" >&2
+  exit 1
+fi
+grep -q '^round_receipt_ok=false$' "$tmp/tampered-round-task-hash-verify.out"
+grep -q '^round_receipt_task_ids_ok=false$' "$tmp/tampered-round-task-hash-verify.out"
+grep -q '^round_receipt_task_mismatch_paths=selected_task_ids_sha256$' "$tmp/tampered-round-task-hash-verify.out"
+
 tampered_round_summary_receipt="$tmp/tampered-round-summary-receipt.json"
 sed 's/"frontier_baseline_summary_sha256": "[^"]*"/"frontier_baseline_summary_sha256": "stale"/' "$round_receipt" >"$tampered_round_summary_receipt"
 if "$ROUND" --verify-round-receipt "$tampered_round_summary_receipt" >"$tmp/tampered-round-summary-verify.out" 2>"$tmp/tampered-round-summary-verify.err"; then
@@ -1579,6 +2324,7 @@ if "$ROUND" --verify-round-receipt "$tampered_round_summary_receipt" >"$tmp/tamp
 fi
 grep -q '^round_receipt_ok=false$' "$tmp/tampered-round-summary-verify.out"
 grep -q '^round_receipt_artifact_hashes_ok=false$' "$tmp/tampered-round-summary-verify.out"
+grep -q '^round_receipt_artifact_mismatch_paths=frontier_baseline_summary_sha256$' "$tmp/tampered-round-summary-verify.out"
 
 tampered_round_receipt="$tmp/tampered-round-receipt.json"
 sed 's/"weights_sha256": "[^"]*"/"weights_sha256": "stale"/' "$round_receipt" >"$tampered_round_receipt"
@@ -1588,15 +2334,42 @@ if "$ROUND" --verify-round-receipt "$tampered_round_receipt" >"$tmp/tampered-rou
 fi
 grep -q '^round_receipt_ok=false$' "$tmp/tampered-round-verify.out"
 grep -q '^round_receipt_artifact_hashes_ok=false$' "$tmp/tampered-round-verify.out"
+grep -q '^round_receipt_artifact_mismatch_paths=weights_sha256$' "$tmp/tampered-round-verify.out"
 
 if "$ROUND" --verify-round-receipt "$tmp/missing-round-receipt.json" >"$tmp/missing-round-verify.out" 2>"$tmp/missing-round-verify.err"; then
   echo "expected missing round receipt to fail verification" >&2
   exit 1
 fi
 grep -q '^round_receipt_exists=false$' "$tmp/missing-round-verify.out"
+grep -q '^round_receipt_missing_fields=$' "$tmp/missing-round-verify.out"
+grep -q '^round_receipt_schema_issue_paths=round_receipt_exists$' "$tmp/missing-round-verify.out"
 grep -q '^round_receipt_ok=false$' "$tmp/missing-round-verify.out"
 grep -q '^no_model_run=true$' "$tmp/missing-round-verify.out"
 grep -q '^no_scorer_run=true$' "$tmp/missing-round-verify.out"
+
+printf '{"broken"' >"$tmp/malformed-round-receipt.json"
+if "$ROUND" --verify-round-receipt "$tmp/malformed-round-receipt.json" >"$tmp/malformed-round-verify.out" 2>"$tmp/malformed-round-verify.err"; then
+  echo "expected malformed round receipt to fail verification" >&2
+  exit 1
+fi
+grep -q '^round_receipt_exists=true$' "$tmp/malformed-round-verify.out"
+grep -q '^round_receipt_missing_fields=$' "$tmp/malformed-round-verify.out"
+grep -q '^round_receipt_schema_issue_paths=round_receipt_json$' "$tmp/malformed-round-verify.out"
+grep -q '^round_receipt_ok=false$' "$tmp/malformed-round-verify.out"
+grep -q '^no_model_run=true$' "$tmp/malformed-round-verify.out"
+grep -q '^no_scorer_run=true$' "$tmp/malformed-round-verify.out"
+
+printf '[]\n' >"$tmp/non-object-round-receipt.json"
+if "$ROUND" --verify-round-receipt "$tmp/non-object-round-receipt.json" >"$tmp/non-object-round-verify.out" 2>"$tmp/non-object-round-verify.err"; then
+  echo "expected non-object round receipt to fail verification" >&2
+  exit 1
+fi
+grep -q '^round_receipt_exists=true$' "$tmp/non-object-round-verify.out"
+grep -q '^round_receipt_missing_fields=$' "$tmp/non-object-round-verify.out"
+grep -q '^round_receipt_schema_issue_paths=round_receipt_object$' "$tmp/non-object-round-verify.out"
+grep -q '^round_receipt_ok=false$' "$tmp/non-object-round-verify.out"
+grep -q '^no_model_run=true$' "$tmp/non-object-round-verify.out"
+grep -q '^no_scorer_run=true$' "$tmp/non-object-round-verify.out"
 grep -q '"ready_to_run": true' "$outroot/round-contract/preflight.json"
 grep -q '"credential_rotation_attestation_ok": true' "$outroot/round-contract/preflight.json"
 grep -q '"production_ready_to_run": false' "$outroot/round-contract/preflight.json"

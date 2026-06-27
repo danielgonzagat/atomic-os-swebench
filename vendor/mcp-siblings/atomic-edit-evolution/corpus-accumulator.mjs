@@ -90,10 +90,15 @@ let newRecords = 0;
 for (const gate of gates) {
   const result = runGate(gate);
   const passed = result.exitCode === 0;
-  results.push({ gate, passed, exitCode: result.exitCode });
-  if (!passed) {
+  results.push({ gate, passed, exitCode: result.exitCode, resultObj: result });
+}
+
+const failedGates = results.filter(r => !r.passed).map(r => 'node ' + r.gate + ' --json');
+
+for (const r of results) {
+  if (!r.passed) {
     generation += 1;
-    const witness = createWitness(gate, result, generation, allGateCmds, previousRecordSha256);
+    const witness = createWitness(r.gate, r.resultObj, generation, failedGates, previousRecordSha256);
     fs.appendFileSync(CORPUS_FILE, JSON.stringify(witness) + '\n');
     previousRecordSha256 = witness.recordSha256;
     newRecords++;

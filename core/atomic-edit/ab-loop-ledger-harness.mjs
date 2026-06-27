@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-nocheck -- executable MJS ledger harness; ab-loop-ledger.proof.mjs owns behavior while the LSP parser ignores JSDoc here.
 /**
  * ab-loop-ledger-harness.mjs — hash-chained ledger for Codex A/B loop decisions.
  * Pure functions only: callers decide where to persist returned JSONL text.
@@ -8,28 +9,41 @@ import crypto from 'node:crypto';
 const SCHEMA_VERSION = 1;
 const KIND = 'atomic-ab-loop-evaluation-record';
 
+/** @typedef {Record<string, any>} AnyRecord */
+/** @typedef {{ ok: false, error: string }} Failure */
+/** @typedef {{ ok: true, records: AnyRecord[] } | Failure} ParseLedgerResult */
+/** @typedef {{ ok: true, record: AnyRecord } | Failure} BuildLoopRecordResult */
+/** @typedef {{ ok: true, recordSha256: string } | Failure} VerifyRecordResult */
+/** @typedef {{ ok: true, recordCount: number, headRecordSha256: string | null, actions: string[], latestAction: string | null } | Failure} LedgerVerificationResult */
+
+/** @param {unknown} value @returns {value is AnyRecord} */
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+/** @param {unknown} value @returns {string} */
 function canonicalSha256(value) {
   return crypto.createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex');
 }
 
+/** @param {AnyRecord} record @returns {string} */
 function recordHash(record) {
   const copy = { ...record };
   delete copy.recordSha256;
   return canonicalSha256(copy);
 }
 
+/** @param {unknown} value @returns {unknown[]} */
 function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+/** @param {unknown} value @param {number} [fallback] @returns {number} */
 function asInteger(value, fallback = 0) {
   return Number.isInteger(value) ? value : fallback;
 }
 
+/** @param {unknown} policy @returns {AnyRecord | null} */
 function normalizePolicy(policy) {
   if (!isRecord(policy)) return null;
   return {
@@ -41,6 +55,7 @@ function normalizePolicy(policy) {
   };
 }
 
+/** @param {{ previousRecord: AnyRecord | null, evaluation: unknown }} args @returns {BuildLoopRecordResult} */
 function buildLoopRecord({ previousRecord, evaluation }) {
   if (!isRecord(evaluation)) return { ok: false, error: 'evaluation must be an object' };
   if (evaluation.ok !== true) return { ok: false, error: 'only ok loop evaluations can be appended' };
@@ -68,9 +83,11 @@ function buildLoopRecord({ previousRecord, evaluation }) {
   return { ok: true, record: { ...body, recordSha256: recordHash(body) } };
 }
 
+/** @param {unknown} text @returns {ParseLedgerResult} */
 function parseLedgerJsonl(text) {
   const normalized = String(text ?? '').trim();
   if (!normalized) return { ok: true, records: [] };
+  /** @type {AnyRecord[]} */
   const records = [];
   const lines = normalized.split('\n');
   for (let index = 0; index < lines.length; index += 1) {
@@ -85,6 +102,7 @@ function parseLedgerJsonl(text) {
   return { ok: true, records };
 }
 
+/** @param {AnyRecord} record @param {string | null} previousSha @param {number} expectedSequence @param {number} index @returns {VerifyRecordResult} */
 function verifyRecord(record, previousSha, expectedSequence, index) {
   if (record.kind !== KIND) return { ok: false, error: `ledger record ${index + 1} has unknown kind` };
   if (record.schemaVersion !== SCHEMA_VERSION) return { ok: false, error: `ledger record ${index + 1} has unsupported schemaVersion` };
@@ -99,10 +117,12 @@ function verifyRecord(record, previousSha, expectedSequence, index) {
   return { ok: true, recordSha256: recomputed };
 }
 
+/** @param {unknown} text @returns {LedgerVerificationResult} */
 export function verifyLoopLedgerJsonl(text) {
   const parsed = parseLedgerJsonl(text);
   if (!parsed.ok) return parsed;
   let previousSha = null;
+  /** @type {string[]} */
   const actions = [];
   for (let index = 0; index < parsed.records.length; index += 1) {
     const record = parsed.records[index];
@@ -120,10 +140,12 @@ export function verifyLoopLedgerJsonl(text) {
   };
 }
 
+/** @param {{ ledgerText?: string, evaluation: unknown }} args @returns {AnyRecord} */
 export function appendLoopEvaluationJsonl({ ledgerText = '', evaluation }) {
   const verified = verifyLoopLedgerJsonl(ledgerText);
   if (verified.ok !== true) return { ok: false, error: `existing ledger rejected: ${verified.error}` };
   const parsed = parseLedgerJsonl(ledgerText);
+  if (!parsed.ok) return parsed;
   const previousRecord = parsed.records.length > 0 ? parsed.records[parsed.records.length - 1] : null;
   const built = buildLoopRecord({ previousRecord, evaluation });
   if (!built.ok) return built;
@@ -140,19 +162,23 @@ export function appendLoopEvaluationJsonl({ ledgerText = '', evaluation }) {
   };
 }
 
+/** @param {{ ledgerText?: string }} args @returns {AnyRecord} */
 export function latestLoopEvaluation({ ledgerText = '' }) {
   const verified = verifyLoopLedgerJsonl(ledgerText);
   if (verified.ok !== true) return verified;
   const parsed = parseLedgerJsonl(ledgerText);
+  if (!parsed.ok) return parsed;
   const record = parsed.records.length > 0 ? parsed.records[parsed.records.length - 1] : null;
   return { ok: true, record, chain: verified };
 }
 
+/** @param {string} stdinText @returns {any} */
 function parseJsonInput(stdinText) {
   if (!stdinText || !stdinText.trim()) throw new Error('stdin JSON is required');
   return JSON.parse(stdinText);
 }
 
+/** @param {string[]} argv @param {string} stdinText @returns {AnyRecord} */
 export function runCli(argv, stdinText) {
   try {
     const input = parseJsonInput(stdinText);
@@ -174,6 +200,7 @@ export function runCli(argv, stdinText) {
   }
 }
 
+/** @returns {boolean} */
 function isCliMain() {
   if (!process.argv[1]) return false;
   const current = new URL(import.meta.url).pathname;
@@ -181,12 +208,13 @@ function isCliMain() {
 }
 
 if (isCliMain()) {
-  const result = runCli(process.argv.slice(2), await new Promise((resolve) => {
+  const stdinText = await new Promise((resolve) => {
     let data = '';
     process.stdin.setEncoding('utf8');
-    process.stdin.on('data', (chunk) => { data += chunk; });
+    process.stdin.on('data', /** @param {string} chunk */ (chunk) => { data += chunk; });
     process.stdin.on('end', () => resolve(data));
-  }));
+  });
+  const result = runCli(process.argv.slice(2), String(stdinText));
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   process.exit(result.ok ? 0 : 1);
 }

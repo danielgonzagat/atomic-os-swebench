@@ -39,6 +39,8 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { log } from './server-helpers-io.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { REPO_ROOT, activeWorkspaceRoot, assertInsideActiveWorkspace, resolveAllowedRootForAbsolutePath, isProtectedRelative } from './guard.js';
@@ -46,6 +48,7 @@ import { ok, fail } from './server-helpers-result.js';
 import {
   assertCompleteEffectSnapshot,
   captureEffectSnapshot,
+  cleanupEffectSnapshot,
   diffEffect,
   rollbackEffect,
   type EffectSnapshot,
@@ -605,16 +608,97 @@ function brokerEndpointIfPresent(endpoint: string): string | null {
   }
 }
 
+let autoBrokerSocket: string | null = null;
+
+function autoBootstrapBrokerSync(): string | null {
+  if (autoBrokerSocket && brokerEndpointIfPresent(autoBrokerSocket)) {
+    return autoBrokerSocket;
+  }
+
+  const root = REPO_ROOT;
+  const atomicDir = path.join(root, '.atomic');
+  if (!fs.existsSync(atomicDir)) {
+    try {
+      fs.mkdirSync(atomicDir, { recursive: true });
+    } catch { /* best effort */ }
+  }
+
+  const brokerDir = path.join(atomicDir, `codex-broker-auto-${process.pid}`);
+  try {
+    fs.rmSync(brokerDir, { recursive: true, force: true });
+  } catch { /* best effort */ }
+
+  const socket = pathToFileURL(brokerDir).href;
+  const brokerScript = path.join(atomicSelfSourceRoot() ?? root, 'atomic-exec-broker.mjs');
+  if (!fs.existsSync(brokerScript)) {
+    log(`[auto-bootstrap] broker script not found: ${brokerScript}`);
+    return null;
+  }
+
+  log(`[auto-bootstrap] spawning broker synchronously: ${socket}`);
+  const child = childProcess.spawn(process.execPath, [brokerScript, socket], {
+    cwd: root,
+    env: { ...process.env, ATOMIC_EXEC_BROKER_ROOT: root },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  const start = Date.now();
+  let ready = false;
+  while (Date.now() - start < 8000) {
+    if (brokerEndpointIfPresent(socket)) {
+      ready = true;
+      break;
+    }
+    childProcess.spawnSync('sleep', ['0.05']);
+  }
+
+  if (ready) {
+    log(`[auto-bootstrap] broker is ready!`);
+    const statePath = path.join(root, '.atomic', 'codex-broker-current.json');
+    const payload = {
+      agent: "codex",
+      repoRoot: root,
+      socket,
+      codexHome: process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex'),
+      pid: child.pid ?? process.pid,
+      createdAt: new Date().toISOString(),
+      autoBootstrapped: true,
+    };
+    try {
+      fs.writeFileSync(statePath, JSON.stringify(payload, null, 2) + "\n", { mode: 0o600 });
+    } catch (e) {
+      log(`[auto-bootstrap] failed to write state: ${e}`);
+    }
+
+    process.env.ATOMIC_EXEC_BROKER_SOCKET = socket;
+    process.env.ATOMIC_USE_BROKER_STATE = '1';
+    autoBrokerSocket = socket;
+    return socket;
+  } else {
+    log(`[auto-bootstrap] failed: broker did not become ready`);
+    child.kill();
+    return null;
+  }
+}
+
 function brokerSocketPath(): string | null {
   const envEndpoint = brokerEndpointIfPresent(process.env.ATOMIC_EXEC_BROKER_SOCKET ?? '');
   if (envEndpoint) return envEndpoint;
   const statePath = path.join(REPO_ROOT, '.atomic', 'codex-broker-current.json');
+  let hasStateFile = false;
   try {
-    const state = JSON.parse(fs.readFileSync(statePath, 'utf8')) as { socket?: unknown };
-    const stateEndpoint = typeof state.socket === 'string' ? brokerEndpointIfPresent(state.socket) : null;
-    if (stateEndpoint) return stateEndpoint;
+    if (fs.existsSync(statePath)) {
+      hasStateFile = true;
+      const state = JSON.parse(fs.readFileSync(statePath, 'utf8')) as { socket?: unknown };
+      const stateEndpoint = typeof state.socket === 'string' ? brokerEndpointIfPresent(state.socket) : null;
+      if (stateEndpoint) return stateEndpoint;
+    }
   } catch {
     // Broker state is optional outside host-admitted Codex sessions.
+  }
+
+  if (hostSandboxActive() || process.env.ATOMIC_EXEC_BROKER_SOCKET !== undefined || hasStateFile) {
+    return autoBootstrapBrokerSync();
   }
   return null;
 }
@@ -1228,11 +1312,12 @@ export function registerToolsExec(server: McpServer): void {
         // scratch temp/cache root, so runtime caches do not become effects.
         const effectRoot: string | null = proveEffect ? resolveEffectRoot(cwd, a.effectRoot) : null;
         const effectSnap: EffectSnapshot | null = effectRoot
-          ? captureEffectSnapshot(effectRoot, {})
+          ? captureEffectSnapshot(effectRoot, { cloneDependencies: true })
           : null;
         if (effectSnap)
           assertCompleteEffectSnapshot(effectSnap, 'run atomic_exec with byte-effect proof');
-        const timeout = a.timeoutMs ?? 120000;
+        try {
+          const timeout = a.timeoutMs ?? 120000;
         // Host mode: per-command sandboxing is delegated to the out-of-sandbox
         // broker (macOS forbids nested sandbox-exec). It MUST be present, or we
         // fail closed — a host-launched command must never run unsandboxed.
@@ -1497,6 +1582,11 @@ export function registerToolsExec(server: McpServer): void {
             rollbackOnNonZero: Boolean(a.rollbackOnNonZero),
           },
         });
+        } finally {
+          if (effectSnap) {
+            cleanupEffectSnapshot(effectSnap);
+          }
+        }
       } catch (e) {
         return fail(e instanceof Error ? e.message : String(e));
       }

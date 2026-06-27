@@ -76,10 +76,15 @@ let newRecords = 0;
 for (const gate of gates) {
   const result = runGate(gate);
   const passed = result.exitCode === 0;
-  results.push({ gate, passed, exitCode: result.exitCode });
-  if (!passed) {
+  results.push({ gate, passed, exitCode: result.exitCode, resultObj: result });
+}
+
+const failedGates = results.filter(r => !r.passed).map(r => 'node ' + r.gate + ' --json');
+
+for (const r of results) {
+  if (!r.passed) {
     generation += 1;
-    fs.appendFileSync(CORPUS_FILE, JSON.stringify(createWitness(gate, result, generation, allGateCmds)) + '\n');
+    fs.appendFileSync(CORPUS_FILE, JSON.stringify(createWitness(r.gate, r.resultObj, generation, failedGates)) + '\n');
     newRecords++;
   }
 }

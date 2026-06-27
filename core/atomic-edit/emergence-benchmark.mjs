@@ -187,8 +187,17 @@ if (isDirectRun) {
     if (jsonMode) process.stdout.write(JSON.stringify({ ok: allEmergent, mode: 'synthetic', results }, null, 2));
     process.exit(allEmergent ? 0 : 1);
   } else {
-    if (!jsonMode) {
-      console.log('\n  Live LLM mode requires an injected proposer.');
+    const blocked = {
+      ok: false,
+      mode: 'live',
+      status: 'EXTERNAL_BLOCKED',
+      reason: 'Live LLM mode requires an injected proposer; import runLiveLLM and pass a provider-backed proposer.',
+      requiredAction: 'Import runLiveLLM and pass your LLM client.',
+    };
+    if (jsonMode) {
+      process.stdout.write(JSON.stringify(blocked, null, 2));
+    } else {
+      console.log('\n  Live LLM mode is EXTERNAL_BLOCKED.');
       console.log('  Import runLiveLLM and pass your LLM client.\n');
     }
     process.exit(0);

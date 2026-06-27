@@ -897,19 +897,150 @@ async function cmdIncident(spec) {
   process.exit(0);
 }
 
-function cmdReplayUndo(verb, opId) {
-  if (!opId) die(`usage: atomic ${verb} <opId>`);
-  const t = loadTrace(opId);
-  if (!t) die(`no trace for ${opId}`);
-  console.error(
-    `atomic ${verb}: traces are PROOF/audit artifacts (chain hash, byte accounting, gate verdict),\n` +
-    `not content snapshots — rollback.strategy = "${t.rollback?.strategy ?? 'caller-held'}". Cold ${verb}\n` +
-    `from a trace alone would invent content, which Atomic OS will not do.\n` +
-    `  • live reversal: use atomic_session_begin/rollback (snapshots the file set for the window).\n` +
-    `  • cold ${verb}: planned via an opt-in .atomic/snapshots/ content layer (roadmap pillar #4).\n` +
-    `Use \`atomic verify ${opId}\` / \`atomic explain ${opId}\` to inspect this op now.`,
-  );
-  process.exit(3);
+let _undoMod = null;
+async function loadUndo() {
+  if (_undoMod) return _undoMod;
+  const candidate = path.join(here, 'dist', 'engine-undo.js');
+  if (!fs.existsSync(candidate)) return null;
+  try {
+    _undoMod = await import(pathToFileURL(candidate).href);
+    return _undoMod;
+  } catch {
+    return null;
+  }
+}
+
+let _ledgerMod = null;
+async function loadLedger() {
+  if (_ledgerMod) return _ledgerMod;
+  const candidate = path.join(here, 'dist', 'server-helpers-lesson-ledger.js');
+  if (!fs.existsSync(candidate)) return null;
+  try {
+    _ledgerMod = await import(pathToFileURL(candidate).href);
+    return _ledgerMod;
+  } catch {
+    return null;
+  }
+}
+
+let _qdMod = null;
+async function loadQd() {
+  if (_qdMod) return _qdMod;
+  const candidate = path.join(here, 'dist', 'server-helpers-qd.js');
+  if (!fs.existsSync(candidate)) return null;
+  try {
+    _qdMod = await import(pathToFileURL(candidate).href);
+    return _qdMod;
+  } catch {
+    return null;
+  }
+}
+
+async function cmdUndo(fileOrOpId) {
+  if (!fileOrOpId) die('usage: atomic undo <file|opId>');
+  const rx = await loadUndo();
+  if (!rx) die('undo engine unavailable (dist/engine-undo.js not built)');
+
+  let file = fileOrOpId;
+  const t = loadTrace(fileOrOpId);
+  if (t) file = t.file;
+
+  const res = rx.undoLast(repoRoot(), file);
+  if (res && res.undone) {
+    console.log(`undo SUCCESS — restored last state for ${res.file} (op: ${res.operationId}, restored ${res.restoredChars} chars)`);
+    process.exit(0);
+  } else {
+    die(`undo FAILED — could not undo file ${file}. Ensure the file exists and is in the exact state left by the last trace.`);
+  }
+}
+
+async function cmdRedo(fileOrOpId) {
+  if (!fileOrOpId) die('usage: atomic redo <file|opId>');
+  const rx = await loadUndo();
+  if (!rx) die('undo engine unavailable (dist/engine-undo.js not built)');
+
+  let file = fileOrOpId;
+  const t = loadTrace(fileOrOpId);
+  if (t) file = t.file;
+
+  const res = rx.redoNext(repoRoot(), file);
+  if (res && res.redone) {
+    console.log(`redo SUCCESS — re-applied state for ${res.file} (op: ${res.operationId})`);
+    process.exit(0);
+  } else {
+    die(`redo FAILED — could not redo file ${file}. Ensure the file exists and is in the state before the trace.`);
+  }
+}
+
+async function cmdLedger(sub, ...args) {
+  const rx = await loadLedger();
+  if (!rx) die('ledger engine unavailable (dist/server-helpers-lesson-ledger.js not built)');
+  const root = repoRoot();
+  if (sub === 'verify') {
+    const records = rx.readLessonLedger(root);
+    const res = rx.verifyLessonLedgerChain(records);
+    if (res.ok) {
+      console.log(`ledger VERIFIED — verified chain integrity of ${records.length} lesson record(s)`);
+      process.exit(0);
+    } else {
+      die(`ledger FAILED — chain break or hash mismatch: ${res.error}`);
+    }
+  } else if (sub === 'list' || !sub) {
+    const records = rx.readLessonLedger(root);
+    console.log(`# Lesson Ledger — ${records.length} record(s) under ${root}/.atomic\n`);
+    for (const r of records) {
+      console.log(`  ${r.recordSha256.slice(0, 12)}  seq=${r.sequence}  ${r.operator.op.padEnd(12)} ${r.operator.file}  [${r.decision.toUpperCase()}]`);
+    }
+    process.exit(0);
+  } else if (sub === 'query') {
+    const gate = args[0];
+    if (!gate) die('usage: atomic ledger query <gate_name>');
+    const results = rx.queryLessonsByEffect(root, { gatesFlipped: [gate] });
+    console.log(`# Lesson Ledger Query for gate: ${gate} — ${results.length} result(s)\n`);
+    for (const r of results) {
+      console.log(`  ${r.lesson.recordSha256.slice(0, 12)}  score=${r.score}  seq=${r.lesson.sequence}  ${r.lesson.operator.op.padEnd(12)} ${r.lesson.operator.file}  [${r.lesson.decision.toUpperCase()}]`);
+    }
+    process.exit(0);
+  } else {
+    die('usage: atomic ledger <list|verify|query> [args]');
+  }
+}
+
+async function cmdObserve() {
+  const rx = await loadQd();
+  if (!rx) die('observation engine unavailable (dist/server-helpers-qd.js not built)');
+  const root = repoRoot();
+  const archive = rx.getMapElitesArchive(root);
+  const metrics = rx.computeMapElitesMetrics(archive);
+  console.log(`# Quality-Diversity MAP-Elites Observatory`);
+  console.log(`cells filled: ${metrics.cellsFilled} · average fitness: ${metrics.averageFitness}\n`);
+  if (archive.length === 0) {
+    console.log('  observatory empty — no lessons archived yet.');
+    process.exit(0);
+  }
+  console.log('occupied cells:');
+  for (const cell of archive) {
+    const d = cell.descriptor;
+    console.log(`  • ${d.subsystem.padEnd(8)} · ${d.changeType.padEnd(12)} · ${d.effectClass.padEnd(8)}  =>  fitness=${cell.fitness} (lesson: ${cell.lessonId.slice(7)})`);
+  }
+  process.exit(0);
+}
+
+function cmdEvolve(mode, ...args) {
+  const validModes = ['self-test', 'decide', 'receipt', 'verify-receipt', 'archive-entry', 'verify-archive-entry', 'verify-archive-chain', 'verify-archive-jsonl', 'append-archive-jsonl'];
+  if (!mode || !validModes.includes(mode)) {
+    die(`usage: atomic evolve <mode> [args...]\nvalid modes: ${validModes.join(', ')}`);
+  }
+  const cliFlag = `--${mode}`;
+  const harness = path.join(here, 'self-evolution-harness.mjs');
+  if (!fs.existsSync(harness)) die('self-evolution harness not found at ' + harness);
+
+  const runEnv = { ...process.env };
+  const sp = spawnSync(process.execPath, [harness, cliFlag, ...args], {
+    env: runEnv,
+    stdio: 'inherit',
+  });
+  process.exit(sp.status ?? 0);
 }
 
 const [, , cmd, ...rest] = process.argv;
@@ -929,8 +1060,12 @@ switch (cmd) {
   case 'admit-gate': cmdAdmitGate(rest[0]).catch(die); break;
   case 'enforce': cmdEnforce(rest[0]); break;
   case 'incident': cmdIncident(rest[0]).catch(die); break;
-  case 'replay': case 'undo': cmdReplayUndo(cmd, rest[0]); break;
+  case 'replay': case 'undo': await cmdUndo(rest[0]); break;
+  case 'redo': await cmdRedo(rest[0]); break;
+  case 'ledger': await cmdLedger(rest[0], ...rest.slice(1)); break;
+  case 'observe': await cmdObserve(); break;
+  case 'evolve': cmdEvolve(rest[0], ...rest.slice(1)); break;
   default:
-    console.log('atomic — proof-chain CLI + governance + MCP trust firewall\n  init [--force]            detect the repo + generate governance config\n  verify [<opId>|--head]    recompute the chain + check file state\n  explain <opId>            intention, proof, char diff, gate verdict\n  log [-n N]                walk the proof chain\n  compare                   run AtomicBench\n  mcp <scan|approve|verify> [--cmd "<server>"]   capability manifest + tool-poisoning detection\n  intent check [--base <ref>] [--run]            verify a change stayed within the declared product intent\n  prove <opId>              export a portable proof-carrying edit (+ re-exec body when content-snapshotted)\n  verify-proof <file> [--reexec]   re-verify a proof; --reexec RE-RUNS validate + Merkle + gateRunId + seal\n  replay|undo <opId>        (proof != content snapshot; see note)');
+    console.log('atomic — proof-chain CLI + governance + MCP trust firewall\n  init [--force]            detect the repo + generate governance config\n  verify [<opId>|--head]    recompute the chain + check file state\n  explain <opId>            intention, proof, char diff, gate verdict\n  log [-n N]                walk the proof chain\n  compare                   run AtomicBench\n  mcp <scan|approve|verify> [--cmd "<server>"]   capability manifest + tool-poisoning detection\n  intent check [--base <ref>] [--run]            verify a change stayed within the declared product intent\n  prove <opId>              export a portable proof-carrying edit (+ re-exec body when content-snapshotted)\n  verify-proof <file> [--reexec]   re-verify a proof; --reexec RE-RUNS validate + Merkle + gateRunId + seal\n  undo <file|opId>          undo the last atomic change on a file or by trace ID\n  redo <file|opId>          redo the next atomic change on a file or by trace ID\n  ledger <list|verify|query> query or cryptographically verify the lesson ledger\n  observe                   print Quality-Diversity MAP-Elites occupied behavior cells\n  evolve <mode>             run autopoietic self-evolution decisions and promotion checks');
     process.exit(cmd ? 1 : 0);
 }

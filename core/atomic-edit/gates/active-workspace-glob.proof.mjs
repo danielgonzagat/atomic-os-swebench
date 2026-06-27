@@ -44,6 +44,15 @@ function sourceAssertions() {
       nativeBridge.includes("export type GlobFileType = 'file' | 'dir' | 'symlink'") &&
       nativeBridge.includes('function listEntries(') &&
       nativeBridge.includes('fileType: opts.fileType as GlobFileType | undefined'),
+    nativeBridgePrunesLiteralGlobPrefix:
+      nativeBridge.includes('function globLiteralDirectoryPrefix(') &&
+      nativeBridge.includes('const prefixed = path.resolve(target, prefix)') &&
+      nativeBridge.includes('walkTarget = prefixed'),
+    nativeBridgeShortCircuitsGlobMaxResults:
+      nativeBridge.includes('maxResults?: number') &&
+      nativeBridge.includes('if (out.length >= maxResults)'),
+    nativeIoReturnsGlobLimitReached:
+      nativeIo.includes('limitReached: res.limitReached'),
     nativeIoRootsAtActiveWorkspace:
       nativeIo.includes('activeWorkspaceRoot()') &&
       nativeIo.includes("assertInsideActiveWorkspace(abs, 'native io path')") &&
@@ -117,11 +126,17 @@ async function dynamicGlobProof() {
       pattern: 'src/**',
       fileType: 'dir',
     });
+    const limited = await callAtomicGlob(proofRoot, workspace, {
+      pattern: 'src/**/*.ts',
+      fileType: 'file',
+      maxResults: 1,
+    });
 
     const nestedPaths = paths(nested.body);
     const allTestPaths = paths(allTests.body);
     const srcScopedPaths = paths(srcScoped.body);
     const dirPaths = paths(dirs.body);
+    const limitedPaths = paths(limited.body);
     return {
       ok:
         nested.ok === true &&
@@ -137,15 +152,21 @@ async function dynamicGlobProof() {
         dirs.ok === true &&
         dirPaths.includes('src/__tests__') &&
         dirPaths.includes('src/serializer') &&
-        !dirPaths.some((entry) => entry.includes('sibling')),
+        !dirPaths.some((entry) => entry.includes('sibling')) &&
+        limited.ok === true &&
+        limitedPaths.length === 1 &&
+        limited.body.limitReached === true &&
+        limited.body.totalMatches >= 1,
       nested,
       allTests,
       srcScoped,
       dirs,
+      limited,
       nestedPaths,
       allTestPaths,
       srcScopedPaths,
       dirPaths,
+      limitedPaths,
     };
   } finally {
     fs.rmSync(proofRoot, { recursive: true, force: true });

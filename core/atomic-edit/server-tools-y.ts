@@ -231,11 +231,23 @@ function jsonScriptHostRoot(): string {
 }
 
 function jsonScriptEnv(root: string): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.ATOMIC_SINGLE_TOOL_CALL;
+  delete env.ATOMIC_SINGLE_TOOL_NAME;
+  delete env.ATOMIC_SINGLE_TOOL_ARGS_JSON;
+  delete env.ATOMIC_EXEC_BROKER_SOCKET;
+  delete env.ATOMIC_EXEC_BROKER_ROOT;
+  delete env.ATOMIC_ALLOW_NESTED_PROOF_BROKER;
+  delete env.ATOMIC_BUILD_BROKER;
   return {
-    ...process.env,
+    ...env,
     ATOMIC_SINGLE_TOOL_CALL: '',
     ATOMIC_SINGLE_TOOL_NAME: '',
     ATOMIC_SINGLE_TOOL_ARGS_JSON: '',
+    ATOMIC_EXEC_BROKER_SOCKET: '',
+    ATOMIC_EXEC_BROKER_ROOT: '',
+    ATOMIC_ALLOW_NESTED_PROOF_BROKER: '',
+    ATOMIC_BUILD_BROKER: '',
     ATOMIC_HOST_WRITE_ROOT: root,
     CODEX_PROJECT_DIR: root,
     TMPDIR: root,
@@ -709,14 +721,17 @@ export function registerToolsY(server: McpServer): void {
         if (a.includeAudits) {
           const audit = runJsonScript('audit-atomicity.mjs', ['--strict-ratio', '--strict-current-topology', '--json'], 60000);
           if (audit.ok) {
+            const auditClean = audit.value.empty === true || audit.value.pass === true;
             domains.push({
               domain: 'atomicityAudit',
-              status: audit.value.pass === true ? 'GREEN' : 'RED',
-              evidence:
-                `audit pass=${String(audit.value.pass)} ratio=${String(audit.value.atomic_edit_ratio)} ` +
-                `currentTopologyPass=${String(audit.value.currentTopologyPass)} coarse=${String(audit.value.coarse_unjustified)}`,
-              requiredChange: audit.value.pass === true ? undefined : 'Eliminate coarse/untraced edits and restore current topology coverage.',
+              status: auditClean ? 'GREEN' : 'RED',
+              evidence: audit.value.empty === true
+                ? 'audit empty=true; no parseable traces currently require ratio/topology enforcement'
+                : `audit pass=${String(audit.value.pass)} ratio=${String(audit.value.atomic_edit_ratio)} ` +
+                  `currentTopologyPass=${String(audit.value.currentTopologyPass)} coarse=${String(audit.value.coarse_unjustified)}`,
+              requiredChange: auditClean ? undefined : 'Eliminate coarse/untraced edits and restore current topology coverage.',
               detail: {
+                empty: audit.value.empty,
                 pass: audit.value.pass,
                 atomic_edit_ratio: audit.value.atomic_edit_ratio,
                 currentTopologyPass: audit.value.currentTopologyPass,

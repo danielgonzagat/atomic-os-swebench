@@ -21,7 +21,48 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LENS_GATES, runGates, type UnifiedRed, type UnifiedUnjudged } from './registry.js';
 
-const SKIP = new Set(['node_modules', '.git', '.atomic', '.claude', '.mcp-cache', '.next', '.turbo', '.cache', 'build', 'coverage', 'dist', 'vendor']);
+const SKIP = new Set([
+  'node_modules',
+  '.git',
+  '.atomic',
+  '.claude',
+  '.codex',
+  '.mcp-cache',
+  '.next',
+  '.turbo',
+  '.cache',
+  '.atomic-build-tmp',
+  '.planning',
+  'build',
+  'coverage',
+  'dist',
+  'dist-lkg',
+  'dist.broken-last',
+  'vendor',
+  'node-compile-cache',
+  'npm-cache',
+]);
+const GENERATED_SKIP_PREFIXES = [
+  '.proof-',
+  '.smoke-',
+  '.self-expansion-',
+  '.security-mono-proof-',
+  '.atomic-exec-sandbox',
+  '.external-runtime-denial-',
+  '.supervisor-',
+  '.build-tmp-',
+  'atomic-exec-broker-file-',
+  'atomic-edit-dist-',
+  'dist-lkg.tmp-',
+  'atomic-universal-',
+  'atomic-type-gate-',
+  'property-gate-',
+  'probe-gate-',
+  'converge-symbol-mutation-proof-',
+  'converge-operator-proof-',
+  'atomic-lsp-e2e-',
+];
+const GENERATED_SKIP_PATTERNS = [/^[0-9a-f]{32}$/];
 const SOURCE_RE = /\.(ts|tsx|js|jsx|mjs|cjs)$/;
 const LOCUS_RE = /L(\d+)(?::(\d+))?/;
 const SNIPPET_LIMIT = 240;
@@ -57,6 +98,18 @@ function byteLength(value: string): number {
   return Buffer.byteLength(value, 'utf8');
 }
 
+function shouldSkipPathSegment(segment: string): boolean {
+  return (
+    SKIP.has(segment) ||
+    GENERATED_SKIP_PREFIXES.some((prefix) => segment.startsWith(prefix)) ||
+    GENERATED_SKIP_PATTERNS.some((pattern) => pattern.test(segment))
+  );
+}
+
+function hasSkippedPathSegment(relPath: string): boolean {
+  return relPath.split('/').some((segment) => shouldSkipPathSegment(segment));
+}
+
 function enumerateSource(repoRoot: string, scopeAbs: string, cap = 8000): string[] {
   const out: string[] = [];
   const walk = (absDir: string): void => {
@@ -69,7 +122,7 @@ function enumerateSource(repoRoot: string, scopeAbs: string, cap = 8000): string
     }
     for (const e of entries) {
       if (out.length >= cap) return;
-      if (SKIP.has(e.name)) continue;
+      if (shouldSkipPathSegment(e.name)) continue;
       const abs = path.join(absDir, e.name);
       if (e.isDirectory()) walk(abs);
       else if (SOURCE_RE.test(e.name)) {
@@ -318,6 +371,8 @@ function resolveScope(repoRoot: string, scopeRel: string): string[] {
   const out = new Set<string>();
   for (const part of parts) {
     const abs = path.resolve(repoRoot, part);
+    const rel = path.relative(repoRoot, abs).replaceAll('\\', '/');
+    if (rel.startsWith('..') || path.isAbsolute(rel) || hasSkippedPathSegment(rel)) continue;
     let st: fs.Stats | null = null;
     try {
       st = fs.statSync(abs);
@@ -327,7 +382,7 @@ function resolveScope(repoRoot: string, scopeRel: string): string[] {
     if (st.isDirectory()) {
       for (const f of enumerateSource(repoRoot, abs)) out.add(f);
     } else if (SOURCE_RE.test(abs) && !abs.endsWith('.proof.ts')) {
-      out.add(path.relative(repoRoot, abs).replaceAll('\\', '/'));
+      out.add(rel);
     }
   }
   return [...out];

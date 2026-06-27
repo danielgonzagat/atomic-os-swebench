@@ -105,8 +105,8 @@ export function classifyScope(
   }
 
   // Get the name of the parent scope (function/class name)
-  let name = '';
-  let parentName = '';
+  const name = '';
+  const parentName = '';
 
   return { kind, name: name || '', parentName: parentName || undefined };
 }

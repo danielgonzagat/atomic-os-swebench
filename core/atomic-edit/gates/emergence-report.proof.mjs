@@ -2,12 +2,16 @@
 // PROVES: silent (no candidate) on all-known-agent data; fires F1 ONLY on a genuine
 // unknown-agent feed event; renders a one-line VERDICT when clear; and NEVER emits the word
 // 'proven' for an emergence claim (anti-facade). Uses temp .atomic fixtures, never the real corpus.
+import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { computeEmergenceReport, renderEmergenceReport, KNOWN_AGENTS } from '../emergence-report.mjs';
 
 const json = process.argv.includes('--json');
+const gateDir = path.dirname(fileURLToPath(import.meta.url));
+const benchmarkDir = path.join(gateDir, '..');
 let failures = 0;
 function check(n, c) { const ok = !!c; if (!ok) failures += 1; if (!json) console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${n}`); }
 
@@ -76,6 +80,21 @@ fs.writeFileSync(path.join(root, '.atomic', 'disproof-corpus.jsonl'), [JSON.stri
 rep = computeEmergenceReport(root);
 check('F3: broken corpus chain -> exactly one F3 candidate (unexplained writer)', rep.candidates.filter((c) => c.fingerprint === 'F3').length === 1);
 fs.rmSync(root, { recursive: true, force: true });
+
+// (8) F4 live benchmark boundary: live mode without an injected proposer is externally blocked,
+// but the CLI must still emit machine-readable truth for automation.
+const liveCli = spawnSync(process.execPath, ['emergence-benchmark.mjs', '--live', '--json'], {
+  cwd: benchmarkDir,
+  encoding: 'utf8',
+});
+let livePayload = null;
+try { livePayload = JSON.parse(liveCli.stdout); } catch { /* checked below */ }
+check('F4 live benchmark blocked boundary exits cleanly without stderr', liveCli.status === 0 && liveCli.stderr === '');
+check('F4 live benchmark --live --json reports EXTERNAL_BLOCKED instead of silent success',
+  livePayload?.mode === 'live' &&
+  livePayload?.status === 'EXTERNAL_BLOCKED' &&
+  livePayload?.ok === false &&
+  /injected proposer/i.test(livePayload?.reason ?? ''));
 
 if (json) console.log(JSON.stringify({ ok: failures === 0, failures, gate: 'emergence-report' }));
 else console.log(failures === 0 ? '\nOK — emergence-report proof (0 failures)' : `\nFAIL — emergence-report proof (${failures} failure(s))`);

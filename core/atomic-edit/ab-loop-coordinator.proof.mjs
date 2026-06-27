@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-nocheck -- executable proof fixture; assertions below own behavior while LSP ignores fixture scaffolding.
 /**
  * ab-loop-coordinator.proof.mjs — executable proof for one pure A/B loop
  * iteration: evaluate policy/round history, formalize measured Atomic losses,

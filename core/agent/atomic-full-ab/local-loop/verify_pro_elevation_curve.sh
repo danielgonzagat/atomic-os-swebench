@@ -116,6 +116,43 @@ def same_task_vector_schema_ok(points):
     )
 
 
+def task_vector_schema_issue_paths(points):
+    if not isinstance(points, list) or not points:
+        return ["same_task_vector"]
+
+    keys = []
+    for point in points:
+        if not isinstance(point, dict):
+            continue
+        task_ids = point.get("task_ids")
+        task_key = tuple(task_ids) if isinstance(task_ids, list) else None
+        keys.append((point.get("selected_task_ids_sha256"), task_key))
+    if not keys:
+        return ["same_task_vector"]
+
+    expected_hash, expected_task_key = max(keys, key=keys.count)
+    issues = []
+
+    def add(path_name):
+        if path_name not in issues:
+            issues.append(path_name)
+
+    for idx, point in enumerate(points):
+        prefix = f"points[{idx}]"
+        if not isinstance(point, dict):
+            add(prefix)
+            continue
+        task_ids = point.get("task_ids")
+        task_key = tuple(task_ids) if isinstance(task_ids, list) else None
+        if point.get("selected_task_ids_sha256") != expected_hash:
+            add(f"{prefix}.selected_task_ids_sha256")
+        if task_key != expected_task_key:
+            add(f"{prefix}.task_ids")
+    if not issues and not same_task_vector_schema_ok(points):
+        add("same_task_vector")
+    return issues
+
+
 def same_frontier_baseline_schema_ok(points):
     if not isinstance(points, list) or not points:
         return False
@@ -130,6 +167,41 @@ def same_frontier_baseline_schema_ok(points):
         and close(point.get("frontier_solve_rate"), first_rate)
         for point in points
     )
+
+
+def frontier_baseline_schema_issue_paths(points):
+    if not isinstance(points, list) or not points:
+        return ["same_frontier_baseline"]
+
+    keys = []
+    for point in points:
+        if not isinstance(point, dict):
+            continue
+        rate = point.get("frontier_solve_rate")
+        rate_key = round(float(rate), 12) if number(rate) else rate
+        keys.append((point.get("frontier_baseline_sha256"), rate_key))
+    if not keys:
+        return ["same_frontier_baseline"]
+
+    expected_hash, expected_rate = max(keys, key=keys.count)
+    issues = []
+
+    def add(path_name):
+        if path_name not in issues:
+            issues.append(path_name)
+
+    for idx, point in enumerate(points):
+        prefix = f"points[{idx}]"
+        if not isinstance(point, dict):
+            add(prefix)
+            continue
+        if point.get("frontier_baseline_sha256") != expected_hash:
+            add(f"{prefix}.frontier_baseline_sha256")
+        if not close(point.get("frontier_solve_rate"), expected_rate):
+            add(f"{prefix}.frontier_solve_rate")
+    if not issues and not same_frontier_baseline_schema_ok(points):
+        add("same_frontier_baseline")
+    return issues
 
 
 def same_benchmark_schema_ok(points):
@@ -170,6 +242,37 @@ def rate_formulas_schema_ok(points):
     return True
 
 
+def rate_formula_schema_issue_paths(points):
+    if not isinstance(points, list) or not points:
+        return ["rate_formulas_ok"]
+
+    issues = []
+
+    def add(path_name):
+        if path_name not in issues:
+            issues.append(path_name)
+
+    for idx, point in enumerate(points):
+        prefix = f"points[{idx}]"
+        if not isinstance(point, dict):
+            add(prefix)
+            continue
+        student_rate = point.get("student_solve_rate")
+        frontier_rate = point.get("frontier_solve_rate")
+        if not number(student_rate):
+            add(f"{prefix}.student_solve_rate")
+        if not number(frontier_rate):
+            add(f"{prefix}.frontier_solve_rate")
+        if number(student_rate) and number(frontier_rate) and not close(
+            point.get("elevation_vs_frontier_solve_rate"),
+            float(student_rate) - float(frontier_rate),
+        ):
+            add(f"{prefix}.elevation_vs_frontier_solve_rate")
+    if not issues and not rate_formulas_schema_ok(points):
+        add("rate_formulas_ok")
+    return issues
+
+
 def strictly_increasing_accumulation_schema_ok(points):
     if not isinstance(points, list) or len(points) < 2:
         return False
@@ -181,6 +284,36 @@ def strictly_increasing_accumulation_schema_ok(points):
     return all(indices[idx] < indices[idx + 1] for idx in range(len(indices) - 1))
 
 
+def accumulation_schema_issue_paths(points):
+    if not isinstance(points, list) or len(points) < 2:
+        return ["strictly_increasing_accumulation"]
+
+    issues = []
+
+    def add(path_name):
+        if path_name not in issues:
+            issues.append(path_name)
+
+    previous = None
+    for idx, point in enumerate(points):
+        prefix = f"points[{idx}]"
+        if not isinstance(point, dict):
+            add(prefix)
+            previous = None
+            continue
+        current = point.get("accumulation_index")
+        if not int_value(current):
+            add(f"{prefix}.accumulation_index")
+            previous = None
+            continue
+        if previous is not None and previous >= current:
+            add(f"{prefix}.accumulation_index")
+        previous = current
+    if not issues and not strictly_increasing_accumulation_schema_ok(points):
+        add("strictly_increasing_accumulation")
+    return issues
+
+
 def margin_growing_schema_ok(points):
     if not isinstance(points, list) or len(points) < 2:
         return False
@@ -190,6 +323,37 @@ def margin_growing_schema_ok(points):
             return False
         rates.append(float(point.get("elevation_vs_frontier_solve_rate")))
     return all(rates[idx] < rates[idx + 1] for idx in range(len(rates) - 1))
+
+
+def margin_schema_issue_paths(points):
+    if not isinstance(points, list) or len(points) < 2:
+        return ["margin_growing"]
+
+    issues = []
+
+    def add(path_name):
+        if path_name not in issues:
+            issues.append(path_name)
+
+    previous = None
+    for idx, point in enumerate(points):
+        prefix = f"points[{idx}]"
+        if not isinstance(point, dict):
+            add(prefix)
+            previous = None
+            continue
+        current = point.get("elevation_vs_frontier_solve_rate")
+        if not number(current):
+            add(f"{prefix}.elevation_vs_frontier_solve_rate")
+            previous = None
+            continue
+        current = float(current)
+        if previous is not None and previous >= current:
+            add(f"{prefix}.elevation_vs_frontier_solve_rate")
+        previous = current
+    if not issues and not margin_growing_schema_ok(points):
+        add("margin_growing")
+    return issues
 
 
 def curve_axes_schema_ok(receipt, points):
@@ -210,6 +374,36 @@ def curve_axes_schema_ok(receipt, points):
         and bool(solve_rates)
         and close(latest, solve_rates[-1])
     )
+
+
+def curve_axis_schema_issue_paths(receipt, points):
+    if not isinstance(points, list):
+        return ["curve_axes"]
+
+    issues = []
+
+    def add(path_name):
+        if path_name not in issues:
+            issues.append(path_name)
+
+    accumulation_indices = receipt.get("accumulation_indices")
+    solve_rates = receipt.get("elevation_vs_frontier_solve_rates")
+    latest = receipt.get("latest_elevation_vs_frontier_solve_rate")
+    point_indices = [point.get("accumulation_index") for point in points if isinstance(point, dict)]
+    point_rates = [point.get("elevation_vs_frontier_solve_rate") for point in points if isinstance(point, dict)]
+
+    if not isinstance(accumulation_indices, list) or accumulation_indices != point_indices:
+        add("accumulation_indices")
+    if (
+        not isinstance(solve_rates, list)
+        or len(solve_rates) != len(point_rates)
+        or not all(number(rate) for rate in solve_rates)
+        or not all(close(left, right) for left, right in zip(solve_rates, point_rates))
+    ):
+        add("elevation_vs_frontier_solve_rates")
+    if not isinstance(solve_rates, list) or not solve_rates or not close(latest, solve_rates[-1]):
+        add("latest_elevation_vs_frontier_solve_rate")
+    return issues
 
 
 def point_schema_ok(point):
@@ -380,8 +574,9 @@ def round_verification_schema_issue_paths(receipt, points):
     verifications = receipt.get("round_verifications")
     if not isinstance(verifications, list):
         return ["round_verifications"]
-    if len(verifications) != len(points):
-        add("round_verifications")
+    count_matches = len(verifications) == len(points)
+    if not count_matches:
+        add("round_verifications.count")
 
     points_by_path = {
         point.get("round_receipt_path"): point
@@ -389,7 +584,7 @@ def round_verification_schema_issue_paths(receipt, points):
         if isinstance(point, dict) and nonempty_string(point.get("round_receipt_path"))
     }
     if len(points_by_path) != len(points):
-        add("round_verifications")
+        add("points.round_receipt_path")
 
     seen = set()
     for idx, verification in enumerate(verifications):
@@ -437,8 +632,8 @@ def round_verification_schema_issue_paths(receipt, points):
         if parsed.get("frontier_summary_verification_ok") != "true":
             add(f"{prefix}.stdout.frontier_summary_verification_ok")
 
-    if seen != set(points_by_path):
-        add("round_verifications")
+    if count_matches and seen != set(points_by_path):
+        add("round_verifications.missing_round_receipt_path")
     return issues
 
 
@@ -655,14 +850,20 @@ def schema_issue_paths_for(receipt, points):
     for idx, point in enumerate(points):
         for issue_path in point_schema_issue_paths(point, idx):
             add(issue_path)
-    expect(same_task_vector_schema_ok(points), "same_task_vector")
-    expect(same_frontier_baseline_schema_ok(points), "same_frontier_baseline")
+    for issue_path in task_vector_schema_issue_paths(points):
+        add(issue_path)
+    for issue_path in frontier_baseline_schema_issue_paths(points):
+        add(issue_path)
     expect(same_benchmark_schema_ok(points), "same_benchmark")
     expect(same_metric_contract_schema_ok(points), "same_metric_contract")
-    expect(rate_formulas_schema_ok(points), "rate_formulas_ok")
-    expect(strictly_increasing_accumulation_schema_ok(points), "strictly_increasing_accumulation")
-    expect(margin_growing_schema_ok(points), "margin_growing")
-    expect(curve_axes_schema_ok(receipt, points), "curve_axes")
+    for issue_path in rate_formula_schema_issue_paths(points):
+        add(issue_path)
+    for issue_path in accumulation_schema_issue_paths(points):
+        add(issue_path)
+    for issue_path in margin_schema_issue_paths(points):
+        add(issue_path)
+    for issue_path in curve_axis_schema_issue_paths(receipt, points):
+        add(issue_path)
     for issue_path in round_verification_schema_issue_paths(receipt, points):
         add(issue_path)
     return issues
@@ -670,17 +871,28 @@ def schema_issue_paths_for(receipt, points):
 
 path = Path(curve_receipt_path)
 if not curve_receipt_path or not path.is_file():
-    emit()
+    emit(
+        schema_issue_count=1,
+        schema_issue_paths="curve_receipt_exists",
+    )
     raise SystemExit(2)
 
 try:
     receipt = json.loads(path.read_text(encoding="utf-8"))
 except Exception:
-    emit(exists=True)
+    emit(
+        exists=True,
+        schema_issue_count=1,
+        schema_issue_paths="curve_receipt_json",
+    )
     raise SystemExit(2)
 
 if not isinstance(receipt, dict):
-    emit(exists=True)
+    emit(
+        exists=True,
+        schema_issue_count=1,
+        schema_issue_paths="curve_receipt_object",
+    )
     raise SystemExit(2)
 
 points = receipt.get("points")

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-nocheck -- proof-only MJS harness; ab-loop-admission.proof.mjs owns behavior.
 /**
  * ab-loop-admission-harness.mjs — pure controller for the Codex A/B loop.
  * It decides whether the loop may start, repeat, improve Atomic, or escalate

@@ -90,6 +90,11 @@ export const WRITE_GATES: GateModule[] = [
   // secret-named assignment). Static regex+entropy byte fact; NEW-only delta vs
   // priorOf; placeholders/env exonerated. Perception ceiling: shape, not taint.
   securityGate,
+  // DELTA semantic check via the LSP mesh — reds only on a NEW intrinsic single-file
+  // semantic error this edit introduces (cross-language: py/go/rust/… via real language
+  // servers). Pre-existing errors cancel; no server / cross-file resolution → unjudged.
+  // The capability tsc-based type-soundness cannot cover. Absent server → clean no-op.
+  lspSemanticGate,
 ];
 
 /**

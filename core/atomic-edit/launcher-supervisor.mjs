@@ -553,7 +553,9 @@ function onChildExit(proc, code, signal) {
 
   // crashes after a successful run restart the ladder from the top; failures
   // during recovery walk down the ladder.
-  const stage2 = initAnswered && stage !== 'lkg' && !firstFailureBurst() ? 'impl' : nextLadderStage(stage);
+  const stage2 = initAnswered && !firstFailureBurst()
+    ? (stage === 'lkg' ? 'lkg' : 'impl')
+    : nextLadderStage(stage);
   if (stage2 === 'rescue') { enterRescue('recovery ladder exhausted'); return; }
   let next = spawnStage(stage2);
   if (!next) {

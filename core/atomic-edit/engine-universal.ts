@@ -464,7 +464,7 @@ export function universalInsertProperty(
     if (!m) throw new Error(`anchor property "${afterProperty}" not found in ${file}`);
     const lineStart = original.lastIndexOf('\n', m.index) + 1;
     const indent = (original.slice(lineStart, m.index).match(/^[ \t]*/) ?? [''])[0];
-    let insertAt = m.index + m[0].length;
+    const insertAt = m.index + m[0].length;
     let tail = original.slice(insertAt);
     const hadComma = /^[ \t]*,/.test(tail);
     if (hadComma) tail = tail.replace(/^[ \t]*,/, '');

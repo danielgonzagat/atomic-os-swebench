@@ -136,6 +136,7 @@ export function registerToolsNativeIo(server: McpServer): void {
         });
         return ok({
           totalMatches: res.totalMatches,
+          limitReached: res.limitReached,
           matches: res.matches.map((match) => ({ ...match, path: displayPath(match.path) })),
         });
       } catch (e) {

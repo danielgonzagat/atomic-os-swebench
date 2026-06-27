@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-nocheck -- executable proof fixture; assertions below own behavior.
 /**
  * ab-loop-admission.proof.mjs — executable proof for A/B loop admission and escalation.
  * Synthetic rounds prove loop control behavior only; they are not evidence that

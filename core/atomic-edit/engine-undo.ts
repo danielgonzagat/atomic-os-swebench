@@ -89,7 +89,7 @@ function snapshotHash(repoRoot: string, trace: LegacyTrace, side: 'before' | 'af
 }
 
 function chainIsValid(trace: LegacyTrace): boolean {
-  return chainHashOf(trace.parentSha256, trace.afterSha256, trace.gateVerdict) === trace.chainHash;
+  return chainHashOf(trace.parentSha256 ?? '', trace.afterSha256, trace.gateVerdict) === trace.chainHash;
 }
 
 export function undoLast(repoRoot: string, file: string): UndoResult | null {

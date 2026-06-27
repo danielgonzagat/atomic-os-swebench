@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     globals: true,
     include: ['**/*.test.ts', '**/*.test.mjs'],
-    exclude: ['node_modules', 'dist', 'vendor', '.positive-byte-sessions', '.atomic-build-tmp'],
+    exclude: ['node_modules', 'dist', 'vendor', '.positive-byte-sessions', '.atomic-build-tmp', '.atomic', '.atomic-closure-cache'],
     environment: 'node',
     testTimeout: 30000,
   },

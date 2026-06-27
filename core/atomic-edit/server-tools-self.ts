@@ -11,7 +11,6 @@ import {
   withSelfExpansionAdmission,
   isAtomicSelfExpansionPath,
   isAtomicAgentCliSelfExpansionPath,
-  atomicAgentCliSelfExpansionRootRel,
   atomicAgentCliSelfExpansionSourceRelPaths,
   atomicSelfSourceRoot,
 } from './server-helpers-self-expansion.js';
@@ -183,6 +182,24 @@ const MANDATORY_SELF_EXPANSION_VALIDATORS: readonly SelfExpansionValidator[] = [
   // correct cells, re-derive only wrong ones), and a DeepSeek proposer slot is wired but NOT invoked (the real
   // number spends credits + sends data externally → gated behind explicit authorization).
   { phase: 'truth-funnel-bench', command: 'node gates/truth-funnel-bench.proof.mjs --json' },
+  // H2 fair-harness contract: H2 remains a non-claim until preregistration,
+  // shortcut soundness, degeneration guards, 2D resolve@K(g), ablations,
+  // guide-vs-frequency-prior, utility-gated library admission, PASS/NULL/VOID bars,
+  // and independent rescore are all machine-readable. This gate proves the contract
+  // is discriminating; it does not claim the H2 experiment has passed.
+  { phase: 'h2-harness-contract', command: 'node gates/h2-harness-contract.proof.mjs --json' },
+  // H2 executable verdict runner: computes PASS/NULL/VOID from a frozen
+  // preregistration hash, degeneration/Z3/shortcut guards, 2D arm metrics,
+  // guide-prior ablation, library utility admission, and independent rescore.
+  { phase: 'h2-harness-runner', command: 'node gates/h2-harness-runner.proof.mjs --json' },
+  // H2 deterministic experiment harness: derives arm curves, comparisons, and
+  // seed evidence from raw preregistered traces before independent rescore, so
+  // caller-supplied PASS/comparison fields cannot manufacture a valid H2 claim.
+  { phase: 'h2-experiment-harness', command: 'node gates/h2-experiment-harness.proof.mjs --json' },
+  // H2 ledger bridge: consumes verified III.f run-ledgers per H2 arm, converts
+  // per-seed capability curves into raw resolve traces, and forces VOID on
+  // missing controls, under-instrumented real-run data, chain tamper, or hash tamper.
+  { phase: 'h2-ledger-bridge', command: 'node gates/h2-ledger-bridge.proof.mjs --json' },
   // L07 — a REAL present-vs-dangling supply-chain fact for Go/Rust/Python/Java (stdlib/declared = present,
   // undeclared-non-stdlib = dangling, no-manifest = unjudged). "Universal" = judged-everywhere, not silent-but-JS.
   { phase: 'lang-supply-chain', command: 'node gates/lang-supply-chain.proof.mjs --json' },
@@ -1166,7 +1183,7 @@ function appendSelfEvolutionDisproofCorpus(witnessArgs: JsonRecord): JsonRecord 
   const appended = runDisproofCorpusHarness('--append-witness-jsonl', { corpusText, witnessArgs });
   if (typeof appended.corpusText !== 'string') throw new Error('disproof corpus append returned no corpusText');
   fs.mkdirSync(path.dirname(corpusPath), { recursive: true });
-  atomicWrite(corpusPath, appended.corpusText as string);
+  withSelfExpansionAdmission(() => atomicWrite(corpusPath, appended.corpusText as string));
   return {
     corpusFile: SELF_EVOLUTION_DISPROOF_CORPUS_REL,
     deduped: appended.deduped ?? false,
@@ -1880,11 +1897,9 @@ export function registerToolsSelf(server: McpServer): void {
             /* fail-safe */
           }
 
-          const selfEvolutionArchive = appendRealSelfExpansionArchive(selfRoot, promotionReceipt);
-          // All proofs passed and the Darwin-Godel admission receipt was archived.
-          // RATCHET the security baseline so any strengthening of the engine's own
-          // surface immediately becomes the locked minimum. Best-effort: a ratchet
-          // failure never fails an already-proven-green expansion.
+          // All proofs passed and the Darwin-Godel admission receipt is ready.
+          // Ratchet and re-check rollbackable effects before appending the durable
+          // archive, because the archive is the success marker for this transaction.
           try {
             enforceSecurityMonotonicity({ ratchet: true });
           } catch {
@@ -1892,6 +1907,7 @@ export function registerToolsSelf(server: McpServer): void {
           }
           const effects = diffSelfExpansionSnapshot(snap);
           assertNoUnexpectedSelfExpansionEffects(effects.effects, applied);
+          const selfEvolutionArchive = appendRealSelfExpansionArchive(selfRoot, promotionReceipt);
           return ok({
             ok: true,
             changed: true,

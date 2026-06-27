@@ -149,6 +149,34 @@ async function main() {
 
   record(
     results,
+    'README exposes the H2 fair-harness contract proof path',
+    readme.includes('node scripts/mcp/atomic-edit/gates/h2-harness-contract.proof.mjs --json'),
+    { hasH2HarnessContractCommand: readme.includes('node scripts/mcp/atomic-edit/gates/h2-harness-contract.proof.mjs --json') },
+  );
+
+  record(
+    results,
+    'README exposes the H2 verdict runner proof path',
+    readme.includes('node scripts/mcp/atomic-edit/gates/h2-harness-runner.proof.mjs --json'),
+    { hasH2HarnessRunnerCommand: readme.includes('node scripts/mcp/atomic-edit/gates/h2-harness-runner.proof.mjs --json') },
+  );
+
+  record(
+    results,
+    'README exposes the H2 deterministic experiment harness proof path',
+    readme.includes('node scripts/mcp/atomic-edit/gates/h2-experiment-harness.proof.mjs --json'),
+    { hasH2ExperimentHarnessCommand: readme.includes('node scripts/mcp/atomic-edit/gates/h2-experiment-harness.proof.mjs --json') },
+  );
+
+  record(
+    results,
+    'README exposes the H2 ledger bridge proof path',
+    readme.includes('node scripts/mcp/atomic-edit/gates/h2-ledger-bridge.proof.mjs --json'),
+    { hasH2LedgerBridgeCommand: readme.includes('node scripts/mcp/atomic-edit/gates/h2-ledger-bridge.proof.mjs --json') },
+  );
+
+  record(
+    results,
     'README exposes the public package Vitest proof path',
     readme.includes('node scripts/mcp/atomic-edit/gates/vitest-package-suite.proof.mjs --json'),
     { hasVitestProofCommand: readme.includes('node scripts/mcp/atomic-edit/gates/vitest-package-suite.proof.mjs --json') },

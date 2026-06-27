@@ -9,8 +9,8 @@ type ToolResult = { content: { text: string }[]; isError?: boolean };
 const results: ProofResult[] = [];
 const atomicRoot = process.cwd();
 const repoRoot = path.resolve(atomicRoot, '..', '..', '..');
-const goodRel = path.join('scripts', 'mcp', 'atomic-edit', `.self-expansion-apply-rollback.${process.pid}.ts`);
-const missingRel = path.join('scripts', 'mcp', 'atomic-edit', `.self-expansion-apply-missing.${process.pid}.ts`);
+const goodRel = path.join('core', 'atomic-edit', `rollback-apply-${process.pid}.mjs`);
+const missingRel = path.join('core', 'atomic-edit', `rollback-missing-${process.pid}.mjs`);
 const goodAbs = path.join(repoRoot, goodRel);
 const missingAbs = path.join(repoRoot, missingRel);
 
@@ -46,7 +46,7 @@ async function run(): Promise<void> {
       },
     }) as ToolResult;
     const text = message(res);
-    check('apply-phase failure is reported as rollback', res.isError === true && /rolled back/.test(text), text);
+    check('apply-phase failure is reported as nonzero rollback', res.isError === true && /rolled back [1-9][0-9]* file effect/.test(text), text);
     check('created file was rolled back after later apply failure', !fs.existsSync(goodAbs), goodRel);
     check('missing replace target remains absent', !fs.existsSync(missingAbs), missingRel);
   } finally {

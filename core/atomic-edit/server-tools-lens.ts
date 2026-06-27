@@ -30,16 +30,45 @@ const SKIP = new Set([
   '.git',
   '.atomic',
   '.claude',
+  '.codex',
   '.mcp-cache',
   '.next',
   '.turbo',
   '.cache',
+  '.atomic-build-tmp',
+  '.planning',
   'build',
   'coverage',
   'dist',
+  'dist-lkg',
+  'dist.broken-last',
   'vendor',
   'node-compile-cache',
+  'npm-cache',
 ]);
+
+const GENERATED_SKIP_PREFIXES = [
+  '.proof-',
+  '.smoke-',
+  '.self-expansion-',
+  '.security-mono-proof-',
+  '.atomic-exec-sandbox',
+  '.external-runtime-denial-',
+  '.supervisor-',
+  '.build-tmp-',
+  'atomic-exec-broker-file-',
+  'atomic-edit-dist-',
+  'dist-lkg.tmp-',
+  'atomic-universal-',
+  'atomic-type-gate-',
+  'property-gate-',
+  'probe-gate-',
+  'converge-symbol-mutation-proof-',
+  'converge-operator-proof-',
+  'atomic-lsp-e2e-',
+];
+
+const GENERATED_SKIP_PATTERNS = [/^[0-9a-f]{32}$/];
 // CLASS-CALLGRAPH-BLIND-NONJS (R027): this scan's SOURCE_RE was JS-only, so atomic_grep_calls / the lens walk
 // NEVER READ .py/.go/.rb/.rs/.java/.c files → call-graph perception returned 0 callers for every non-JS
 // function (measured: pylint-7080's `_is_ignored_file` showed 0 callers though called at pylinter.py:600). The
@@ -97,8 +126,16 @@ const DIRECT_TEXT_FILE_LABELS: Record<string, string> = {
   Makefile: 'Makefile',
 };
 
+function shouldSkipPathSegment(segment: string): boolean {
+  return (
+    SKIP.has(segment) ||
+    GENERATED_SKIP_PREFIXES.some((prefix) => segment.startsWith(prefix)) ||
+    GENERATED_SKIP_PATTERNS.some((pattern) => pattern.test(segment))
+  );
+}
+
 function hasSkippedPathSegment(relPath: string): boolean {
-  return relPath.split('/').some((segment) => SKIP.has(segment));
+  return relPath.split('/').some((segment) => shouldSkipPathSegment(segment));
 }
 
 function directTextFileLabel(relPath: string): string | null {
@@ -140,7 +177,7 @@ function enumerateScope(repoRoot: string, scopeRel: string, cap = 8000): string[
     }
     for (const e of entries) {
       if (out.size >= cap) return;
-      if (SKIP.has(e.name)) continue;
+      if (shouldSkipPathSegment(e.name)) continue;
       const abs = path.join(absDir, e.name);
       if (e.isDirectory()) walk(abs);
       else if (SOURCE_RE.test(e.name)) {
@@ -186,7 +223,56 @@ function enumerateDirectNonSourceFiles(repoRoot: string, scopeRel: string, cap =
     }
     for (const entry of entries) {
       if (out.size >= cap) return;
-      if (SKIP.has(entry.name)) continue;
+      if (shouldSkipPathSegment(entry.name)) continue;
+      const abs = path.join(absDir, entry.name);
+      if (entry.isDirectory()) walk(abs);
+      else if (entry.isFile()) addFile(abs);
+    }
+  };
+  for (const part of scopeRel.split(',').map((s) => s.trim()).filter(Boolean)) {
+    if (out.size >= cap) break;
+    const abs = path.resolve(repoRoot, part);
+    const rel = path.relative(repoRoot, abs).replaceAll('\\', '/');
+    if (rel.startsWith('..') || path.isAbsolute(rel) || hasSkippedPathSegment(rel)) continue;
+    let st: fs.Stats | null = null;
+    try {
+      st = fs.statSync(abs);
+    } catch {
+      continue;
+    }
+    if (st.isDirectory()) walk(abs);
+    else if (st.isFile()) addFile(abs);
+  }
+  return [...out];
+}
+
+const SOURCE_LENS_SKIPPED_DIRECT_EXTS = new Set(['.css', '.scss', '.less', '.sql', '.html', '.htm', '.sh', '.bash', '.zsh']);
+
+function isSourceLensSkippedDirectFile(relPath: string): boolean {
+  return SOURCE_LENS_SKIPPED_DIRECT_EXTS.has(path.extname(relPath).toLowerCase());
+}
+
+export function enumerateSkipped(repoRoot: string, scopeRel: string, cap = 1000): string[] {
+  const out = new Set<string>();
+  const addFile = (abs: string): void => {
+    if (out.size >= cap) return;
+    const rel = path.relative(repoRoot, abs).replaceAll('\\', '/');
+    if (rel.startsWith('..') || path.isAbsolute(rel) || hasSkippedPathSegment(rel)) return;
+    if (SOURCE_RE.test(abs)) return;
+    if (!isSourceLensSkippedDirectFile(rel)) return;
+    out.add(rel);
+  };
+  const walk = (absDir: string): void => {
+    if (out.size >= cap) return;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(absDir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (out.size >= cap) return;
+      if (shouldSkipPathSegment(entry.name)) continue;
       const abs = path.join(absDir, entry.name);
       if (entry.isDirectory()) walk(abs);
       else if (entry.isFile()) addFile(abs);

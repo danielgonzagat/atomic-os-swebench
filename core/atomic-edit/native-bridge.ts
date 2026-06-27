@@ -30,7 +30,7 @@ export interface GrepMatch { path: string; lineNumber: number; line: string; }
 export interface GrepResult { matches: GrepMatch[]; totalMatches: number; filesWithMatches: number; filesSearched: number; limitReached: boolean; }
 export type GlobFileType = 'file' | 'dir' | 'symlink';
 export interface GlobMatch { path: string; fileType: GlobFileType; }
-export interface GlobResult { matches: GlobMatch[]; totalMatches: number; }
+export interface GlobResult { matches: GlobMatch[]; totalMatches: number; limitReached: boolean; }
 
 // --------------------------- grammar registry ---------------------------
 
@@ -260,53 +260,101 @@ function globMatches(re: RegExp | null, relPath: string): boolean {
   return re.test(rel) || re.test(path.basename(rel));
 }
 
+interface ListEntriesResult { matches: GlobMatch[]; totalMatches: number; limitReached: boolean; }
+
+function globLiteralDirectoryPrefix(glob?: string): string {
+  const normalized = normalizeRelPath(glob ?? '');
+  if (!normalized || normalized === '.') return '';
+  const segments = normalized.split('/').filter(Boolean);
+  const literal: string[] = [];
+  for (const segment of segments) {
+    if (segment.includes('*') || segment.includes('?') || segment.includes('[') || segment.includes(']') || segment.includes('{') || segment.includes('}')) break;
+    literal.push(segment);
+  }
+  if (literal.length === 0) return '';
+  if (literal.length === segments.length) return literal.slice(0, -1).join('/');
+  return literal.join('/');
+}
+
+function pathInsideOrSame(parent: string, child: string): boolean {
+  const rel = path.relative(parent, child);
+  return rel === '' || (!!rel && !rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
 function listEntries(
   target: string,
   glob?: string,
-  opts: { fileType?: GlobFileType; hidden?: boolean } = {},
-): GlobMatch[] {
-  let st: fs.Stats;
-  try { st = fs.statSync(target); } catch { return []; }
-  const out: GlobMatch[] = [];
+  opts: { fileType?: GlobFileType; hidden?: boolean; maxResults?: number } = {},
+): ListEntriesResult {
   const re = glob ? globToRe(glob) : null;
+  const prefix = globLiteralDirectoryPrefix(glob);
+  let walkTarget = target;
+  let relPrefix = '';
+  if (prefix) {
+    const prefixed = path.resolve(target, prefix);
+    if (!pathInsideOrSame(path.resolve(target), prefixed)) {
+      return { matches: [], totalMatches: 0, limitReached: false };
+    }
+    walkTarget = prefixed;
+    relPrefix = prefix;
+  }
+
+  let st: fs.Stats;
+  try { st = fs.lstatSync(walkTarget); } catch { return { matches: [], totalMatches: 0, limitReached: false }; }
+  const out: GlobMatch[] = [];
+  let totalMatches = 0;
+  let limitReached = false;
+  const maxResultsValue = opts.maxResults ?? Number.POSITIVE_INFINITY;
+  const maxResults = Number.isFinite(maxResultsValue) ? Math.max(1, Math.floor(maxResultsValue)) : Number.POSITIVE_INFINITY;
   const includeHidden = opts.hidden === true;
-  const add = (full: string, rel: string, fileType: GlobFileType): void => {
-    if (opts.fileType && opts.fileType !== fileType) return;
-    if (!includeHidden && hasHiddenSegment(rel)) return;
-    if (globMatches(re, rel)) out.push({ path: full, fileType });
+  const add = (full: string, rel: string, fileType: GlobFileType): boolean => {
+    if (opts.fileType && opts.fileType !== fileType) return true;
+    if (!includeHidden && hasHiddenSegment(rel)) return true;
+    if (!globMatches(re, rel)) return true;
+    totalMatches += 1;
+    if (out.length < maxResults) out.push({ path: full, fileType });
+    if (out.length >= maxResults) {
+      limitReached = true;
+      return false;
+    }
+    return true;
   };
   if (st.isFile()) {
-    add(target, path.basename(target), 'file');
-    return out;
+    add(walkTarget, relPrefix || path.basename(walkTarget), 'file');
+    return { matches: out, totalMatches, limitReached };
   }
   if (st.isSymbolicLink()) {
-    add(target, path.basename(target), 'symlink');
-    return out;
+    add(walkTarget, relPrefix || path.basename(walkTarget), 'symlink');
+    return { matches: out, totalMatches, limitReached };
   }
-  if (!st.isDirectory()) return out;
+  if (!st.isDirectory()) return { matches: out, totalMatches, limitReached };
+  let shouldContinue = true;
   const walk = (dir: string, relDir: string): void => {
+    if (!shouldContinue) return;
     let ents: fs.Dirent[];
     try { ents = fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)); } catch { return; }
     for (const e of ents) {
+      if (!shouldContinue) return;
       if (SKIP_DIRS.has(e.name)) continue;
       const full = path.join(dir, e.name);
-      const rel = relDir ? `${relDir}/${e.name}` : e.name;
+      const rel = relDir ? relDir + '/' + e.name : e.name;
       if (e.isDirectory()) {
-        add(full, rel, 'dir');
+        shouldContinue = add(full, rel, 'dir');
+        if (!shouldContinue) return;
         walk(full, rel);
       } else if (e.isSymbolicLink()) {
-        add(full, rel, 'symlink');
+        shouldContinue = add(full, rel, 'symlink');
       } else if (e.isFile()) {
-        add(full, rel, 'file');
+        shouldContinue = add(full, rel, 'file');
       }
     }
   };
-  walk(target, '');
-  return out;
+  walk(walkTarget, relPrefix);
+  return { matches: out, totalMatches, limitReached };
 }
 
 function listFiles(target: string, glob?: string): string[] {
-  return listEntries(target, glob, { fileType: 'file', hidden: true }).map((entry) => entry.path);
+  return listEntries(target, glob, { fileType: 'file', hidden: true }).matches.map((entry) => entry.path);
 }
 
 function globToRe(glob: string): RegExp {
@@ -448,12 +496,13 @@ export async function nativeGrep(opts: Record<string, unknown>): Promise<GrepRes
 
 export async function nativeGlob(opts: Record<string, unknown>): Promise<GlobResult> {
   const target = String(opts.path ?? '.');
+  const maxResults = Number(opts.maxResults ?? 500);
   const entries = listEntries(target, String(opts.pattern ?? '*'), {
     fileType: opts.fileType as GlobFileType | undefined,
     hidden: opts.hidden === true,
+    maxResults,
   });
-  const maxResults = Number(opts.maxResults ?? 500);
-  return { matches: entries.slice(0, maxResults), totalMatches: entries.length };
+  return { matches: entries.matches, totalMatches: entries.totalMatches, limitReached: entries.limitReached };
 }
 
 /** Syntax validity via web-tree-sitter. realParser:false means no grammar (cannot judge); parsed reflects zero ERROR/MISSING nodes. */

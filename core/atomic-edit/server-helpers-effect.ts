@@ -21,7 +21,7 @@ import { characterDiff } from './advanced.js';
 import { REPO_ROOT } from './guard.js';
 
 const SKIP_DIRS = new Set([
-  'node_modules', '.git', 'dist', 'dist-lkg', 'dist.broken-last', '.next', 'build', '.atomic-build-tmp', 'coverage', '.atomic',
+  'node_modules', '.git', 'dist', 'dist-lkg', 'dist.broken-last', '.next', 'build', '.atomic-build-tmp', 'coverage', '.atomic', 'npm-cache',
   '.codex-artifacts', '.codex-hook-tmp', '.turbo', 'vendor', '.cache', '.atomic-closure-cache', 'node-compile-cache',
   'jest_dx', 'test-results', 'atomic-exec', '.serena', '.codegraph', '.claude', '.mcp-cache', '.positive-byte-sessions',
   '__pycache__', 'docs', '.pytest_cache',
@@ -30,7 +30,6 @@ const SKIP_DIRS = new Set([
 const SKIP_FILE_NAMES = new Set([
   '.DS_Store',
   '.build-manifest.json',
-  'self-evolution-archive.jsonl',
 ]);
 
 const REPO_SCRATCH_DIRS = new Set([
@@ -118,6 +117,7 @@ export interface EffectSnapshot {
   modes?: Map<string, number>;
   limitReached: boolean;
   limits: { maxFiles: number; maxBytes: number; maxFileBytes: number };
+  dependencyClones?: Array<{ originalAbs: string; cloneAbs: string }>;
 }
 
 export interface FileEffect {
@@ -248,6 +248,47 @@ function rollbackChmod(rootAbs: string, absPath: string, mode: number): boolean 
   }
 }
 
+export function findDependencyDirs(root: string): string[] {
+  const dirs: string[] = [];
+  const walk = (current: string, depth: number) => {
+    if (depth > 4) return;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const name = entry.name;
+        const fullPath = path.join(current, name);
+        if (name === 'node_modules' || name === 'venv' || name === '.venv' || name === '.z3venv') {
+          dirs.push(fullPath);
+        } else {
+          if (SKIP_DIRS.has(name) || (name.startsWith('.') && name !== '.venv' && name !== '.z3venv')) {
+            continue;
+          }
+          walk(fullPath, depth + 1);
+        }
+      }
+    }
+  };
+  walk(root, 1);
+  return dirs;
+}
+
+export function cleanupEffectSnapshot(snap: EffectSnapshot): void {
+  if (snap.dependencyClones && snap.dependencyClones.length > 0) {
+    const clonesDir = path.dirname(snap.dependencyClones[0].cloneAbs);
+    try {
+      fs.rmSync(clonesDir, { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
+    snap.dependencyClones = [];
+  }
+}
+
 export function assertCompleteEffectSnapshot(snap: EffectSnapshot, action: string): void {
   if (!snap.limitReached) return;
   throw new Error(
@@ -258,7 +299,7 @@ export function assertCompleteEffectSnapshot(snap: EffectSnapshot, action: strin
 /** Capture the byte-content of every in-scope file under `rootAbs` (bounded). */
 export function captureEffectSnapshot(
   rootAbs: string,
-  opts: { maxFiles?: number; maxBytes?: number; maxFileBytes?: number; includeRel?: string[] } = {},
+  opts: { maxFiles?: number; maxBytes?: number; maxFileBytes?: number; includeRel?: string[]; cloneDependencies?: boolean } = {},
 ): EffectSnapshot {
   const maxFiles = opts.maxFiles ?? 20000;
   const maxBytes = opts.maxBytes ?? 256 * 1024 * 1024;
@@ -299,9 +340,12 @@ export function captureEffectSnapshot(
     }
     if (!st.isFile()) return;
     if (st.size > maxFileBytes) {
-      // Too large to snapshot under the cap -> we cannot guarantee byte-exact
-      // reversal for it, so the snapshot is NOT complete (was silently skipped).
-      limitReached = true;
+      // Too large to snapshot under the per-file cap. Declared OUT of byte-effect
+      // coverage (same model as SKIP_DIRS: .atomic / node_modules / dist) instead
+      // of bricking the ENTIRE snapshot. A single oversized ledger/cache/backup
+      // file (e.g. the multi-MB self-evolution-archive.jsonl) must never make
+      // atomic_exec + atomic_expand_self permanently unusable. Byte-exact reversal
+      // of THIS one file is not guaranteed, exactly like other out-of-coverage paths.
       return;
     }
     let buf: Buffer;
@@ -377,7 +421,26 @@ export function captureEffectSnapshot(
     walk(rootAbs);
   }
 
-  return { rootAbs, ...(includeRel.length > 0 ? { includeRel } : {}), files, modes, limitReached, limits };
+  const dependencyClones: Array<{ originalAbs: string; cloneAbs: string }> = [];
+  if (opts.cloneDependencies) {
+    const dependencyDirs = findDependencyDirs(rootAbs);
+    const clonesDir = path.join(rootAbs, '.atomic', 'dependency-clones', `clone-${process.pid}-${Date.now()}-${Math.floor(Math.random() * 1000000)}`);
+    for (const dir of dependencyDirs) {
+      try {
+        const cloneName = path.relative(rootAbs, dir).replace(/[/\\]/g, '__');
+        const cloneAbs = path.join(clonesDir, cloneName);
+        fs.mkdirSync(path.dirname(cloneAbs), { recursive: true });
+        const res = childProcess.spawnSync('cp', ['-Rc', dir, cloneAbs]);
+        if (res.status === 0) {
+          dependencyClones.push({ originalAbs: dir, cloneAbs });
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  return { rootAbs, ...(includeRel.length > 0 ? { includeRel } : {}), files, modes, limitReached, limits, ...(dependencyClones.length > 0 ? { dependencyClones } : {}) };
 }
 
 /** Re-walk and compute the exact per-file byte-effect since the snapshot. */
@@ -436,6 +499,35 @@ export function diffEffect(snap: EffectSnapshot): FileEffect[] {
 export function rollbackEffect(snap: EffectSnapshot, effects: FileEffect[]): number {
   assertCompleteEffectSnapshot(snap, 'rollback filesystem effect');
   let restored = 0;
+
+  if (snap.dependencyClones && snap.dependencyClones.length > 0) {
+    const originalPathsInSnap = new Set(snap.dependencyClones.map(c => c.originalAbs));
+    const currentDepDirs = findDependencyDirs(snap.rootAbs);
+    for (const currentDir of currentDepDirs) {
+      if (!originalPathsInSnap.has(currentDir)) {
+        try {
+          fs.rmSync(currentDir, { recursive: true, force: true });
+          restored += 1;
+        } catch {
+          // ignore
+        }
+      }
+    }
+    for (const cloneInfo of snap.dependencyClones) {
+      try {
+        fs.rmSync(cloneInfo.originalAbs, { recursive: true, force: true });
+        const res = childProcess.spawnSync('cp', ['-Rc', cloneInfo.cloneAbs, cloneInfo.originalAbs]);
+        if (res.status === 0) {
+          restored += 1;
+        } else {
+          fs.renameSync(cloneInfo.cloneAbs, cloneInfo.originalAbs);
+          restored += 1;
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }
   for (const eff of effects) {
     const abs = path.join(snap.rootAbs, eff.file);
     if (eff.change === 'created') {

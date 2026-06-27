@@ -214,7 +214,7 @@ elevation_stream_sha256=$elevation_stream_sha256
 weights_path=$WEIGHTS
 no_synthetic=true
 no_replay=true
-summary_fields=metric,run_id,metric_claim,production_ready_to_run,metric_admissible,production_toolchain_ok,benchmark_suite,benchmark_dataset_name,official_benchmark,metric_scope,within_task_efficiency_metric_admissible,manifest_path,selected_task_count,selected_task_ids_sha256,selection_manifest_path,selection_manifest_sha256,selection_receipt_ok,anti_cherry_pick,frontier_baseline_runner,frontier_baseline_runner_sha256,elevation_stream,elevation_stream_sha256,weights_path,weights_sha256,preflight_receipt_path,preflight_receipt_sha256,preflight_verification_ok,task_provenance_ok,task_provenance_sha256,frontier_baseline_path,frontier_baseline_sha256,frontier_model,frontier_baseline_role,frontier_baseline_frozen,frontier_baseline_official_docker,frontier_baseline_benchmark_label,frontier_baseline_summary_path,frontier_baseline_summary_sha256,frontier_summary_verification_ok,frontier_baseline_evidence_receipt_ok,frontier_baseline_resolved,frontier_solve_rate,deepseek_control_resolved,deepseek_control_solve_rate,atomic_substrate_resolved,student_solve_rate,student_model,elevation_vs_frontier,elevation_vs_frontier_solve_rate,elevation_vs_deepseek_control,elevation_vs_deepseek_control_solve_rate,accumulation_index,substrate_weight_count,elevation_valid_if_run,elevation_summary_path,elevation_summary_sha256,round_receipt_path,round_receipt_sha256,round_receipt_verification_ok
+summary_fields=metric,run_id,metric_claim,production_ready_to_run,ready_blockers,production_ready_blockers,metric_admissible,production_toolchain_ok,benchmark_suite,benchmark_dataset_name,official_benchmark,metric_scope,within_task_efficiency_metric_admissible,manifest_path,selected_task_count,selected_task_ids_sha256,selection_manifest_path,selection_manifest_sha256,selection_receipt_ok,anti_cherry_pick,frontier_baseline_runner,frontier_baseline_runner_sha256,elevation_stream,elevation_stream_sha256,weights_path,weights_sha256,preflight_receipt_path,preflight_receipt_sha256,preflight_verification_ok,task_provenance_ok,task_provenance_sha256,frontier_baseline_path,frontier_baseline_sha256,frontier_model,frontier_baseline_role,frontier_baseline_frozen,frontier_baseline_official_docker,frontier_baseline_benchmark_label,frontier_baseline_summary_path,frontier_baseline_summary_sha256,frontier_summary_verification_ok,frontier_baseline_evidence_receipt_ok,frontier_baseline_resolved,frontier_solve_rate,deepseek_control_resolved,deepseek_control_solve_rate,atomic_substrate_resolved,student_solve_rate,student_model,elevation_vs_frontier,elevation_vs_frontier_solve_rate,elevation_vs_deepseek_control,elevation_vs_deepseek_control_solve_rate,accumulation_index,substrate_weight_count,elevation_valid_if_run,elevation_summary_path,elevation_summary_sha256,round_receipt_path,round_receipt_sha256,round_receipt_verification_ok
 EOF
 }
 
@@ -564,38 +564,74 @@ emit_preflight() {
     suite_pristine_layout="$(report_field "$frontier_report" suite_pristine_layout_ok false)"
   fi
 
+  selected_count_ok=false
+  if [[ "$selected_count" =~ ^[1-9][0-9]*$ ]]; then
+    selected_count_ok=true
+  fi
+  task_provenance_sha_ok=false
+  if [[ "$task_provenance_sha" =~ ^[0-9a-f]{64}$ ]]; then
+    task_provenance_sha_ok=true
+  fi
+
+  ready_blockers=""
+  add_ready_blocker() {
+    if [[ "$1" != "true" ]]; then
+      if [[ -n "$ready_blockers" ]]; then
+        ready_blockers+=","
+      fi
+      ready_blockers+="$2"
+    fi
+  }
+  add_ready_blocker "$official" official_benchmark
+  add_ready_blocker "$selected_count_ok" selected_task_count
+  add_ready_blocker "$selection_receipt_ok" selection_receipt_ok
+  add_ready_blocker "$anti_cherry_pick" anti_cherry_pick
+  add_ready_blocker "$deepseek_present" deepseek_api_key_present
+  add_ready_blocker "$modal_credentials_present" modal_credentials_present
+  add_ready_blocker "$credential_format_ok" credential_format_ok
+  add_ready_blocker "$credential_rotation_attestation_ok" credential_rotation_attestation_ok
+  add_ready_blocker "$deepseek_api_preflight_ok" deepseek_api_preflight_ok
+  add_ready_blocker "$modal_preflight_ok" modal_preflight_ok
+  add_ready_blocker "$scorer_preflight_ok" scorer_preflight_ok
+  add_ready_blocker "$runner_policy_ok" runner_policy_ok
+  add_ready_blocker "$frontier_runner_ok" frontier_runner_ok
+  add_ready_blocker "$elevation_stream_ok" elevation_stream_ok
+  add_ready_blocker "$weights_ok" weights_ok
+  add_ready_blocker "$task_layout" task_layout_ok
+  add_ready_blocker "$task_provenance" task_provenance_ok
+  add_ready_blocker "$task_provenance_sha_ok" task_provenance_sha256
+  add_ready_blocker "$suite_pristine_layout" suite_pristine_layout_ok
+
   ready=false
-  if [[ "$official" == "true" \
-    && "$selected_count" =~ ^[1-9][0-9]*$ \
-    && "$selection_receipt_ok" == "true" \
-    && "$anti_cherry_pick" == "true" \
-    && "$deepseek_present" == "true" \
-    && "$modal_credentials_present" == "true" \
-    && "$credential_format_ok" == "true" \
-    && "$credential_rotation_attestation_ok" == "true" \
-    && "$deepseek_api_preflight_ok" == "true" \
-    && "$modal_preflight_ok" == "true" \
-    && "$scorer_preflight_ok" == "true" \
-    && "$runner_policy_ok" == "true" \
-    && "$frontier_runner_ok" == "true" \
-    && "$elevation_stream_ok" == "true" \
-    && "$weights_ok" == "true" \
-    && "$task_layout" == "true" \
-    && "$task_provenance" == "true" \
-    && "$task_provenance_sha" =~ ^[0-9a-f]{64}$ \
-    && "$suite_pristine_layout" == "true" ]]; then
+  if [[ -z "$ready_blockers" ]]; then
     ready=true
   fi
+
+  test_runner_override_disabled=false
+  if [[ "$test_runner_override_allowed" == "false" ]]; then
+    test_runner_override_disabled=true
+  fi
+  production_ready_blockers=""
+  add_production_ready_blocker() {
+    if [[ "$1" != "true" ]]; then
+      if [[ -n "$production_ready_blockers" ]]; then
+        production_ready_blockers+=","
+      fi
+      production_ready_blockers+="$2"
+    fi
+  }
+  add_production_ready_blocker "$ready" ready_to_run
+  add_production_ready_blocker "$canonical_toolchain" canonical_toolchain
+  add_production_ready_blocker "$test_runner_override_disabled" test_runner_override_allowed
+  add_production_ready_blocker "$production_credential_format_ok" production_credential_format_ok
+  add_production_ready_blocker "$credential_rotation_attested" credential_rotation_attested
+  add_production_ready_blocker "$official_deepseek_api_preflight_ok" official_deepseek_api_preflight_ok
+  add_production_ready_blocker "$official_modal_preflight_ok" official_modal_preflight_ok
+  add_production_ready_blocker "$official_scorer_preflight_ok" official_scorer_preflight_ok
+  add_production_ready_blocker "$runner_policy_ok" runner_policy_ok
+
   production_ready=false
-  if [[ "$ready" == "true" \
-    && "$canonical_toolchain" == "true" \
-    && "$test_runner_override_allowed" == "false" \
-    && "$production_credential_format_ok" == "true" \
-    && "$credential_rotation_attested" == "true" \
-    && "$official_deepseek_api_preflight_ok" == "true" \
-    && "$official_modal_preflight_ok" == "true" \
-    && "$official_scorer_preflight_ok" == "true" \
-    && "$runner_policy_ok" == "true" ]]; then
+  if [[ -z "$production_ready_blockers" ]]; then
     production_ready=true
   fi
 
@@ -662,6 +698,8 @@ task_provenance_sha256=$task_provenance_sha
 suite_pristine_layout_ok=$suite_pristine_layout
 ready_to_run=$ready
 production_ready_to_run=$production_ready
+ready_blockers=$ready_blockers
+production_ready_blockers=$production_ready_blockers
 no_model_run=true
 no_scorer_run=true
 preflight_receipt_path=$preflight_receipt_path
@@ -730,6 +768,8 @@ EOF
       suite_pristine_layout_ok="$suite_pristine_layout" \
       ready_to_run="$ready" \
       production_ready_to_run="$production_ready" \
+      ready_blockers="$ready_blockers" \
+      production_ready_blockers="$production_ready_blockers" \
       no_model_run=true \
       no_scorer_run=true
   fi
@@ -745,10 +785,15 @@ metric_claim=false
 preflight_receipt_path=$receipt_json
 preflight_receipt_exists=false
 preflight_receipt_schema_ok=false
+preflight_receipt_missing_fields=
+preflight_receipt_schema_issue_paths=preflight_receipt_exists
 receipt_ready_to_run=false
 current_ready_to_run=false
 receipt_production_ready_to_run=false
 current_production_ready_to_run=false
+ready_blockers=preflight_receipt_exists
+production_ready_blockers=preflight_receipt_ok
+preflight_receipt_mismatch_paths=preflight_receipt_exists
 receipt_matches_current=false
 preflight_receipt_ok=false
 no_model_run=true
@@ -825,6 +870,8 @@ required = [
     "suite_pristine_layout_ok",
     "ready_to_run",
     "production_ready_to_run",
+    "ready_blockers",
+    "production_ready_blockers",
     "no_model_run",
     "no_scorer_run",
 ]
@@ -849,13 +896,19 @@ def parse_report(text):
     return parsed
 
 current = parse_report(current_report)
+receipt_parse_issue = ""
 try:
     with open(receipt_path, encoding="utf-8") as handle:
         receipt = json.load(handle)
 except Exception:
     receipt = {}
+    receipt_parse_issue = "preflight_receipt_json"
+if not isinstance(receipt, dict):
+    receipt = {}
+    receipt_parse_issue = "preflight_receipt_object"
 
-missing = [key for key in required if key not in receipt]
+missing = [] if receipt_parse_issue else [key for key in required if key not in receipt]
+schema_issue_paths = [receipt_parse_issue] if receipt_parse_issue else list(missing)
 receipt_values = {key: normalize(receipt.get(key, "")) for key in required}
 schema_ok = not missing
 schema_ok = schema_ok and receipt_values.get("metric") == "pro_elevation_preflight"
@@ -914,22 +967,30 @@ schema_ok = schema_ok and (
     receipt_values.get("credential_format_bypassed_by_test_runner") != "true"
     or receipt_values.get("test_runner_override_allowed") == "true"
 )
-schema_ok = schema_ok and receipt_values.get("credential_format_ok") == (
+expected_credential_format_ok = (
     "true" if (
         receipt_values.get("production_credential_format_ok") == "true"
         or receipt_values.get("credential_format_bypassed_by_test_runner") == "true"
     ) else "false"
 )
+credential_format_schema_ok = receipt_values.get("credential_format_ok") == expected_credential_format_ok
+schema_ok = schema_ok and credential_format_schema_ok
+if not credential_format_schema_ok and "credential_format_ok" not in schema_issue_paths:
+    schema_issue_paths.append("credential_format_ok")
 schema_ok = schema_ok and (
     receipt_values.get("credential_rotation_attestation_bypassed_by_test_runner") != "true"
     or receipt_values.get("test_runner_override_allowed") == "true"
 )
-schema_ok = schema_ok and receipt_values.get("credential_rotation_attestation_ok") == (
+expected_credential_rotation_attestation_ok = (
     "true" if (
         receipt_values.get("credential_rotation_attested") == "true"
         or receipt_values.get("credential_rotation_attestation_bypassed_by_test_runner") == "true"
     ) else "false"
 )
+credential_rotation_attestation_schema_ok = receipt_values.get("credential_rotation_attestation_ok") == expected_credential_rotation_attestation_ok
+schema_ok = schema_ok and credential_rotation_attestation_schema_ok
+if not credential_rotation_attestation_schema_ok and "credential_rotation_attestation_ok" not in schema_issue_paths:
+    schema_issue_paths.append("credential_rotation_attestation_ok")
 schema_ok = schema_ok and receipt_values.get("official_deepseek_api_preflight_ok") == (
     "true" if (
         receipt_values.get("deepseek_auth_ok") == "true"
@@ -940,12 +1001,16 @@ schema_ok = schema_ok and (
     receipt_values.get("deepseek_api_preflight_bypassed_by_test_runner") != "true"
     or receipt_values.get("test_runner_override_allowed") == "true"
 )
-schema_ok = schema_ok and receipt_values.get("deepseek_api_preflight_ok") == (
+expected_deepseek_api_preflight_ok = (
     "true" if (
         receipt_values.get("official_deepseek_api_preflight_ok") == "true"
         or receipt_values.get("deepseek_api_preflight_bypassed_by_test_runner") == "true"
     ) else "false"
 )
+deepseek_api_preflight_schema_ok = receipt_values.get("deepseek_api_preflight_ok") == expected_deepseek_api_preflight_ok
+schema_ok = schema_ok and deepseek_api_preflight_schema_ok
+if not deepseek_api_preflight_schema_ok and "deepseek_api_preflight_ok" not in schema_issue_paths:
+    schema_issue_paths.append("deepseek_api_preflight_ok")
 schema_ok = schema_ok and receipt_values.get("official_modal_preflight_ok") == (
     "true" if (
         receipt_values.get("modal_cli_present") == "true"
@@ -956,12 +1021,16 @@ schema_ok = schema_ok and (
     receipt_values.get("modal_preflight_bypassed_by_test_runner") != "true"
     or receipt_values.get("test_runner_override_allowed") == "true"
 )
-schema_ok = schema_ok and receipt_values.get("modal_preflight_ok") == (
+expected_modal_preflight_ok = (
     "true" if (
         receipt_values.get("official_modal_preflight_ok") == "true"
         or receipt_values.get("modal_preflight_bypassed_by_test_runner") == "true"
     ) else "false"
 )
+modal_preflight_schema_ok = receipt_values.get("modal_preflight_ok") == expected_modal_preflight_ok
+schema_ok = schema_ok and modal_preflight_schema_ok
+if not modal_preflight_schema_ok and "modal_preflight_ok" not in schema_issue_paths:
+    schema_issue_paths.append("modal_preflight_ok")
 schema_ok = schema_ok and receipt_values.get("swebench_import_ok") in ("true", "false")
 schema_ok = schema_ok and receipt_values.get("docker_api_ok") in ("true", "false")
 schema_ok = schema_ok and receipt_values.get("official_scorer_preflight_ok") in ("true", "false")
@@ -973,34 +1042,39 @@ schema_ok = schema_ok and receipt_values.get("official_scorer_preflight_ok") == 
         and receipt_values.get("docker_api_ok") == "true"
     ) else "false"
 )
-schema_ok = schema_ok and receipt_values.get("scorer_preflight_ok") == (
+expected_scorer_preflight_ok = (
     "true" if (
         receipt_values.get("official_scorer_preflight_ok") == "true"
         or receipt_values.get("scorer_preflight_bypassed_by_test_runner") == "true"
     ) else "false"
 )
+scorer_preflight_schema_ok = receipt_values.get("scorer_preflight_ok") == expected_scorer_preflight_ok
+schema_ok = schema_ok and scorer_preflight_schema_ok
+if not scorer_preflight_schema_ok and "scorer_preflight_ok" not in schema_issue_paths:
+    schema_issue_paths.append("scorer_preflight_ok")
 schema_ok = schema_ok and (
     receipt_values.get("scorer_preflight_bypassed_by_test_runner") != "true"
     or receipt_values.get("test_runner_override_allowed") == "true"
 )
 provenance_sha = receipt_values.get("task_provenance_sha256", "")
 provenance_sha_ok = len(provenance_sha) == 64 and all(char in "0123456789abcdef" for char in provenance_sha)
-schema_ok = schema_ok and (
-    receipt_values.get("ready_to_run") != "true"
-    or (
-        provenance_sha_ok
-        and receipt_values.get("selection_receipt_ok") == "true"
-        and receipt_values.get("anti_cherry_pick") == "true"
-        and receipt_values.get("deepseek_api_key_present") == "true"
-        and receipt_values.get("modal_credentials_present") == "true"
-        and receipt_values.get("credential_format_ok") == "true"
-        and receipt_values.get("credential_rotation_attestation_ok") == "true"
-        and receipt_values.get("deepseek_api_preflight_ok") == "true"
-        and receipt_values.get("modal_preflight_ok") == "true"
-        and receipt_values.get("scorer_preflight_ok") == "true"
-    )
+expected_receipt_ready = (
+    provenance_sha_ok
+    and receipt_values.get("selection_receipt_ok") == "true"
+    and receipt_values.get("anti_cherry_pick") == "true"
+    and receipt_values.get("deepseek_api_key_present") == "true"
+    and receipt_values.get("modal_credentials_present") == "true"
+    and receipt_values.get("credential_format_ok") == "true"
+    and receipt_values.get("credential_rotation_attestation_ok") == "true"
+    and receipt_values.get("deepseek_api_preflight_ok") == "true"
+    and receipt_values.get("modal_preflight_ok") == "true"
+    and receipt_values.get("scorer_preflight_ok") == "true"
 )
 receipt_ready = receipt_values.get("ready_to_run") == "true"
+ready_schema_ok = receipt_ready == expected_receipt_ready
+schema_ok = schema_ok and ready_schema_ok
+if not ready_schema_ok and "ready_to_run" not in schema_issue_paths:
+    schema_issue_paths.append("ready_to_run")
 current_ready = current.get("ready_to_run") == "true"
 receipt_production_ready = receipt_values.get("production_ready_to_run") == "true"
 current_production_ready = current.get("production_ready_to_run") == "true"
@@ -1015,9 +1089,75 @@ expected_receipt_production_ready = (
     and receipt_values.get("official_scorer_preflight_ok") == "true"
     and receipt_values.get("runner_policy_ok") == "true"
 )
-schema_ok = schema_ok and receipt_production_ready == expected_receipt_production_ready
-matches_current = schema_ok and all(receipt_values.get(key, "") == current.get(key, "") for key in required)
+production_ready_schema_ok = receipt_production_ready == expected_receipt_production_ready
+schema_ok = schema_ok and production_ready_schema_ok
+if not production_ready_schema_ok and "production_ready_to_run" not in schema_issue_paths:
+    schema_issue_paths.append("production_ready_to_run")
+schema_ok = schema_ok and isinstance(receipt.get("ready_blockers"), str)
+schema_ok = schema_ok and isinstance(receipt.get("production_ready_blockers"), str)
+
+
+def blocker_list(checks):
+    return ",".join(name for ok, name in checks if not ok)
+
+
+try:
+    selected_count_ok = int(receipt_values.get("selected_task_count", "0")) > 0
+except ValueError:
+    selected_count_ok = False
+expected_ready_blockers = blocker_list([
+    (receipt_values.get("official_benchmark") == "true", "official_benchmark"),
+    (selected_count_ok, "selected_task_count"),
+    (receipt_values.get("selection_receipt_ok") == "true", "selection_receipt_ok"),
+    (receipt_values.get("anti_cherry_pick") == "true", "anti_cherry_pick"),
+    (receipt_values.get("deepseek_api_key_present") == "true", "deepseek_api_key_present"),
+    (receipt_values.get("modal_credentials_present") == "true", "modal_credentials_present"),
+    (receipt_values.get("credential_format_ok") == "true", "credential_format_ok"),
+    (receipt_values.get("credential_rotation_attestation_ok") == "true", "credential_rotation_attestation_ok"),
+    (receipt_values.get("deepseek_api_preflight_ok") == "true", "deepseek_api_preflight_ok"),
+    (receipt_values.get("modal_preflight_ok") == "true", "modal_preflight_ok"),
+    (receipt_values.get("scorer_preflight_ok") == "true", "scorer_preflight_ok"),
+    (receipt_values.get("runner_policy_ok") == "true", "runner_policy_ok"),
+    (receipt_values.get("frontier_runner_ok") == "true", "frontier_runner_ok"),
+    (receipt_values.get("elevation_stream_ok") == "true", "elevation_stream_ok"),
+    (receipt_values.get("weights_ok") == "true", "weights_ok"),
+    (receipt_values.get("task_layout_ok") == "true", "task_layout_ok"),
+    (receipt_values.get("task_provenance_ok") == "true", "task_provenance_ok"),
+    (provenance_sha_ok, "task_provenance_sha256"),
+    (receipt_values.get("suite_pristine_layout_ok") == "true", "suite_pristine_layout_ok"),
+])
+expected_production_ready_blockers = blocker_list([
+    (receipt_ready, "ready_to_run"),
+    (receipt_values.get("canonical_toolchain") == "true", "canonical_toolchain"),
+    (receipt_values.get("test_runner_override_allowed") == "false", "test_runner_override_allowed"),
+    (receipt_values.get("production_credential_format_ok") == "true", "production_credential_format_ok"),
+    (receipt_values.get("credential_rotation_attested") == "true", "credential_rotation_attested"),
+    (receipt_values.get("official_deepseek_api_preflight_ok") == "true", "official_deepseek_api_preflight_ok"),
+    (receipt_values.get("official_modal_preflight_ok") == "true", "official_modal_preflight_ok"),
+    (receipt_values.get("official_scorer_preflight_ok") == "true", "official_scorer_preflight_ok"),
+    (receipt_values.get("runner_policy_ok") == "true", "runner_policy_ok"),
+])
+ready_blockers_schema_ok = receipt_values.get("ready_blockers") == expected_ready_blockers
+production_ready_blockers_schema_ok = receipt_values.get("production_ready_blockers") == expected_production_ready_blockers
+schema_ok = schema_ok and ready_blockers_schema_ok
+schema_ok = schema_ok and production_ready_blockers_schema_ok
+if not ready_blockers_schema_ok and "ready_blockers" not in schema_issue_paths:
+    schema_issue_paths.append("ready_blockers")
+if not production_ready_blockers_schema_ok and "production_ready_blockers" not in schema_issue_paths:
+    schema_issue_paths.append("production_ready_blockers")
+mismatch_paths = [
+    key for key in required
+    if key in receipt and receipt_values.get(key, "") != current.get(key, "")
+]
+matches_current = schema_ok and not mismatch_paths
 receipt_ok = schema_ok and receipt_ready and current_ready and matches_current
+if receipt_parse_issue:
+    schema_ok = False
+    missing = []
+    schema_issue_paths = [receipt_parse_issue]
+    receipt_values["ready_blockers"] = receipt_parse_issue
+    receipt_values["production_ready_blockers"] = "preflight_receipt_ok"
+    receipt_ok = False
 
 print("metric=pro_elevation_preflight_verification")
 print("metric_claim=false")
@@ -1031,10 +1171,14 @@ print(f"within_task_efficiency_metric_admissible={receipt_values.get('within_tas
 print("preflight_receipt_exists=true")
 print(f"preflight_receipt_schema_ok={'true' if schema_ok else 'false'}")
 print(f"preflight_receipt_missing_fields={','.join(missing)}")
+print(f"preflight_receipt_schema_issue_paths={','.join(schema_issue_paths)}")
+print(f"preflight_receipt_mismatch_paths={','.join(mismatch_paths)}")
 print(f"receipt_ready_to_run={'true' if receipt_ready else 'false'}")
 print(f"current_ready_to_run={'true' if current_ready else 'false'}")
 print(f"receipt_production_ready_to_run={'true' if receipt_production_ready else 'false'}")
 print(f"current_production_ready_to_run={'true' if current_production_ready else 'false'}")
+print(f"ready_blockers={receipt_values.get('ready_blockers', '')}")
+print(f"production_ready_blockers={receipt_values.get('production_ready_blockers', '')}")
 print(f"receipt_matches_current={'true' if matches_current else 'false'}")
 print(f"preflight_receipt_ok={'true' if receipt_ok else 'false'}")
 print("no_model_run=true")
@@ -1046,13 +1190,16 @@ PYPREVERIFY
 verify_production_ready_receipt() {
   local receipt_json="${1:-}"
   local verification verify_status
-  local receipt_exists schema_ok receipt_ready current_ready receipt_production_ready current_production_ready matches_current preflight_ok production_ready_ok
-  local selection_manifest_path selection_manifest_sha256 selection_receipt_ok anti_cherry_pick
+  local receipt_exists schema_ok receipt_ready current_ready receipt_production_ready receipt_production_ready_verified current_production_ready matches_current preflight_ok production_ready_ok production_ready_receipt_blockers
+  local selection_manifest_path selection_manifest_sha256 selection_receipt_ok anti_cherry_pick ready_blockers production_ready_blockers mismatch_paths
+  local missing_fields schema_issue_paths preflight_receipt_blocker
 
   verify_status=0
   verification="$(verify_preflight_receipt "$receipt_json")" || verify_status=$?
   receipt_exists="$(report_field "$verification" preflight_receipt_exists false)"
   schema_ok="$(report_field "$verification" preflight_receipt_schema_ok false)"
+  missing_fields="$(report_field "$verification" preflight_receipt_missing_fields '')"
+  schema_issue_paths="$(report_field "$verification" preflight_receipt_schema_issue_paths '')"
   receipt_ready="$(report_field "$verification" receipt_ready_to_run false)"
   current_ready="$(report_field "$verification" current_ready_to_run false)"
   receipt_production_ready="$(report_field "$verification" receipt_production_ready_to_run false)"
@@ -1063,12 +1210,32 @@ verify_production_ready_receipt() {
   selection_manifest_sha256="$(report_field "$verification" selection_manifest_sha256 '')"
   selection_receipt_ok="$(report_field "$verification" selection_receipt_ok false)"
   anti_cherry_pick="$(report_field "$verification" anti_cherry_pick false)"
+  ready_blockers="$(report_field "$verification" ready_blockers '')"
+  production_ready_blockers="$(report_field "$verification" production_ready_blockers '')"
+  mismatch_paths="$(report_field "$verification" preflight_receipt_mismatch_paths '')"
+  production_ready_receipt_blockers=""
+  receipt_production_ready_verified=false
+  if [[ "$receipt_production_ready" == "true" && "$preflight_ok" == "true" ]]; then
+    receipt_production_ready_verified=true
+  fi
+  add_production_ready_receipt_blocker() {
+    if [[ "$1" != "true" ]]; then
+      if [[ -n "$production_ready_receipt_blockers" ]]; then
+        production_ready_receipt_blockers+=","
+      fi
+      production_ready_receipt_blockers+="$2"
+    fi
+  }
+  preflight_receipt_blocker=preflight_receipt_ok
+  if [[ "$receipt_exists" == "true" && -n "$schema_issue_paths" ]]; then
+    preflight_receipt_blocker="$schema_issue_paths"
+  fi
+  add_production_ready_receipt_blocker "$preflight_ok" "$preflight_receipt_blocker"
+  add_production_ready_receipt_blocker "$receipt_production_ready_verified" receipt_production_ready_to_run
+  add_production_ready_receipt_blocker "$current_production_ready" current_production_ready_to_run
+  add_production_ready_receipt_blocker "$matches_current" receipt_matches_current
   production_ready_ok=false
-  if [[ "$verify_status" -eq 0 \
-    && "$preflight_ok" == "true" \
-    && "$receipt_production_ready" == "true" \
-    && "$current_production_ready" == "true" \
-    && "$matches_current" == "true" ]]; then
+  if [[ -z "$production_ready_receipt_blockers" ]]; then
     production_ready_ok=true
   fi
 
@@ -1082,13 +1249,19 @@ selection_receipt_ok=$selection_receipt_ok
 anti_cherry_pick=$anti_cherry_pick
 preflight_receipt_exists=$receipt_exists
 preflight_receipt_schema_ok=$schema_ok
+preflight_receipt_missing_fields=$missing_fields
+preflight_receipt_schema_issue_paths=$schema_issue_paths
 receipt_ready_to_run=$receipt_ready
 current_ready_to_run=$current_ready
 receipt_production_ready_to_run=$receipt_production_ready
 current_production_ready_to_run=$current_production_ready
+ready_blockers=$ready_blockers
+production_ready_blockers=$production_ready_blockers
+preflight_receipt_mismatch_paths=$mismatch_paths
 receipt_matches_current=$matches_current
 preflight_receipt_ok=$preflight_ok
 production_ready_receipt_ok=$production_ready_ok
+production_ready_receipt_blockers=$production_ready_receipt_blockers
 no_model_run=true
 no_scorer_run=true
 EOF
@@ -1338,6 +1511,8 @@ metric_claim=false
 round_receipt_path=$receipt_json
 round_receipt_exists=false
 round_receipt_schema_ok=false
+round_receipt_missing_fields=
+round_receipt_schema_issue_paths=round_receipt_exists
 round_receipt_artifact_hashes_ok=false
 round_receipt_task_ids_ok=false
 round_receipt_ok=false
@@ -1452,13 +1627,18 @@ metric_fields = [
     "substrate_weight_count",
 ]
 
+receipt_parse_issue = ""
 try:
     with receipt_path.open(encoding="utf-8") as handle:
         receipt = json.load(handle)
 except Exception:
     receipt = {}
+    receipt_parse_issue = "round_receipt_json"
+if not isinstance(receipt, dict):
+    receipt = {}
+    receipt_parse_issue = "round_receipt_object"
 
-missing = [key for key in required if key not in receipt] if isinstance(receipt, dict) else required
+missing = [] if receipt_parse_issue else [key for key in required if key not in receipt]
 schema_ok = isinstance(receipt, dict) and not missing
 schema_ok = schema_ok and receipt.get("metric") == "pro_elevation_round"
 schema_ok = schema_ok and receipt.get("metric_claim") is False
@@ -1476,6 +1656,8 @@ schema_ok = schema_ok and receipt.get("task_provenance_ok") is True
 schema_ok = schema_ok and receipt.get("frontier_baseline_evidence_receipt_ok") is True
 schema_ok = schema_ok and receipt.get("elevation_valid_if_run") is True
 schema_ok = schema_ok and isinstance(receipt.get("production_ready_to_run"), bool)
+schema_ok = schema_ok and ("ready_blockers" not in receipt or isinstance(receipt.get("ready_blockers"), str))
+schema_ok = schema_ok and ("production_ready_blockers" not in receipt or isinstance(receipt.get("production_ready_blockers"), str))
 schema_ok = schema_ok and isinstance(receipt.get("production_toolchain_ok"), bool)
 schema_ok = schema_ok and isinstance(receipt.get("metric_admissible"), bool)
 schema_ok = schema_ok and isinstance(receipt.get("frontier_model"), str) and bool(receipt.get("frontier_model"))
@@ -1493,6 +1675,25 @@ try:
 except Exception:
     round_receipt_path_ok = False
 schema_ok = schema_ok and round_receipt_path_ok
+schema_issue_paths = []
+
+def add_schema_issue(ok, path):
+    if not ok and path not in schema_issue_paths:
+        schema_issue_paths.append(path)
+
+if isinstance(receipt, dict):
+    for key in missing:
+        add_schema_issue(False, key)
+    add_schema_issue(receipt.get("benchmark_suite") == "swe_bench_pro", "benchmark_suite")
+    add_schema_issue(receipt.get("benchmark_dataset_name") == "ScaleAI/SWE-bench_Pro", "benchmark_dataset_name")
+    add_schema_issue(receipt.get("official_benchmark") is True, "official_benchmark")
+    add_schema_issue(receipt.get("frontier_baseline_role") == "frontier", "frontier_baseline_role")
+    add_schema_issue(receipt.get("frontier_baseline_frozen") is True, "frontier_baseline_frozen")
+    add_schema_issue(receipt.get("frontier_baseline_official_docker") is True, "frontier_baseline_official_docker")
+    add_schema_issue(receipt.get("frontier_baseline_benchmark_label") == "SWE-bench-Pro", "frontier_baseline_benchmark_label")
+    add_schema_issue(receipt.get("student_model") == "deepseek-v4-pro", "student_model")
+else:
+    schema_issue_paths = list(required)
 provenance_sha = receipt.get("task_provenance_sha256")
 provenance_sha_ok = isinstance(provenance_sha, str) and len(provenance_sha) == 64 and all(char in "0123456789abcdef" for char in provenance_sha)
 preflight_provenance_ok = False
@@ -1606,12 +1807,23 @@ if isinstance(preflight_path_value, str):
                 and preflight.get("suite_pristine_layout_ok") is True
                 and preflight.get("ready_to_run") is True
                 and preflight.get("production_ready_to_run") is expected_preflight_production_ready
+                and (
+                    "ready_blockers" not in receipt
+                    or preflight.get("ready_blockers") == receipt.get("ready_blockers")
+                )
+                and (
+                    "production_ready_blockers" not in receipt
+                    or preflight.get("production_ready_blockers") == receipt.get("production_ready_blockers")
+                )
                 and preflight.get("no_model_run") is True
                 and preflight.get("no_scorer_run") is True
             )
             production_toolchain_ok = preflight_production_ready
         except Exception:
             preflight_provenance_ok = False
+add_schema_issue(receipt.get("production_ready_to_run") == production_toolchain_ok, "production_ready_to_run")
+add_schema_issue(receipt.get("production_toolchain_ok") == production_toolchain_ok, "production_toolchain_ok")
+add_schema_issue(receipt.get("metric_admissible") == production_toolchain_ok, "metric_admissible")
 frontier_summary_ok = False
 frontier_summary_verification_ok = False
 frontier_summary_path_value = receipt.get("frontier_baseline_summary_path")
@@ -1643,6 +1855,30 @@ if isinstance(frontier_summary_path_value, str):
                 and frontier_summary.get("sample_failures") == 0
                 and frontier_summary.get("score_failures") == 0
             )
+            add_schema_issue(frontier_summary.get("metric") == "frontier_baseline_receipt", "frontier_summary.metric")
+            add_schema_issue(frontier_summary.get("metric_claim") is False, "frontier_summary.metric_claim")
+            if receipt.get("benchmark_suite") == "swe_bench_pro":
+                add_schema_issue(frontier_summary.get("benchmark_suite") == receipt.get("benchmark_suite"), "frontier_summary.benchmark_suite")
+            if receipt.get("benchmark_dataset_name") == "ScaleAI/SWE-bench_Pro":
+                add_schema_issue(frontier_summary.get("benchmark_dataset_name") == receipt.get("benchmark_dataset_name"), "frontier_summary.benchmark_dataset_name")
+            if receipt.get("frontier_baseline_benchmark_label") == "SWE-bench-Pro":
+                add_schema_issue(frontier_summary.get("benchmark_label") == receipt.get("frontier_baseline_benchmark_label"), "frontier_summary.benchmark_label")
+            if receipt.get("official_benchmark") is True:
+                add_schema_issue(frontier_summary.get("official_benchmark") is True, "frontier_summary.official_benchmark")
+            if receipt.get("frontier_baseline_role") == "frontier":
+                add_schema_issue(frontier_summary.get("baseline_role") == receipt.get("frontier_baseline_role"), "frontier_summary.baseline_role")
+            if receipt.get("frontier_baseline_frozen") is True:
+                add_schema_issue(frontier_summary.get("frozen") is receipt.get("frontier_baseline_frozen"), "frontier_summary.frozen")
+            if receipt.get("frontier_baseline_official_docker") is True:
+                add_schema_issue(frontier_summary.get("official_docker") is receipt.get("frontier_baseline_official_docker"), "frontier_summary.official_docker")
+            add_schema_issue(frontier_summary.get("frontier_model") == receipt.get("frontier_model"), "frontier_model")
+            add_schema_issue(frontier_summary.get("task_provenance_ok") is True, "frontier_summary.task_provenance_ok")
+            if provenance_sha_ok:
+                add_schema_issue(frontier_summary.get("task_provenance_sha256") == provenance_sha, "frontier_summary.task_provenance_sha256")
+            add_schema_issue(frontier_summary.get("suite_preflight_ok") is True, "frontier_summary.suite_preflight_ok")
+            add_schema_issue(frontier_summary.get("frontier_baseline_evidence_receipt_ok") is True, "frontier_summary.frontier_baseline_evidence_receipt_ok")
+            add_schema_issue(frontier_summary.get("sample_failures") == 0, "frontier_summary.sample_failures")
+            add_schema_issue(frontier_summary.get("score_failures") == 0, "frontier_summary.score_failures")
         except Exception:
             frontier_summary_ok = False
 frontier_runner_value = receipt.get("frontier_baseline_runner")
@@ -1710,6 +1946,48 @@ if isinstance(elevation_summary_path_value, str):
                 and elevation_summary.get("selection_manifest_sha256") == receipt.get("selection_manifest_sha256")
                 and elevation_summary.get("distinct_tasks") is True
             )
+            add_schema_issue(elevation_summary.get("metric") == "elevation", "elevation_summary.metric")
+            add_schema_issue(elevation_summary.get("metric_claim") is False, "elevation_summary.metric_claim")
+            if receipt.get("benchmark_suite") == "swe_bench_pro":
+                add_schema_issue(elevation_summary.get("benchmark_suite") == receipt.get("benchmark_suite"), "elevation_summary.benchmark_suite")
+            if receipt.get("benchmark_dataset_name") == "ScaleAI/SWE-bench_Pro":
+                add_schema_issue(elevation_summary.get("benchmark_dataset_name") == receipt.get("benchmark_dataset_name"), "elevation_summary.benchmark_dataset_name")
+            if receipt.get("official_benchmark") is True:
+                add_schema_issue(elevation_summary.get("official_benchmark") is True, "elevation_summary.official_benchmark")
+            if receipt.get("metric_scope") == "paired_frontier_solve_rate_delta":
+                add_schema_issue(elevation_summary.get("metric_scope") == receipt.get("metric_scope"), "elevation_summary.metric_scope")
+            if receipt.get("within_task_efficiency_metric_admissible") is False:
+                add_schema_issue(elevation_summary.get("within_task_efficiency_metric_admissible") is receipt.get("within_task_efficiency_metric_admissible"), "elevation_summary.within_task_efficiency_metric_admissible")
+            if receipt.get("student_model") == "deepseek-v4-pro":
+                add_schema_issue(elevation_summary.get("student_model") == receipt.get("student_model"), "elevation_summary.student_model")
+            add_schema_issue(elevation_summary.get("task_ids") == receipt.get("task_ids"), "elevation_summary.task_ids")
+            add_schema_issue(elevation_summary.get("selected_task_ids_sha256") == receipt.get("selected_task_ids_sha256"), "elevation_summary.selected_task_ids_sha256")
+            add_schema_issue(elevation_summary.get("frontier_baseline_path") == receipt.get("frontier_baseline_path"), "elevation_summary.frontier_baseline_path")
+            add_schema_issue(elevation_summary.get("frontier_baseline_sha256") == receipt.get("frontier_baseline_sha256"), "elevation_summary.frontier_baseline_sha256")
+            if receipt.get("frontier_baseline_role") == "frontier":
+                add_schema_issue(elevation_summary.get("frontier_baseline_role") == receipt.get("frontier_baseline_role"), "elevation_summary.frontier_baseline_role")
+            if receipt.get("frontier_baseline_frozen") is True:
+                add_schema_issue(elevation_summary.get("frontier_baseline_frozen") is receipt.get("frontier_baseline_frozen"), "elevation_summary.frontier_baseline_frozen")
+            if receipt.get("frontier_baseline_official_docker") is True:
+                add_schema_issue(elevation_summary.get("frontier_baseline_official_docker") is receipt.get("frontier_baseline_official_docker"), "elevation_summary.frontier_baseline_official_docker")
+            if receipt.get("frontier_baseline_benchmark_label") == "SWE-bench-Pro":
+                add_schema_issue(elevation_summary.get("frontier_baseline_benchmark_label") == receipt.get("frontier_baseline_benchmark_label"), "elevation_summary.frontier_baseline_benchmark_label")
+            add_schema_issue(elevation_summary.get("elevation_valid") is True, "elevation_summary.elevation_valid")
+            add_schema_issue(elevation_summary.get("sample_timeouts") == 0, "elevation_summary.sample_timeouts")
+            add_schema_issue(elevation_summary.get("score_failures") == 0, "elevation_summary.score_failures")
+            add_schema_issue(elevation_summary.get("reused_samples") == 0, "elevation_summary.reused_samples")
+            add_schema_issue(elevation_summary.get("rerun_timeout_samples") == 0, "elevation_summary.rerun_timeout_samples")
+            add_schema_issue(elevation_summary.get("task_provenance_ok") is True, "elevation_summary.task_provenance_ok")
+            add_schema_issue(elevation_summary.get("suite_preflight_ok") is True, "elevation_summary.suite_preflight_ok")
+            add_schema_issue(elevation_summary.get("frontier_baseline_evidence_receipt_ok") is True, "elevation_summary.frontier_baseline_evidence_receipt_ok")
+            add_schema_issue(elevation_summary.get("frontier_baseline_provenance_ok") is True, "elevation_summary.frontier_baseline_provenance_ok")
+            add_schema_issue(elevation_summary.get("teacher_atomic") is True, "elevation_summary.teacher_atomic")
+            add_schema_issue(elevation_summary.get("anti_replay") is True, "elevation_summary.anti_replay")
+            add_schema_issue(elevation_summary.get("selection_receipt_ok") is True, "elevation_summary.selection_receipt_ok")
+            add_schema_issue(elevation_summary.get("anti_cherry_pick") is True, "elevation_summary.anti_cherry_pick")
+            add_schema_issue(elevation_summary.get("selection_manifest_path") == receipt.get("selection_manifest_path"), "elevation_summary.selection_manifest_path")
+            add_schema_issue(elevation_summary.get("selection_manifest_sha256") == receipt.get("selection_manifest_sha256"), "elevation_summary.selection_manifest_sha256")
+            add_schema_issue(elevation_summary.get("distinct_tasks") is True, "elevation_summary.distinct_tasks")
             manifest_path_value = receipt.get("selection_manifest_path")
             if not isinstance(manifest_path_value, str) or not Path(manifest_path_value).is_file() or receipt.get("selection_manifest_sha256") != sha256_file(Path(manifest_path_value)):
                 elevation_summary_ok = False
@@ -1722,6 +2000,31 @@ if isinstance(elevation_summary_path_value, str):
                 return isinstance(value, (int, float)) and not isinstance(value, bool)
             def close(left, right):
                 return number(left) and abs(float(left) - float(right)) <= 1e-12
+            add_schema_issue(
+                isinstance(elevation_summary.get("task_count"), int)
+                and not isinstance(elevation_summary.get("task_count"), bool)
+                and elevation_summary.get("task_count") == task_count
+                and task_count > 0,
+                "elevation_summary.task_count",
+            )
+            add_schema_issue(
+                isinstance(frontier_resolved, int)
+                and not isinstance(frontier_resolved, bool)
+                and 0 <= frontier_resolved <= task_count,
+                "elevation_summary.frontier_baseline_resolved",
+            )
+            add_schema_issue(
+                isinstance(student_resolved, int)
+                and not isinstance(student_resolved, bool)
+                and 0 <= student_resolved <= task_count,
+                "elevation_summary.atomic_substrate_resolved",
+            )
+            add_schema_issue(
+                isinstance(control_resolved, int)
+                and not isinstance(control_resolved, bool)
+                and 0 <= control_resolved <= task_count,
+                "elevation_summary.deepseek_control_resolved",
+            )
             if (
                 not isinstance(elevation_summary.get("task_count"), int)
                 or elevation_summary.get("task_count") != task_count
@@ -1739,17 +2042,35 @@ if isinstance(elevation_summary_path_value, str):
                 frontier_rate = frontier_resolved / task_count
                 student_rate = student_resolved / task_count
                 control_rate = control_resolved / task_count
+                formula_expectations = {
+                    "frontier_solve_rate": frontier_rate,
+                    "student_solve_rate": student_rate,
+                    "deepseek_control_solve_rate": control_rate,
+                    "elevation_vs_frontier": student_resolved - frontier_resolved,
+                    "elevation_vs_deepseek_control": student_resolved - control_resolved,
+                    "elevation_vs_frontier_solve_rate": student_rate - frontier_rate,
+                    "elevation_vs_deepseek_control_solve_rate": student_rate - control_rate,
+                }
+
+                def formula_ok(key):
+                    expected = formula_expectations[key]
+                    value = elevation_summary.get(key)
+                    if isinstance(expected, float):
+                        return close(value, expected)
+                    return value == expected
+
+                for key in formula_expectations:
+                    add_schema_issue(formula_ok(key), f"elevation_summary.{key}")
                 elevation_summary_ok = (
                     elevation_summary_ok
-                    and close(elevation_summary.get("frontier_solve_rate"), frontier_rate)
-                    and close(elevation_summary.get("student_solve_rate"), student_rate)
-                    and close(elevation_summary.get("deepseek_control_solve_rate"), control_rate)
-                    and elevation_summary.get("elevation_vs_frontier") == student_resolved - frontier_resolved
-                    and elevation_summary.get("elevation_vs_deepseek_control") == student_resolved - control_resolved
-                    and close(elevation_summary.get("elevation_vs_frontier_solve_rate"), student_rate - frontier_rate)
-                    and close(elevation_summary.get("elevation_vs_deepseek_control_solve_rate"), student_rate - control_rate)
+                    and all(formula_ok(key) for key in formula_expectations)
                     and all(receipt.get(key) == elevation_summary.get(key) for key in metric_fields)
                 )
+                for key in metric_fields:
+                    if key in formula_expectations:
+                        add_schema_issue((not formula_ok(key)) or receipt.get(key) == elevation_summary.get(key), key)
+                    else:
+                        add_schema_issue(receipt.get(key) == elevation_summary.get(key), key)
         except Exception:
             elevation_summary_ok = False
 schema_ok = (
@@ -1774,31 +2095,46 @@ hash_pairs = [
     ("elevation_summary_path", "elevation_summary_sha256"),
 ]
 artifact_hashes_ok = schema_ok
+artifact_mismatch_paths = []
 for path_key, hash_key in hash_pairs:
     path_value = receipt.get(path_key)
     expected_hash = receipt.get(hash_key)
-    if not isinstance(path_value, str) or not isinstance(expected_hash, str):
+    if not isinstance(path_value, str):
         artifact_hashes_ok = False
+        artifact_mismatch_paths.append(path_key)
+        continue
+    if not isinstance(expected_hash, str):
+        artifact_hashes_ok = False
+        artifact_mismatch_paths.append(hash_key)
         continue
     path = Path(path_value)
     if not path.is_file():
         artifact_hashes_ok = False
+        artifact_mismatch_paths.append(path_key)
         continue
     if sha256_file(path) != expected_hash:
         artifact_hashes_ok = False
+        artifact_mismatch_paths.append(hash_key)
 
 tasks = receipt.get("task_ids")
+task_mismatch_paths = []
+tasks_valid = isinstance(tasks, list) and all(isinstance(task, str) and task for task in tasks)
+if not tasks_valid:
+    task_mismatch_paths.append("task_ids")
 try:
     selected_count = int(receipt.get("selected_task_count"))
 except Exception:
     selected_count = -1
-task_ids_ok = (
-    isinstance(tasks, list)
-    and all(isinstance(task, str) and task for task in tasks)
-    and selected_count == len(tasks)
-    and isinstance(receipt.get("selected_task_ids_sha256"), str)
-    and sha256_text(tasks) == receipt.get("selected_task_ids_sha256")
-)
+if not tasks_valid or selected_count != len(tasks):
+    task_mismatch_paths.append("selected_task_count")
+selected_task_ids_sha = receipt.get("selected_task_ids_sha256")
+if not isinstance(selected_task_ids_sha, str) or not tasks_valid or sha256_text(tasks) != selected_task_ids_sha:
+    task_mismatch_paths.append("selected_task_ids_sha256")
+task_ids_ok = not task_mismatch_paths
+if receipt_parse_issue:
+    schema_ok = False
+    missing = []
+    schema_issue_paths = [receipt_parse_issue]
 
 receipt_sha256 = sha256_file(receipt_path)
 receipt_ok = schema_ok and artifact_hashes_ok and task_ids_ok
@@ -1816,8 +2152,11 @@ print("round_receipt_exists=true")
 print(f"round_receipt_sha256={receipt_sha256}")
 print(f"round_receipt_schema_ok={'true' if schema_ok else 'false'}")
 print(f"round_receipt_missing_fields={','.join(missing)}")
+print(f"round_receipt_schema_issue_paths={','.join(schema_issue_paths)}")
 print(f"round_receipt_artifact_hashes_ok={'true' if artifact_hashes_ok else 'false'}")
+print(f"round_receipt_artifact_mismatch_paths={','.join(artifact_mismatch_paths)}")
 print(f"round_receipt_task_ids_ok={'true' if task_ids_ok else 'false'}")
+print(f"round_receipt_task_mismatch_paths={','.join(task_mismatch_paths)}")
 print(f"round_receipt_ok={'true' if receipt_ok else 'false'}")
 print(f"production_ready_to_run={'true' if production_toolchain_ok else 'false'}")
 print(f"production_toolchain_ok={'true' if production_toolchain_ok else 'false'}")
@@ -1934,6 +2273,8 @@ fi
 task_provenance_ok="$(report_field "$preflight_report" task_provenance_ok false)"
 task_provenance_sha256="$(report_field "$preflight_report" task_provenance_sha256 '')"
 preflight_production_ready_to_run="$(report_field "$preflight_report" production_ready_to_run false)"
+preflight_ready_blockers="$(report_field "$preflight_report" ready_blockers '')"
+preflight_production_ready_blockers="$(report_field "$preflight_report" production_ready_blockers '')"
 preflight_canonical_toolchain="$(report_field "$preflight_report" canonical_toolchain false)"
 preflight_test_runner_override_allowed="$(report_field "$preflight_report" test_runner_override_allowed false)"
 preflight_runner_policy_ok="$(report_field "$preflight_report" runner_policy_ok false)"
@@ -1950,6 +2291,8 @@ echo "preflight_receipt_path=$PREFLIGHT"
 echo "preflight_verification_ok=$preflight_verification_ok"
 echo "task_provenance_sha256=$task_provenance_sha256"
 echo "production_ready_to_run=$preflight_production_ready_to_run"
+echo "ready_blockers=$preflight_ready_blockers"
+echo "production_ready_blockers=$preflight_production_ready_blockers"
 echo "production_toolchain_ok=$production_toolchain_ok"
 echo "metric_admissible=$metric_admissible"
 echo "frontier_baseline_runner=$FRONTIER_RUNNER"
@@ -2029,6 +2372,8 @@ write_round_receipt_json "$ROUND_RECEIPT" \
   metric=pro_elevation_round \
   metric_claim=false \
   production_ready_to_run="$preflight_production_ready_to_run" \
+  ready_blockers="$preflight_ready_blockers" \
+  production_ready_blockers="$preflight_production_ready_blockers" \
   metric_admissible="$metric_admissible" \
   production_toolchain_ok="$production_toolchain_ok" \
   run_id="$RUN_ID" \
@@ -2096,5 +2441,5 @@ if [[ "$round_receipt_verification_ok" != "true" ]]; then
   printf '%s\n' "$round_receipt_verification" >&2
   exit 2
 fi
-printf 'metric=pro_elevation_round metric_claim=false production_ready_to_run=%s metric_admissible=%s production_toolchain_ok=%s run_id=%s benchmark_suite=%s benchmark_dataset_name=%s official_benchmark=true metric_scope=%s within_task_efficiency_metric_admissible=%s manifest_path=%s selected_task_count=%s selected_task_ids_sha256=%s selection_manifest_path=%s selection_manifest_sha256=%s selection_receipt_ok=true anti_cherry_pick=true frontier_baseline_runner=%s frontier_baseline_runner_sha256=%s elevation_stream=%s elevation_stream_sha256=%s weights_path=%s weights_sha256=%s preflight_receipt_path=%s preflight_receipt_sha256=%s preflight_verification_ok=%s task_provenance_ok=%s task_provenance_sha256=%s frontier_baseline_path=%s frontier_baseline_sha256=%s frontier_model=%s frontier_baseline_role=%s frontier_baseline_frozen=%s frontier_baseline_official_docker=%s frontier_baseline_benchmark_label=%s frontier_baseline_summary_path=%s frontier_baseline_summary_sha256=%s frontier_summary_verification_ok=%s frontier_baseline_evidence_receipt_ok=%s frontier_baseline_resolved=%s frontier_solve_rate=%s deepseek_control_resolved=%s deepseek_control_solve_rate=%s atomic_substrate_resolved=%s student_solve_rate=%s student_model=%s elevation_vs_frontier=%s elevation_vs_frontier_solve_rate=%s elevation_vs_deepseek_control=%s elevation_vs_deepseek_control_solve_rate=%s accumulation_index=%s substrate_weight_count=%s elevation_valid_if_run=%s elevation_summary_path=%s elevation_summary_sha256=%s round_receipt_path=%s round_receipt_sha256=%s round_receipt_verification_ok=%s\n' \
-  "$preflight_production_ready_to_run" "$metric_admissible" "$production_toolchain_ok" "$RUN_ID" "$BENCHMARK_SUITE" "$DATASET_NAME" "$metric_scope" "$within_task_efficiency_metric_admissible" "$MANIFEST" "${#TASKS[@]}" "$selected_task_ids_sha256" "$MANIFEST" "$selection_manifest_sha256" "$FRONTIER_RUNNER" "$frontier_runner_sha256" "$ELEVATION_STREAM" "$elevation_stream_sha256" "$WEIGHTS" "$weights_sha256" "$PREFLIGHT" "$preflight_receipt_sha256" "$preflight_verification_ok" "$task_provenance_ok" "$task_provenance_sha256" "$BASELINE" "$frontier_baseline_sha256" "$frontier_model" "$frontier_baseline_role" "$frontier_baseline_frozen" "$frontier_baseline_official_docker" "$frontier_baseline_benchmark_label" "$frontier_baseline_summary_path" "$frontier_baseline_summary_sha256" "$frontier_summary_verification_ok" "$frontier_receipt_ok" "$frontier_baseline_resolved" "$frontier_solve_rate" "$deepseek_control_resolved" "$deepseek_control_solve_rate" "$atomic_substrate_resolved" "$student_solve_rate" "$STUDENT_MODEL" "$elevation_vs_frontier" "$elevation_vs_frontier_solve_rate" "$elevation_vs_deepseek_control" "$elevation_vs_deepseek_control_solve_rate" "$accumulation_index" "$substrate_weight_count" "$elevation_valid_if_run" "$elevation_summary_path" "$elevation_summary_sha256" "$ROUND_RECEIPT" "$round_receipt_sha256" "$round_receipt_verification_ok"
+printf 'metric=pro_elevation_round metric_claim=false production_ready_to_run=%s ready_blockers=%s production_ready_blockers=%s metric_admissible=%s production_toolchain_ok=%s run_id=%s benchmark_suite=%s benchmark_dataset_name=%s official_benchmark=true metric_scope=%s within_task_efficiency_metric_admissible=%s manifest_path=%s selected_task_count=%s selected_task_ids_sha256=%s selection_manifest_path=%s selection_manifest_sha256=%s selection_receipt_ok=true anti_cherry_pick=true frontier_baseline_runner=%s frontier_baseline_runner_sha256=%s elevation_stream=%s elevation_stream_sha256=%s weights_path=%s weights_sha256=%s preflight_receipt_path=%s preflight_receipt_sha256=%s preflight_verification_ok=%s task_provenance_ok=%s task_provenance_sha256=%s frontier_baseline_path=%s frontier_baseline_sha256=%s frontier_model=%s frontier_baseline_role=%s frontier_baseline_frozen=%s frontier_baseline_official_docker=%s frontier_baseline_benchmark_label=%s frontier_baseline_summary_path=%s frontier_baseline_summary_sha256=%s frontier_summary_verification_ok=%s frontier_baseline_evidence_receipt_ok=%s frontier_baseline_resolved=%s frontier_solve_rate=%s deepseek_control_resolved=%s deepseek_control_solve_rate=%s atomic_substrate_resolved=%s student_solve_rate=%s student_model=%s elevation_vs_frontier=%s elevation_vs_frontier_solve_rate=%s elevation_vs_deepseek_control=%s elevation_vs_deepseek_control_solve_rate=%s accumulation_index=%s substrate_weight_count=%s elevation_valid_if_run=%s elevation_summary_path=%s elevation_summary_sha256=%s round_receipt_path=%s round_receipt_sha256=%s round_receipt_verification_ok=%s\n' \
+  "$preflight_production_ready_to_run" "$preflight_ready_blockers" "$preflight_production_ready_blockers" "$metric_admissible" "$production_toolchain_ok" "$RUN_ID" "$BENCHMARK_SUITE" "$DATASET_NAME" "$metric_scope" "$within_task_efficiency_metric_admissible" "$MANIFEST" "${#TASKS[@]}" "$selected_task_ids_sha256" "$MANIFEST" "$selection_manifest_sha256" "$FRONTIER_RUNNER" "$frontier_runner_sha256" "$ELEVATION_STREAM" "$elevation_stream_sha256" "$WEIGHTS" "$weights_sha256" "$PREFLIGHT" "$preflight_receipt_sha256" "$preflight_verification_ok" "$task_provenance_ok" "$task_provenance_sha256" "$BASELINE" "$frontier_baseline_sha256" "$frontier_model" "$frontier_baseline_role" "$frontier_baseline_frozen" "$frontier_baseline_official_docker" "$frontier_baseline_benchmark_label" "$frontier_baseline_summary_path" "$frontier_baseline_summary_sha256" "$frontier_summary_verification_ok" "$frontier_receipt_ok" "$frontier_baseline_resolved" "$frontier_solve_rate" "$deepseek_control_resolved" "$deepseek_control_solve_rate" "$atomic_substrate_resolved" "$student_solve_rate" "$STUDENT_MODEL" "$elevation_vs_frontier" "$elevation_vs_frontier_solve_rate" "$elevation_vs_deepseek_control" "$elevation_vs_deepseek_control_solve_rate" "$accumulation_index" "$substrate_weight_count" "$elevation_valid_if_run" "$elevation_summary_path" "$elevation_summary_sha256" "$ROUND_RECEIPT" "$round_receipt_sha256" "$round_receipt_verification_ok"

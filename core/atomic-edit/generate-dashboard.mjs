@@ -4,7 +4,14 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = path.resolve(path.dirname(fileURLToPath(import.meta.url)));
-const repoRoot = process.env.ATOMIC_EDIT_REPO_ROOT || here;
+let gitRoot = here;
+for (let i = 0; i < 5; i++) {
+  if (fs.existsSync(path.join(gitRoot, '.git'))) {
+    break;
+  }
+  gitRoot = path.dirname(gitRoot);
+}
+const repoRoot = process.env.ATOMIC_EDIT_REPO_ROOT || gitRoot;
 
 const feedPath = path.join(repoRoot, '.atomic', 'emergence-feed.jsonl');
 const corpusPath = path.join(repoRoot, '.atomic', 'disproof-corpus.jsonl');

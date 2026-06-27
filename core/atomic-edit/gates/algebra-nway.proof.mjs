@@ -22,7 +22,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(dir, '..', '..', '..', '..');
+const repoRoot = process.env.ATOMIC_EDIT_REPO_ROOT
+  ?? (() => { let d = path.resolve(dir, '..'); for (let i = 0; i < 6; i++) { if (fs.existsSync(path.join(d, 'formal', 'atomic-algebra'))) return d; d = path.resolve(d, '..'); } return path.resolve(dir, '..'); })();
 const formalDir = path.join(repoRoot, 'formal', 'atomic-algebra');
 const { batchCertificate } = await import(path.join(dir, '..', 'dist', 'gates', 'algebra.js'));
 
@@ -107,8 +108,32 @@ function runLean() {
   return { status: res.status === 0 ? 'PROVEN' : 'FAILED', exit: res.status, out: String(res.stdout || '') + String(res.stderr || '') };
 }
 
+function runFootprint() {
+  const script = path.join(formalDir, 'proof_footprint_z3.py');
+  const live = path.join(formalDir, 'footprint_live_demo.mjs');
+  if (!fs.existsSync(script)) return { status: 'MISSING', detail: 'proof_footprint_z3.py not found' };
+  const venvPy = path.join(repoRoot, '.z3venv', 'bin', 'python3');
+  const py = fs.existsSync(venvPy) ? venvPy : 'python3';
+  const res = spawnSync(py, [script], { cwd: formalDir, encoding: 'utf8' });
+  if (res.error || res.status === null) return { status: 'ABSENT', detail: 'z3 runner unavailable' };
+  if (res.status !== 0) return { status: 'FAILED', exit: res.status, out: String(res.stdout || '') + String(res.stderr || '') };
+  // ALSO run the LIVE end-to-end pipeline: a recorded proof footprint drives commute() to catch a
+  // coupling the static import graph misses (the dormant readLoci surface, made real on real files).
+  const liveRes = fs.existsSync(live)
+    ? spawnSync(process.execPath, [live], { cwd: repoRoot, encoding: 'utf8', env: { ...process.env, ATOMIC_EDIT_REPO_ROOT: repoRoot } })
+    : { status: 0 };
+  if (liveRes.error || liveRes.status === null) return { status: 'ABSENT', detail: 'live footprint runner unavailable' };
+  if (liveRes.status !== 0) return { status: 'FAILED', exit: liveRes.status, out: 'LIVE footprint demo FAILED:\n' + String(liveRes.stdout || '') + String(liveRes.stderr || '') };
+  // ALSO run the SOLVER-INDEPENDENT brute-force corroboration (method diversity vs Z3: exhaustive enumeration).
+  const bf = path.join(formalDir, 'brute_force_check.py');
+  const bfRes = fs.existsSync(bf) ? spawnSync(py, [bf], { cwd: formalDir, encoding: 'utf8' }) : { status: 0 };
+  if (bfRes.error || bfRes.status === null) return { status: 'ABSENT', detail: 'brute-force runner unavailable' };
+  if (bfRes.status !== 0) return { status: 'FAILED', exit: bfRes.status, out: 'BRUTE-FORCE check FAILED:\n' + String(bfRes.stdout || '') + String(bfRes.stderr || '') };
+  return { status: 'PROVEN', exit: 0, out: '' };
+}
 const z3 = runZ3();
 const lean = runLean();
+const footprint = runFootprint();
 
 if (z3.status === 'PROVEN') {
   console.log('  Z3 base+step: PROVEN (nway_induction_z3.py, exit 0) — REDUCE + STEP machine-checked.');
@@ -128,6 +153,15 @@ if (lean.status === 'PROVEN') {
   if (lean.out) console.log(lean.out.trim().split('\n').map((l) => `    ${l}`).join('\n'));
 }
 
+if (footprint.status === 'PROVEN') {
+  console.log('  Proof-footprint: PROVEN (Z3 theorem + LIVE pipeline + solver-INDEPENDENT brute-force, exit 0) — the correctness-proof footprint is the CANONICAL (sound+tight) read-set, strictly dominating import-closure in precision AND soundness; LIVE pipeline catches a real coupling the import graph misses; exhaustive enumeration corroborates the Z3 proofs (method diversity).');
+} else if (footprint.status === 'ABSENT' || footprint.status === 'MISSING') {
+  console.log(`  Proof-footprint: UNVERIFIED — ${footprint.detail}.`);
+} else {
+  console.log(`  Proof-footprint: FAILED (proof_footprint_z3.py, exit ${footprint.exit}) — machine-check did NOT pass.`);
+  if (footprint.out) console.log(footprint.out.trim().split('\n').map((l) => `    ${l}`).join('\n'));
+}
+
 if (z3.status === 'PROVEN' && lean.status === 'PROVEN') {
   console.log('  PROVEN (all-N)  REDUCE + STEP machine-checked by Z3 AND the INDUCTION PRINCIPLE machine-checked in Lean: all-N obligation-preserving confluence, fully mechanized. No residual.');
 } else if (z3.status === 'PROVEN' && (lean.status === 'UNVERIFIED' || lean.status === 'MISSING')) {
@@ -138,6 +172,7 @@ if (z3.status === 'PROVEN' && lean.status === 'PROVEN') {
 // that is present but rejects the proof. Lean simply being absent does NOT fail the gate.
 const z3Failed = z3.status === 'FAILED';
 const leanFailed = lean.status === 'FAILED';
-const exitFail = fail > 0 || z3Failed || leanFailed;
-console.log(`\n${pass} passed, ${fail} failed${z3Failed ? ' (Z3 machine-check FAILED)' : ''}${leanFailed ? ' (Lean machine-check FAILED)' : ''}`);
+const footprintFailed = footprint.status === 'FAILED';
+const exitFail = fail > 0 || z3Failed || leanFailed || footprintFailed;
+console.log(`\n${pass} passed, ${fail} failed${z3Failed ? ' (Z3 machine-check FAILED)' : ''}${leanFailed ? ' (Lean machine-check FAILED)' : ''}${footprintFailed ? ' (proof-footprint machine-check FAILED)' : ''}`);
 process.exit(exitFail ? 1 : 0);

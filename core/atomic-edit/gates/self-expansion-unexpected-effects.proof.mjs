@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-nocheck -- executable proof fixture; assertions below own behavior while LSP ignores fixture scaffolding.
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -6,8 +7,16 @@ import { fileURLToPath } from 'node:url';
 const jsonMode = process.argv.includes('--json');
 const sourceDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = fs.readFileSync(path.join(sourceDir, 'server-tools-self.ts'), 'utf8');
+const effectSource = fs.readFileSync(path.join(sourceDir, 'server-helpers-effect.ts'), 'utf8');
+const skippedFileNamesBlock = effectSource.match(/const SKIP_FILE_NAMES = new Set\(\[([\s\S]*?)\]\);/)?.[1] ?? '';
+/** @type {{ name: string, ok: boolean, detail: Record<string, unknown> }[]} */
 const results = [];
 
+/**
+ * @param {string} name
+ * @param {unknown} ok
+ * @param {Record<string, unknown>} [detail]
+ */
 function record(name, ok, detail = {}) {
   results.push({ name, ok: Boolean(ok), detail });
 }
@@ -15,11 +24,11 @@ function record(name, ok, detail = {}) {
 const guardIndex = source.indexOf('function assertNoUnexpectedSelfExpansionEffects');
 const prePromotionIndex = source.indexOf('assertNoUnexpectedSelfExpansionEffects(effectsBeforePromotion.effects, applied);');
 const promotionIndex = source.indexOf('const promotionReceipt = buildRealSelfExpansionPromotionReceipt');
-const archiveIndex = source.indexOf('const selfEvolutionArchive = appendRealSelfExpansionArchive');
 const ratchetIndex = source.indexOf('enforceSecurityMonotonicity({ ratchet: true })');
-const finalEffectIndex = source.indexOf('const effects = diffSelfExpansionSnapshot(snap);', archiveIndex + 1);
-const finalGuardIndex = source.indexOf('assertNoUnexpectedSelfExpansionEffects(effects.effects, applied);');
-const returnOkIndex = source.indexOf('return ok({', finalEffectIndex);
+const finalEffectIndex = source.indexOf('const effects = diffSelfExpansionSnapshot(snap);', promotionIndex + 1);
+const finalGuardIndex = source.indexOf('assertNoUnexpectedSelfExpansionEffects(effects.effects, applied);', finalEffectIndex + 1);
+const archiveIndex = source.indexOf('const selfEvolutionArchive = appendRealSelfExpansionArchive', finalGuardIndex + 1);
+const returnOkIndex = source.indexOf('return ok({', archiveIndex);
 
 record('FileEffect type is imported for byte-effect guard', source.includes('type FileEffect'));
 record(
@@ -68,15 +77,20 @@ record(
     source.includes('!isLauncherDurabilityMetadataEffect(rel)'),
 );
 record(
-  'successful path checks requested effects before promotion, then builds receipt, archives it, ratchets, and checks final effects before acceptance',
+  'successful path checks requested effects before promotion, then ratchets and checks final effects before appending the success archive',
   prePromotionIndex > guardIndex &&
     promotionIndex > prePromotionIndex &&
-    archiveIndex > promotionIndex &&
-    ratchetIndex > archiveIndex &&
+    ratchetIndex > promotionIndex &&
     finalEffectIndex > ratchetIndex &&
     finalGuardIndex > finalEffectIndex &&
-    returnOkIndex > finalGuardIndex,
+    archiveIndex > finalGuardIndex &&
+    returnOkIndex > archiveIndex,
   { guardIndex, prePromotionIndex, promotionIndex, archiveIndex, ratchetIndex, finalEffectIndex, finalGuardIndex, returnOkIndex },
+);
+record(
+  'durable self-evolution archive is covered by byte-effect snapshots',
+  !skippedFileNamesBlock.includes("'self-evolution-archive.jsonl'"),
+  { skippedFileNamesBlockIncludesArchive: skippedFileNamesBlock.includes("'self-evolution-archive.jsonl'") },
 );
 record(
   'mandatory validator lattice includes this proof',

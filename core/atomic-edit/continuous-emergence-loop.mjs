@@ -28,11 +28,17 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 
 const here = path.resolve(path.dirname(fileURLToPath(import.meta.url)));
-// Default the loop root to the atomic-edit source tree itself (where the
-// disproof corpus, lesson rules, and emergence feed already live). Override
-// with ATOMIC_EDIT_REPO_ROOT to point at a different workspace (e.g. /kloel
-// when invoked by launchd for the live MCP's repoRoot).
-const repoRoot = process.env.ATOMIC_EDIT_REPO_ROOT || here;
+// Find the git repository root by checking parent directories for .git
+let gitRoot = here;
+for (let i = 0; i < 5; i++) {
+  if (fs.existsSync(path.join(gitRoot, '.git'))) {
+    break;
+  }
+  gitRoot = path.dirname(gitRoot);
+}
+// Default the loop root to the git repository root, so that all cycles run on the same
+// shared workspace state instead of separate subdirectory folders.
+const repoRoot = process.env.ATOMIC_EDIT_REPO_ROOT || gitRoot;
 const feedPath = path.join(repoRoot, '.atomic', 'emergence-feed.jsonl');
 const logDir = path.join(repoRoot, '.atomic', 'emergence-logs');
 fs.mkdirSync(logDir, { recursive: true });
@@ -65,8 +71,12 @@ function appendFeed(record) {
 }
 function runScript(name) {
   const t0 = Date.now();
-  const logFile = path.join(logDir, name + '-' + iso().replace(/[:.]/g, '-') + '.log');
-  const res = spawnSync(process.execPath, [path.join(here, name + '.mjs')], {
+  const logFile = path.join(logDir, name.replace(/\//g, '-') + '-' + iso().replace(/[:.]/g, '-') + '.log');
+  const args = [path.join(here, name + '.mjs')];
+  if (name === 'hypothesis-generator') {
+    args.push('--ledger');
+  }
+  const res = spawnSync(process.execPath, args, {
     cwd: here,
     encoding: 'utf8',
     timeout: 5 * 60 * 1000,
