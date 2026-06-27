@@ -30,6 +30,13 @@ const SKIP_DIRS = new Set([
 const SKIP_FILE_NAMES = new Set([
   '.DS_Store',
   '.build-manifest.json',
+  // Append-only, hash-chained engine ledger (SELF_EVOLUTION_ARCHIVE_REL): atomic's OWN
+  // write target; it grows past the 2 MB per-file snapshot cap, which would otherwise set
+  // limitReached on EVERY effect snapshot and brick atomic_exec / mutable commands. A
+  // monotonic ledger is never byte-rolled-back, so excluding it from effect coverage is
+  // sound scope-bounding (same class as node_modules / dist), NOT a weakening of the honest
+  // ceiling (limitReached stays intact for genuinely-oversized non-skipped files).
+  'self-evolution-archive.jsonl',
 ]);
 
 const REPO_SCRATCH_DIRS = new Set([
@@ -99,8 +106,8 @@ function shouldSkipEffectDir(rootAbs: string, full: string, name: string): boole
   return REPO_SCRATCH_PREFIXES.some((prefix) => name.startsWith(prefix));
 }
 
-function shouldSkipEffectFile(full: string, name: string): boolean {
-  if (SKIP_FILE_NAMES.has(name)) return true;
+function shouldSkipEffectFile(full: string, name: string, includeSelfEvolutionArchive = false): boolean {
+  if (SKIP_FILE_NAMES.has(name) && !(includeSelfEvolutionArchive && name === 'self-evolution-archive.jsonl')) return true;
   if (REPO_SCRATCH_PREFIXES.some((prefix) => name.startsWith(prefix))) return true;
   if (/\.(png|jpg|jpeg|gif|pdf|pyc|pyd|so|dll|zip|tar|gz|tgz|ai)$/i.test(name)) return true;
   const repoRel = repoRelativeEffectPath(full);
@@ -111,6 +118,8 @@ export interface EffectSnapshot {
   rootAbs: string;
   /** Optional repo-relative roots that bound capture/diff coverage. Undefined means whole root. */
   includeRel?: string[];
+  /** Preserve explicit coverage of the durable self-evolution archive across follow-up diffs. */
+  includeSelfEvolutionArchive?: boolean;
   /** repo-relative path -> UTF-8 content of every existing in-scope file at snapshot time */
   files: Map<string, string>;
   /** repo-relative path -> POSIX mode bits for every existing in-scope file at snapshot time */
@@ -299,7 +308,7 @@ export function assertCompleteEffectSnapshot(snap: EffectSnapshot, action: strin
 /** Capture the byte-content of every in-scope file under `rootAbs` (bounded). */
 export function captureEffectSnapshot(
   rootAbs: string,
-  opts: { maxFiles?: number; maxBytes?: number; maxFileBytes?: number; includeRel?: string[]; cloneDependencies?: boolean } = {},
+  opts: { maxFiles?: number; maxBytes?: number; maxFileBytes?: number; includeRel?: string[]; cloneDependencies?: boolean; includeSelfEvolutionArchive?: boolean } = {},
 ): EffectSnapshot {
   const maxFiles = opts.maxFiles ?? 20000;
   const maxBytes = opts.maxBytes ?? 256 * 1024 * 1024;
@@ -340,12 +349,9 @@ export function captureEffectSnapshot(
     }
     if (!st.isFile()) return;
     if (st.size > maxFileBytes) {
-      // Too large to snapshot under the per-file cap. Declared OUT of byte-effect
-      // coverage (same model as SKIP_DIRS: .atomic / node_modules / dist) instead
-      // of bricking the ENTIRE snapshot. A single oversized ledger/cache/backup
-      // file (e.g. the multi-MB self-evolution-archive.jsonl) must never make
-      // atomic_exec + atomic_expand_self permanently unusable. Byte-exact reversal
-      // of THIS one file is not guaranteed, exactly like other out-of-coverage paths.
+      // Too large to snapshot under the cap -> we cannot guarantee byte-exact
+      // reversal for it, so the snapshot is NOT complete (was silently skipped).
+      limitReached = true;
       return;
     }
     let buf: Buffer;
@@ -392,7 +398,7 @@ export function captureEffectSnapshot(
         if (shouldSkipEffectDir(rootAbs, full, e.name)) continue;
         walk(full);
       } else if (e.isFile()) {
-        if (shouldSkipEffectFile(full, e.name)) continue;
+        if (shouldSkipEffectFile(full, e.name, opts.includeSelfEvolutionArchive === true)) continue;
         snapshotFile(full);
       }
     }
@@ -440,13 +446,26 @@ export function captureEffectSnapshot(
     }
   }
 
-  return { rootAbs, ...(includeRel.length > 0 ? { includeRel } : {}), files, modes, limitReached, limits, ...(dependencyClones.length > 0 ? { dependencyClones } : {}) };
+  return {
+    rootAbs,
+    ...(includeRel.length > 0 ? { includeRel } : {}),
+    ...(opts.includeSelfEvolutionArchive === true ? { includeSelfEvolutionArchive: true } : {}),
+    files,
+    modes,
+    limitReached,
+    limits,
+    ...(dependencyClones.length > 0 ? { dependencyClones } : {}),
+  };
 }
 
 /** Re-walk and compute the exact per-file byte-effect since the snapshot. */
 export function diffEffect(snap: EffectSnapshot): FileEffect[] {
   assertCompleteEffectSnapshot(snap, 'diff filesystem effect');
-  const after = captureEffectSnapshot(snap.rootAbs, { ...snap.limits, includeRel: snap.includeRel });
+  const after = captureEffectSnapshot(snap.rootAbs, {
+    ...snap.limits,
+    includeRel: snap.includeRel,
+    includeSelfEvolutionArchive: snap.includeSelfEvolutionArchive === true,
+  });
   assertCompleteEffectSnapshot(after, 'diff filesystem effect after command');
   const effects: FileEffect[] = [];
   const beforeModes = snap.modes ?? new Map<string, number>();

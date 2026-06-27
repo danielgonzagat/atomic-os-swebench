@@ -383,6 +383,7 @@ function brokerEndpointPath(endpoint: string): string | null {
 function selfExpansionBrokerSocketPath(): string | null {
   const explicit = brokerEndpointPath(process.env.ATOMIC_EXEC_BROKER_SOCKET ?? '');
   if (explicit) return explicit;
+  if (process.env.ATOMIC_USE_BROKER_STATE !== '1') return null;
   const statePath = path.join(REPO_ROOT, '.atomic', 'codex-broker-current.json');
   try {
     const state = JSON.parse(fs.readFileSync(statePath, 'utf8')) as { socket?: unknown };
@@ -715,25 +716,37 @@ function runProofCommandViaBroker(
 }
 
 function selfExpansionProofRoot(): string {
+  const normalizeHostPath = (value: string): string => {
+    const trimmed = value.trim();
+    if (trimmed.startsWith('file://')) {
+      try {
+        return path.resolve(fileURLToPath(trimmed));
+      } catch {
+        return path.resolve(trimmed);
+      }
+    }
+    return path.resolve(trimmed);
+  };
   const socket = selfExpansionBrokerSocketPath();
   const candidates = new Set<string>();
   for (const value of [REPO_ROOT, process.env.ATOMIC_HOST_WRITE_ROOT, process.env.CODEX_PROJECT_DIR]) {
-    if (value) candidates.add(path.resolve(value));
+    if (value) candidates.add(normalizeHostPath(value));
   }
   if (socket) {
+    const socketPath = socket.startsWith('file://') ? fileURLToPath(socket) : socket;
     const marker = `${path.sep}.atomic${path.sep}`;
-    const index = socket.indexOf(marker);
-    if (index > 0) candidates.add(socket.slice(0, index));
+    const index = socketPath.indexOf(marker);
+    if (index > 0) candidates.add(socketPath.slice(0, index));
   }
-  const explicitHostRoot = process.env.ATOMIC_HOST_WRITE_ROOT ? path.resolve(process.env.ATOMIC_HOST_WRITE_ROOT) : '';
+  const explicitHostRoot = process.env.ATOMIC_HOST_WRITE_ROOT ? normalizeHostPath(process.env.ATOMIC_HOST_WRITE_ROOT) : '';
   if (explicitHostRoot) return explicitHostRoot;
   for (const root of candidates) {
     const statePath = path.join(root, '.atomic', 'codex-broker-current.json');
     try {
       const payload = JSON.parse(fs.readFileSync(statePath, 'utf8')) as { agent?: unknown; repoRoot?: unknown; socket?: unknown };
       if (payload.agent === 'codex' && typeof payload.repoRoot === 'string') {
-        if (!socket || typeof payload.socket !== 'string' || path.resolve(payload.socket) === path.resolve(socket)) {
-          return path.resolve(payload.repoRoot);
+        if (!socket || typeof payload.socket !== 'string' || normalizeHostPath(payload.socket) === normalizeHostPath(socket)) {
+          return normalizeHostPath(payload.repoRoot);
         }
       }
     } catch {
@@ -741,13 +754,13 @@ function selfExpansionProofRoot(): string {
     }
   }
   if (socket) {
+    const socketPath = socket.startsWith('file://') ? fileURLToPath(socket) : socket;
     const marker = `${path.sep}.atomic${path.sep}`;
-    const index = socket.indexOf(marker);
-    if (index > 0) return socket.slice(0, index);
+    const index = socketPath.indexOf(marker);
+    if (index > 0) return socketPath.slice(0, index);
   }
-  return process.env.ATOMIC_HOST_WRITE_ROOT ?? REPO_ROOT;
+  return process.env.ATOMIC_HOST_WRITE_ROOT ? normalizeHostPath(process.env.ATOMIC_HOST_WRITE_ROOT) : REPO_ROOT;
 }
-
 function selfExpansionProofTempRoot(hostRoot: string): string {
   const requested = process.env.TMPDIR ? path.resolve(process.env.TMPDIR) : '';
   const selfRoot = path.resolve(atomicSelfSourceRoot());

@@ -1,15 +1,69 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+// ── Inter-process self-expansion admission lock (closes the concurrency-corruption defect) ──
+// selfExpansionAdmissionDepth below serializes re-entrancy WITHIN a process; it does NOTHING across
+// processes, so two concurrent atomic_expand_self runs (e.g. Codex multi-way) both saw depth=1 and
+// both wrote the atomic-edit source tree → proof-lattice corruption (proven live: 4-way thrash,
+// 42min, zero promote). This lock serializes self-expansion ACROSS processes via an atomic mkdir of
+// a lock dir at the (single, canonical) atomic-edit source tree's .atomic/. Acquired ONLY at the
+// outermost admission (depth 0→1); the depth counter still handles in-process re-entrancy, so inner
+// archive/corpus writes inside one expand_self do NOT re-acquire (no deadlock). A SECOND concurrent
+// expand_self fail-fast REFUSES (never corrupts). A crashed holder leaves a stale lock recovered by
+// mtime lease (> max expand_self budget). Normal single-process path is identical to before.
+const SELF_EXPANSION_LOCK_LEASE_MS = 90 * 60 * 1000; // 90 min > ATOMIC_SELF_EXPANSION_PROOF_GLOBAL_BUDGET_MS (60min)
+
+function selfExpansionLockDir(): string {
+  // atomic-edit source root = parent of this compiled module's dir (dist/ -> atomic-edit/). There is
+  // exactly ONE atomic-edit source tree per host, and every self-expansion writes THERE regardless of
+  // the caller's repoRoot — so one lock guards all of them without needing repoRoot on the signature.
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  const atomicEditRoot = path.resolve(moduleDir, '..');
+  return path.join(atomicEditRoot, '.atomic', 'self-expansion-admission.lock');
+}
+
+function acquireSelfExpansionLock(): void {
+  const lockDir = selfExpansionLockDir();
+  try { fs.mkdirSync(path.dirname(lockDir), { recursive: true }); } catch { /* parent unwritable → fail-closed below */ }
+  try {
+    fs.mkdirSync(lockDir); // atomic — throws EEXIST iff held
+    try { fs.writeFileSync(path.join(lockDir, 'owner'), `${process.pid}@${Date.now()}`); } catch { /* best-effort */ }
+    return; // acquired
+  } catch (e) {
+    const err = e as NodeJS.ErrnoException;
+    if (err.code !== 'EEXIST') throw e; // unexpected (EROFS/ENOENT/...) → fail-closed
+    try {
+      const st = fs.statSync(lockDir);
+      if (Date.now() - st.mtimeMs > SELF_EXPANSION_LOCK_LEASE_MS) {
+        fs.rmSync(lockDir, { recursive: true, force: true });
+        fs.mkdirSync(lockDir); // re-acquire after steal (a race throws EEXIST → busy, safe)
+        try { fs.writeFileSync(path.join(lockDir, 'owner'), `${process.pid}@${Date.now()}`); } catch { /* best-effort */ }
+        return;
+      }
+    } catch { /* stat/rm failed — treat as genuinely held */ }
+    throw new Error(
+      'refused (self-expansion admission lock): another atomic_expand_self is in progress ' +
+        '(inter-process lock held). Concurrent self-expansion corrupts the proof lattice — retry ' +
+        'after the in-progress expansion completes or its lease (90m) expires.',
+    );
+  }
+}
+
+function releaseSelfExpansionLock(): void {
+  try { fs.rmSync(selfExpansionLockDir(), { recursive: true, force: true }); } catch { /* best-effort */ }
+}
 
 let selfExpansionAdmissionDepth = 0;
 
 export function withSelfExpansionAdmission<T>(fn: () => T): T {
+  const outermost = selfExpansionAdmissionDepth === 0;
+  if (outermost) acquireSelfExpansionLock(); // serialize ACROSS processes (depth counter = in-process re-entrancy)
   selfExpansionAdmissionDepth += 1;
   try {
     return fn();
   } finally {
     selfExpansionAdmissionDepth -= 1;
+    if (outermost && selfExpansionAdmissionDepth === 0) releaseSelfExpansionLock();
   }
 }
 
