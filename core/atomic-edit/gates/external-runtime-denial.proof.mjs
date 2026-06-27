@@ -48,6 +48,7 @@ async function callAtomicExec(_client, command, args = {}) {
     maxBuffer: 16 * 1024 * 1024,
     env: {
       ...process.env,
+      ...installInheritedAtomicHostEnv(repoRoot),
       ATOMIC_Y_CERTIFICATE_TRACE: '',
       ATOMIC_DISABLE_HOT_RELOAD: '1',
       ATOMIC_SINGLE_TOOL_CALL: '1',

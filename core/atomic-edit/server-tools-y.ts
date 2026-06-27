@@ -230,24 +230,26 @@ function jsonScriptHostRoot(): string {
   return REPO_ROOT;
 }
 
-function jsonScriptEnv(root: string): NodeJS.ProcessEnv {
+function jsonScriptEnv(root: string, preserveBrokerSocket = false): NodeJS.ProcessEnv {
   const env = { ...process.env };
   delete env.ATOMIC_SINGLE_TOOL_CALL;
   delete env.ATOMIC_SINGLE_TOOL_NAME;
   delete env.ATOMIC_SINGLE_TOOL_ARGS_JSON;
-  delete env.ATOMIC_EXEC_BROKER_SOCKET;
+  if (!preserveBrokerSocket) delete env.ATOMIC_EXEC_BROKER_SOCKET;
   delete env.ATOMIC_EXEC_BROKER_ROOT;
   delete env.ATOMIC_ALLOW_NESTED_PROOF_BROKER;
   delete env.ATOMIC_BUILD_BROKER;
+  delete env.ATOMIC_USE_BROKER_STATE;
   return {
     ...env,
     ATOMIC_SINGLE_TOOL_CALL: '',
     ATOMIC_SINGLE_TOOL_NAME: '',
     ATOMIC_SINGLE_TOOL_ARGS_JSON: '',
-    ATOMIC_EXEC_BROKER_SOCKET: '',
+    ATOMIC_EXEC_BROKER_SOCKET: preserveBrokerSocket ? process.env.ATOMIC_EXEC_BROKER_SOCKET ?? '' : '',
     ATOMIC_EXEC_BROKER_ROOT: '',
     ATOMIC_ALLOW_NESTED_PROOF_BROKER: '',
     ATOMIC_BUILD_BROKER: '',
+    ATOMIC_USE_BROKER_STATE: '',
     ATOMIC_HOST_WRITE_ROOT: root,
     CODEX_PROJECT_DIR: root,
     TMPDIR: root,
@@ -259,6 +261,9 @@ function jsonScriptEnv(root: string): NodeJS.ProcessEnv {
 function jsonScriptMustRunHostDirect(name: string): boolean {
   return new Set([
     'gates/whole-host-sandbox-launcher.proof.mjs',
+    'gates/byte-floor-mode-preserve.proof.mjs',
+    'gates/effect-snapshot-honest-ceiling.proof.mjs',
+    'gates/strict-admission.proof.mjs',
     'gates/no-bypass-static-policy.proof.mjs',
     'bypass-report.mjs',
     'gates/codex-bypass-observer-wiring.proof.mjs',
@@ -310,6 +315,7 @@ function runJsonScriptDirect(
   name: string,
   args: string[],
   timeoutMs: number,
+  preserveBrokerSocket = false,
 ): { ok: true; value: Record<string, unknown> } | { ok: false; error: string } {
   try {
     const root = jsonScriptHostRoot();
@@ -318,7 +324,7 @@ function runJsonScriptDirect(
       encoding: 'utf8',
       timeout: timeoutMs,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: jsonScriptEnv(root),
+      env: jsonScriptEnv(root, preserveBrokerSocket),
       maxBuffer: 64 * 1024 * 1024,
     });
     return parseJsonScriptOutput(out);
@@ -378,12 +384,13 @@ function runJsonScript(
   const started = Date.now();
   if (trace) process.stderr.write(`[atomic-y-certificate] start ${name} timeout=${timeoutMs}\n`);
   let result: { ok: true; value: Record<string, unknown> } | { ok: false; error: string };
-  if (!jsonScriptMustRunHostDirect(name)) {
+  const mustRunHostDirect = jsonScriptMustRunHostDirect(name);
+  if (!mustRunHostDirect) {
     const brokered = runJsonScriptViaBroker(name, args, timeoutMs);
     if (brokered) result = brokered;
     else result = runJsonScriptDirect(name, args, timeoutMs);
   } else {
-    result = runJsonScriptDirect(name, args, timeoutMs);
+    result = runJsonScriptDirect(name, args, timeoutMs, true);
   }
   if (trace) process.stderr.write(`[atomic-y-certificate] done ${name} ok=${String(result.ok)} ms=${Date.now() - started}\n`);
   return result;
@@ -480,6 +487,64 @@ function annotateDelegatedCertificateResult(
   }
 }
 
+type AtomicHealthStatus = 'READY' | 'DEGRADED' | 'BLOCKED' | 'DANGEROUS';
+
+function arrayRecords(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry)) : [];
+}
+
+function summarizeYCertificate(cert: Record<string, unknown>): Record<string, unknown> {
+  const domains = arrayRecords(cert.domains);
+  const blockers = arrayRecords(cert.blockers);
+  const nonGreenDomains = domains
+    .filter((entry) => entry.status !== 'GREEN')
+    .map((entry) => ({
+      domain: String(entry.domain ?? 'unknown'),
+      status: String(entry.status ?? 'unknown'),
+      requiredChange: typeof entry.requiredChange === 'string' ? entry.requiredChange : undefined,
+      evidence: typeof entry.evidence === 'string' ? entry.evidence : undefined,
+    }));
+  const redDomains = nonGreenDomains.filter((entry) => entry.status === 'RED');
+  const unjudgedDomains = nonGreenDomains.filter((entry) => entry.status === 'UNJUDGED');
+  const yComplete = cert.yComplete === true;
+  const status: AtomicHealthStatus =
+    yComplete && nonGreenDomains.length === 0
+      ? 'READY'
+      : redDomains.length > 0
+        ? 'DANGEROUS'
+        : blockers.length > 0
+          ? 'BLOCKED'
+          : 'DEGRADED';
+  const material = JSON.stringify({
+    scope: cert.scope,
+    yComplete,
+    verdict: cert.verdict,
+    domains: domains.map((entry) => ({ domain: entry.domain, status: entry.status })),
+    blockers,
+  });
+  return {
+    status,
+    scope: String(cert.scope ?? 'unknown'),
+    ok: cert.ok === true,
+    yComplete,
+    verdict: String(cert.verdict ?? (yComplete ? 'Y_COMPLETE' : 'Y_BLOCKED')),
+    blockerCount: blockers.length,
+    blockers,
+    nonGreenDomains,
+    redDomains,
+    unjudgedDomains,
+    receiptSha256: crypto.createHash('sha256').update(material).digest('hex'),
+  };
+}
+
+function combineHealthStatus(summaries: Record<string, unknown>[]): AtomicHealthStatus {
+  const statuses = summaries.map((summary) => String(summary.status));
+  if (statuses.includes('DANGEROUS')) return 'DANGEROUS';
+  if (statuses.includes('BLOCKED')) return 'BLOCKED';
+  if (statuses.includes('DEGRADED')) return 'DEGRADED';
+  return 'READY';
+}
+
 export function registerToolsY(server: McpServer): void {
   server.registerTool(
     'atomic_host_reentry_receipt',
@@ -533,6 +598,127 @@ export function registerToolsY(server: McpServer): void {
             tool: 'atomic_y_certificate',
             arguments: { scope: 'whole-host', includeAudits: true },
           },
+        });
+      } catch (e) {
+        return fail(e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
+  server.registerTool(
+    'atomic_health',
+    {
+      title: 'Atomic health - brutal operational status',
+      description:
+        'Returns a brutal READY/DEGRADED/BLOCKED/DANGEROUS status backed by fresh proofs. ' +
+        'READY means the requested scope is Y_COMPLETE. DEGRADED means proof is incomplete or unjudged. ' +
+        'BLOCKED means a known external/re-entry condition prevents completion. DANGEROUS means a red invariant exists.',
+      inputSchema: {
+        scope: z
+          .enum(['mcp-controlled', 'whole-host', 'both'])
+          .optional()
+          .describe('which health surface to evaluate; both checks mcp-controlled and whole-host'),
+        includeAudits: z.boolean().optional().describe('run audit-backed Y proof where available; defaults true'),
+        includeCertificates: z.boolean().optional().describe('include full certificate/proof payloads; defaults false'),
+      },
+    },
+    async (a) => {
+      try {
+        const requestedScope = a.scope ?? 'both';
+        const includeAudits = a.includeAudits !== false;
+        const scopes: YScope[] = requestedScope === 'both' ? ['mcp-controlled', 'whole-host'] : [requestedScope];
+        const certificates: Record<string, unknown>[] = [];
+        const summaries: Record<string, unknown>[] = [];
+
+        if (scopes.includes('mcp-controlled')) {
+          const proof = runJsonScript('gates/compiled-mcp-y-certificate.proof.mjs', ['--json'], includeAudits ? 300000 : 180000);
+          if (proof.ok && proof.value.ok === true && proof.value.certificate && typeof proof.value.certificate === 'object') {
+            const certificate = proof.value.certificate as Record<string, unknown>;
+            const summary = summarizeYCertificate(certificate);
+            const assertion = proof.value.assertion && typeof proof.value.assertion === 'object' ? proof.value.assertion as Record<string, unknown> : {};
+            if (summary.status === 'READY' && assertion.completeState !== true) summary.status = 'DEGRADED';
+            summary.proof = {
+              ok: proof.value.ok === true,
+              completeState: assertion.completeState === true,
+              mandatoryDomainsGreen: assertion.mandatoryDomainsGreen === true,
+            };
+            certificates.push(certificate);
+            summaries.push(summary);
+          } else {
+            const reason = proof.ok ? JSON.stringify(proof.value).slice(0, 1000) : proof.error;
+            summaries.push({
+              status: 'DANGEROUS',
+              scope: 'mcp-controlled',
+              ok: false,
+              yComplete: false,
+              verdict: 'HEALTH_PROOF_FAILED',
+              blockerCount: 1,
+              blockers: [{ domain: 'compiledMcpYCertificate', status: 'RED', requiredChange: reason }],
+              nonGreenDomains: [{ domain: 'compiledMcpYCertificate', status: 'RED', evidence: reason }],
+              receiptSha256: crypto.createHash('sha256').update(String(reason)).digest('hex'),
+            });
+          }
+        }
+
+        if (scopes.includes('whole-host')) {
+          const hostProof = runJsonScript('gates/whole-host-sandbox-launcher.proof.mjs', ['--json'], 120000);
+          const active = currentHostSandboxAdmitted(hostProof);
+          const blocker = active
+            ? null
+            : {
+                domain: 'wholeHostActionSpace',
+                status: 'RED',
+                requiredChange: 'Relaunch through atomic_host_reentry_receipt / codex-atomic-host-launcher before claiming literal whole-host Y.',
+              };
+          const material = JSON.stringify({ hostProof: hostProof.ok ? hostProof.value : hostProof.error, active });
+          summaries.push({
+            status: active ? 'READY' : 'BLOCKED',
+            scope: 'whole-host',
+            ok: hostProof.ok,
+            yComplete: active,
+            verdict: active ? 'Y_COMPLETE' : 'Y_BLOCKED',
+            blockerCount: blocker ? 1 : 0,
+            blockers: blocker ? [blocker] : [],
+            nonGreenDomains: blocker ? [{ ...blocker, evidence: blocker.requiredChange }] : [],
+            redDomains: blocker ? [blocker] : [],
+            unjudgedDomains: [],
+            proof: hostProof.ok ? hostProof.value : { ok: false, error: hostProof.error },
+            receiptSha256: crypto.createHash('sha256').update(material).digest('hex'),
+          });
+          certificates.push({ scope: 'whole-host', hostProof: hostProof.ok ? hostProof.value : { ok: false, error: hostProof.error } });
+        }
+
+        const status = combineHealthStatus(summaries);
+        const nonGreen = summaries.flatMap((summary) => arrayRecords(summary.nonGreenDomains));
+        const blockers = summaries.flatMap((summary) => arrayRecords(summary.blockers));
+        return ok({
+          ok: true,
+          status,
+          ready: status === 'READY',
+          requestedScope,
+          includeAudits,
+          checkedScopes: scopes,
+          summary: summaries,
+          blockers,
+          nonGreenDomains: nonGreen,
+          nextAction:
+            status === 'READY'
+              ? 'No action required for the requested scope.'
+              : status === 'BLOCKED'
+                ? 'Resolve the listed blocker; for whole-host this usually means relaunching through atomic_host_reentry_receipt.'
+                : status === 'DANGEROUS'
+                  ? 'Stop promotion/autonomy and repair the red invariant before accepting claims.'
+                  : 'Run the listed proofs/audits until every mandatory domain is GREEN.',
+          truthReceipt: {
+            source: 'atomic_health',
+            generatedAt: new Date().toISOString(),
+            certificateDigests: summaries.map((summary) => ({
+              scope: summary.scope,
+              status: summary.status,
+              receiptSha256: summary.receiptSha256,
+            })),
+          },
+          ...(a.includeCertificates ? { certificates } : {}),
         });
       } catch (e) {
         return fail(e instanceof Error ? e.message : String(e));
@@ -622,27 +808,64 @@ export function registerToolsY(server: McpServer): void {
               runtimeCurrentFingerprint: currentRuntimeFingerprint,
             },
           },
-          {
-            domain: 'byteFloorWriteAdmission',
-            status: 'GREEN',
-            evidence: 'All atomic write helpers funnel through atomicWrite: protected guard, syntax validation, sha guard, sync write gates, and atomic rename.',
-          },
-          {
-            domain: 'strictGateAdmission',
-            status: 'GREEN',
-            evidence: 'Strict registry treats RED and UNJUDGED as non-green; NOT_APPLICABLE is explicit and does not masquerade as approval.',
-          },
-          {
-            domain: 'filesystemEffectProof',
-            status: 'GREEN',
-            evidence: 'atomic_exec proveEffect captures complete filesystem snapshots, diffs byte effects, and refuses incomplete snapshots before execution.',
-          },
-          {
-            domain: 'knownExternalShellEffects',
-            status: 'GREEN',
-            evidence: 'atomic_exec classifies known network/database/provider/remote-host/package/runtime-control commands as external-or-host-effect and refuses them before spawn.',
-          },
         ];
+        // F2 honesty: byteFloorWriteAdmission / strictGateAdmission / filesystemEffectProof /
+        // knownExternalShellEffects were HARDCODED GREEN with static evidence strings (a vacuous-green
+        // facade — no runtime check). They now RUN their backing proof and derive status from the
+        // result; a proof that cannot run or does not emit JSON yields UNJUDGED (honest), never a
+        // vacuous GREEN. Mirrors the codexNoBypassStaticPolicy / atomicityAudit pattern below.
+        const byteFloorProof = runJsonScript('gates/byte-floor-mode-preserve.proof.mjs', ['--json']);
+        const byteFloorGreen = byteFloorProof.ok && byteFloorProof.value.ok === true;
+        domains.push({
+          domain: 'byteFloorWriteAdmission',
+          status: byteFloorGreen ? 'GREEN' : byteFloorProof.ok ? 'RED' : 'UNJUDGED',
+          evidence: byteFloorGreen
+            ? 'byte-floor-mode-preserve.proof.mjs passed (RUNTIME-VERIFIED): atomic write helpers preserve mode bits through the protected/syntax/sha/sync/rename floor.'
+            : byteFloorProof.ok
+              ? `byte-floor proof reported non-green: ${JSON.stringify(byteFloorProof.value)}`
+              : `byte-floor proof could not run: ${byteFloorProof.error}`,
+          requiredChange: byteFloorGreen ? undefined : 'Repair the byte-floor proof so write-helper admission is runtime-verified.',
+          detail: byteFloorProof.ok ? byteFloorProof.value : undefined,
+        });
+        const fsEffectProof = runJsonScript('gates/effect-snapshot-honest-ceiling.proof.mjs', ['--json']);
+        const fsEffectGreen = fsEffectProof.ok && fsEffectProof.value.ok === true;
+        domains.push({
+          domain: 'filesystemEffectProof',
+          status: fsEffectGreen ? 'GREEN' : fsEffectProof.ok ? 'RED' : 'UNJUDGED',
+          evidence: fsEffectGreen
+            ? 'effect-snapshot-honest-ceiling.proof.mjs passed (RUNTIME-VERIFIED): atomic_exec proveEffect captures complete filesystem snapshots, diffs byte effects, refuses incomplete snapshots.'
+            : fsEffectProof.ok
+              ? `effect-snapshot proof reported non-green: ${JSON.stringify(fsEffectProof.value)}`
+              : `effect-snapshot proof could not run: ${fsEffectProof.error}`,
+          requiredChange: fsEffectGreen ? undefined : 'Repair the effect-snapshot proof so filesystem effect admission is runtime-verified.',
+          detail: fsEffectProof.ok ? fsEffectProof.value : undefined,
+        });
+        const strictAdmissionProof = runJsonScript('gates/strict-admission.proof.mjs', ['--json']);
+        const strictAdmissionGreen = strictAdmissionProof.ok && strictAdmissionProof.value.ok === true;
+        domains.push({
+          domain: 'strictGateAdmission',
+          status: strictAdmissionGreen ? 'GREEN' : strictAdmissionProof.ok ? 'RED' : 'UNJUDGED',
+          evidence: strictAdmissionGreen
+            ? 'strict-admission.proof.mjs passed (RUNTIME-VERIFIED): strict registry treats RED and UNJUDGED as non-green; NOT_APPLICABLE is explicit.'
+            : strictAdmissionProof.ok
+              ? `strict-admission proof reported non-green: ${JSON.stringify(strictAdmissionProof.value)}`
+              : `strict-admission.proof.mjs does not yet emit --json for the certificate (gap); UNJUDGED rather than vacuously GREEN. Static claim: strict registry treats RED/UNJUDGED as non-green.`,
+          requiredChange: strictAdmissionGreen ? undefined : 'Make strict-admission.proof.mjs emit {ok:true} under --json so this domain is runtime-verified instead of UNJUDGED.',
+          detail: strictAdmissionProof.ok ? strictAdmissionProof.value : undefined,
+        });
+        const externalDenialProof = runJsonScript('gates/external-runtime-denial.proof.mjs', ['--json'], 120000);
+        const externalDenialGreen = externalDenialProof.ok && externalDenialProof.value.ok === true;
+        domains.push({
+          domain: 'knownExternalShellEffects',
+          status: externalDenialGreen ? 'GREEN' : externalDenialProof.ok ? 'RED' : 'UNJUDGED',
+          evidence: externalDenialGreen
+            ? 'external-runtime-denial.proof.mjs passed (RUNTIME-VERIFIED): atomic_exec classifies known external/host-effect commands and refuses them before spawn.'
+            : externalDenialProof.ok
+              ? `external-runtime-denial proof reported non-green: ${JSON.stringify(externalDenialProof.value)}`
+              : `external-runtime-denial.proof.mjs does not yet emit --json for the certificate (gap); UNJUDGED rather than vacuously GREEN. Static claim: known external/host-effect commands are classified and refused.`,
+          requiredChange: externalDenialGreen ? undefined : 'Make external-runtime-denial.proof.mjs emit {ok:true} under --json so this domain is runtime-verified instead of UNJUDGED.',
+          detail: externalDenialProof.ok ? externalDenialProof.value : undefined,
+        });
 
         const noBypassPolicy = runJsonScript('gates/no-bypass-static-policy.proof.mjs', ['--json']);
         const noBypassPolicyGreen = noBypassPolicy.ok && noBypassPolicy.value.ok === true;

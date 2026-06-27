@@ -16,6 +16,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+const jsonMode = process.argv.includes('--json');
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(dir, '..', '..', '..', '..');
 const R = await import(path.join(dir, '..', 'dist', 'gates', 'registry.js'));
@@ -23,14 +24,20 @@ const C = await import(path.join(dir, '..', 'dist', 'server-helpers-converge.js'
 
 let pass = 0;
 let fail = 0;
+const results = [];
 const check = (name, cond, detail = '') => {
-  if (cond) {
+  const ok = Boolean(cond);
+  const entry = { name, ok, ...(detail ? { detail } : {}) };
+  results.push(entry);
+  if (ok) {
     pass += 1;
-    console.log('  PASS ', name);
+    if (!jsonMode) console.log('  PASS ', name);
   } else {
     fail += 1;
-    console.log('  FAIL ', name);
-    if (detail) console.log(`         ${detail}`);
+    if (!jsonMode) {
+      console.log('  FAIL ', name);
+      if (detail) console.log(`         ${detail}`);
+    }
   }
 };
 
@@ -102,5 +109,10 @@ try {
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail === 0 ? 0 : 1);
+const proofOk = fail === 0;
+if (jsonMode) {
+  console.log(JSON.stringify({ ok: proofOk, pass, fail, results }, null, 2));
+} else {
+  console.log(`strict-admission proof: ${pass} passed, ${fail} failed`);
+}
+process.exit(proofOk ? 0 : 1);

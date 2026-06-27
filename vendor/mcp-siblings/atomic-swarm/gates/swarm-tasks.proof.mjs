@@ -56,14 +56,23 @@ try {
     { freeTask: free.task, gatedTask: gated.task },
   );
 
-  // 2. ungated task completes freely, but the receipt is honest: verified === false.
-  const freeDone = await taskUpdate({ id: free.task.id, status: 'completed' });
+  // 2. ungated task completion is refused; Atomic completion requires a verified acceptance receipt.
+  let ungatedCompletionRefused = false;
+  let ungatedCompletionMessage = '';
+  try {
+    await taskUpdate({ id: free.task.id, status: 'completed' });
+  } catch (error) {
+    ungatedCompletionRefused = error?.swarmRefusal === true;
+    ungatedCompletionMessage = String(error?.message ?? '');
+  }
+  const afterUngatedCompletion = taskList().tasks.find((task) => task.id === free.task.id);
   record(
-    'ungated task completes freely with completion.verified === false',
-    freeDone.ok === true &&
-      freeDone.task.status === 'completed' &&
-      freeDone.task.completion?.verified === false,
-    { completion: freeDone.task.completion },
+    'ungated completion is refused and status stays pending without acceptanceCommand',
+    ungatedCompletionRefused &&
+      /verified completion only/.test(ungatedCompletionMessage) &&
+      afterUngatedCompletion?.status === 'pending' &&
+      afterUngatedCompletion?.completion === null,
+    { storedTask: afterUngatedCompletion, message: ungatedCompletionMessage },
   );
 
   // 3. gated task without a governed runner is a fail-closed refusal; store untouched.
@@ -95,13 +104,14 @@ try {
   const refusalEntries = readLedgerEntries().filter((entry) => entry.refusedCompletion);
   const afterRed = taskList().tasks.find((task) => task.id === gated.task.id);
   record(
-    'red acceptance verdict refused; ledger has refusedCompletion entry; status unchanged',
+    'red acceptance verdict refused; ledger records refusedCompletion and task becomes failed for sentinel',
     redRefused &&
       redCompletion?.verified === false &&
       refusalEntries.length === 1 &&
       refusalEntries[0].refusedCompletion?.exitCode === 1 &&
-      afterRed?.status === 'pending',
-    { refusalEntries, errorCompletion: redCompletion },
+      afterRed?.status === 'failed' &&
+      afterRed?.completion?.verified === false,
+    { refusalEntries, errorCompletion: redCompletion, storedTask: afterRed },
   );
 
   // 5. green acceptance verdict completes with verified === true and hashed stdout.

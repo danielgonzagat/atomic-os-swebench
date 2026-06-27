@@ -5,8 +5,9 @@
  * acceptanceCommand, and completing such a task REQUIRES that command to exit
  * 0 through the governed broker (same sandbox as atomic_exec) at completion
  * time. No broker, no completion — fail-closed, like everything in the swarm.
- * Tasks without acceptanceCommand complete freely (parity with TodoWrite),
- * but the receipt records that the completion was unverified.
+ * Tasks without acceptanceCommand cannot be marked completed; completion is
+ * reserved for verified acceptance receipts. Ungated tasks may remain active
+ * or be cancelled, but never honestly claim done.
  *
  * Store: .atomic/swarm-tasks.json (atomic temp+rename writes).
  * Ledger: .atomic/swarm-tasks-ledger.jsonl (every transition, with evidence).
@@ -15,7 +16,7 @@ import * as fs from 'node:fs';
 import path from 'node:path';
 import { REPO_ROOT, appendLedger, redactSecrets, refusal, sha256Hex } from './swarm-core.mjs';
 
-const STATUSES = new Set(['pending', 'in_progress', 'completed', 'cancelled']);
+const STATUSES = new Set(['pending', 'in_progress', 'completed', 'cancelled', 'failed']);
 
 function storePath() {
   return path.join(REPO_ROOT, '.atomic', 'swarm-tasks.json');
@@ -79,7 +80,12 @@ export async function taskUpdate({ id, status, subject, description } = {}, { ru
   if (status !== undefined) {
     const next = String(status);
     if (!STATUSES.has(next)) throw refusal(`swarm_task_update refused: invalid status ${next}`);
-    if (next === 'completed' && task.acceptanceCommand) {
+    if (next === 'completed') {
+      if (!task.acceptanceCommand) {
+        throw refusal(
+          `swarm_task_update refused (verified completion only): task ${task.id} has no acceptanceCommand; Atomic tasks cannot be marked completed without a green acceptance receipt`,
+        );
+      }
       if (typeof runAcceptance !== 'function') {
         throw refusal(
           `swarm_task_update refused (fail-closed): task ${task.id} is gated by an acceptance command and no governed runner is available`,
@@ -98,15 +104,24 @@ export async function taskUpdate({ id, status, subject, description } = {}, { ru
         at: new Date().toISOString(),
       };
       if (!passed) {
-        appendLedger('swarm-tasks-ledger.jsonl', { tool: 'swarm_task_update', id: task.id, refusedCompletion: completion, stderrSample: stderr.slice(0, 2000) });
+        // A gated task whose acceptance gate is RED is a FAILED task: persist the
+        // terminal 'failed' state (so atomic-sentinel, which watches status==='failed',
+        // can detect + auto-heal it) THEN refuse the completion. Without this transition
+        // the task never reaches 'failed' and the entire auto-heal feature is dead code.
+        // Retry is still possible by explicitly reopening (status -> 'in_progress'/'pending').
+        task.completion = completion;
+        task.status = 'failed';
+        task.updatedAt = new Date().toISOString();
+        writeStore(store);
+        appendLedger('swarm-tasks-ledger.jsonl', { tool: 'swarm_task_update', id: task.id, status: 'failed', refusedCompletion: completion, stderrSample: stderr.slice(0, 2000) });
         throw refusal(
-          `swarm_task_update refused: acceptance command for task ${task.id} failed (exit ${completion.exitCode}); a gated task cannot be marked done on a red gate`,
+          `swarm_task_update refused: acceptance command for task ${task.id} failed (exit ${completion.exitCode}); a gated task cannot be marked done on a red gate (task marked 'failed' for auto-heal)`,
           { completion },
         );
       }
       task.completion = completion;
-    } else if (next === 'completed') {
-      task.completion = { verified: false, command: null, at: new Date().toISOString() };
+    } else {
+      task.completion = null;
     }
     task.status = next;
   }
