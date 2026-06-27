@@ -50,9 +50,11 @@ export function buildStringReplaceSyGuS(problem: StringReplaceSyGuSProblem): SyG
   }
   constants.push(...(problem.candidateNeedles ?? []), ...(problem.candidateReplacements ?? []));
   const stableConstants = unique(constants);
-  const rewriteTerms = stableConstants
+  const rewriteNeedles = unique(problem.candidateNeedles?.length ? problem.candidateNeedles : stableConstants);
+  const rewriteReplacements = unique(problem.candidateReplacements?.length ? problem.candidateReplacements : stableConstants);
+  const rewriteTerms = rewriteNeedles
     .flatMap((needle) =>
-      stableConstants.map((replacement) =>
+      rewriteReplacements.map((replacement) =>
         needle && needle !== replacement ? `(str.replace s ${quote(needle)} ${quote(replacement)})` : '',
       ),
     )

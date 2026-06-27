@@ -229,7 +229,7 @@ if [[ "${ATOMIC_EDIT_MCP_SELF_HOSTED:-}" == "1" ]]; then
     BROKER_DIR="${REPO_ROOT}/.atomic/self-hosted-broker"
     mkdir -p "${BROKER_DIR}/requests" "${BROKER_DIR}/responses"
     export ATOMIC_EXEC_BROKER_SOCKET="file://${BROKER_DIR}"
-    "${NODE_BIN}" "${SRC_DIR}/atomic-exec-broker.mjs" --no-sandbox "${ATOMIC_EXEC_BROKER_SOCKET}" &
+    "${NODE_BIN}" "${SRC_DIR}/atomic-exec-broker.mjs" --no-sandbox "${ATOMIC_EXEC_BROKER_SOCKET}" 0<&- &
     BROKER_PID=$!
     trap "kill ${BROKER_PID} || true; rm -rf ${BROKER_DIR}" EXIT
     for _ in {1..200}; do
@@ -334,7 +334,7 @@ manifest_fresh() {
 
 if needs_build || ! manifest_fresh; then
   echo "[atomic-edit-launcher] building dist (source changed or manifest stale)…" >&2
-  "${NODE_BIN}" "${SRC_DIR}/build.mjs" >&2
+  (cd "${SRC_DIR}" && "${NODE_BIN}" "${SRC_DIR}/build.mjs") >&2
 fi
 
 if ! manifest_fresh; then

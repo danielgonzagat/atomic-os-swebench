@@ -111,6 +111,31 @@ function readSupervisorState() {
 const hasFullTools = (listed) =>
   (listed.tools?.length ?? 0) >= 50 && listed.tools.some((t) => t.name === 'atomic_y_certificate');
 
+function spawnWithOpenStdin(command, args, options, timeoutMs = 20000) {
+  return new Promise((resolve) => {
+    const child = childProcess.spawn(command, args, { ...options, stdio: ['pipe', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    const finish = (status, signal) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { child.stdin.end(); } catch { /* best effort */ }
+      resolve({ status, signal, stdout, stderr });
+    };
+    const timer = setTimeout(() => {
+      try { child.kill('SIGTERM'); } catch { /* best effort */ }
+      setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* best effort */ } }, 500).unref?.();
+      finish(null, 'timeout');
+    }, timeoutMs);
+    child.stdout.on('data', (chunk) => { stdout += String(chunk); });
+    child.stderr.on('data', (chunk) => { stderr += String(chunk); });
+    child.on('error', (error) => { stderr += String(error?.message ?? error); finish(null, 'error'); });
+    child.on('exit', (code, signal) => finish(code, signal));
+  });
+}
+
 async function main() {
   const results = [];
   buildClone();
@@ -252,8 +277,8 @@ async function main() {
 
     // 6 — security refusal still propagates through the chain (exit 80)
     {
-      const refuse = childProcess.spawnSync(C.bootstrap, [], {
-        cwd: CLONE_ROOT, encoding: 'utf8', timeout: 20000,
+      const refuse = await spawnWithOpenStdin(C.bootstrap, [], {
+        cwd: CLONE_ROOT,
         env: cloneEnv({
           ATOMIC_HOST_SANDBOX: 'macos-sandbox-exec', ATOMIC_HOST_ATOMIC_ONLY: '1',
           ATOMIC_HOST_WRITE_ROOT: CLONE_ROOT, ATOMIC_EXEC_BROKER_SOCKET: '',

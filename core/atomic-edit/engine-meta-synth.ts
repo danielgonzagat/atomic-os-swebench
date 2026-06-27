@@ -104,7 +104,7 @@ function makeProblem(problem: IslandProblem, backends: string[]): SynthesisProbl
 
 export function synthesizeMetaOperator(
   problem: IslandProblem = DEFAULT_STRING_REPLACE_ISLAND,
-  options: { allowCvc5?: boolean; cvc5Bin?: string } = {},
+  options: { allowCvc5?: boolean; cvc5Bin?: string; pythonBin?: string } = {},
 ) {
   if (problem.train.length === 0 || problem.heldOut.length === 0) {
     throw new Error('meta-synthesis requires train and held-out examples');
@@ -125,6 +125,7 @@ export function synthesizeMetaOperator(
   const kernel = runSynthesisKernel(synthesisProblem, {
     allowCvc5: options.allowCvc5 === true,
     cvc5Bin: options.cvc5Bin,
+    pythonBin: options.pythonBin,
   });
   const operator = found
     ? {

@@ -20,6 +20,7 @@ export function registerToolsMetaSynth(server: McpServer): void {
         heldOut: z.array(ExampleSchema).optional().describe('Held-out examples for the same string rewrite island'),
         allowCvc5: z.boolean().optional().describe('Run CVC5 when reachable; false still returns honest receipt data'),
         cvc5Bin: z.string().optional().describe('Explicit cvc5 executable path'),
+        pythonBin: z.string().optional().describe('Explicit Python executable with the cvc5 module installed'),
         verifyReceipt: z.record(z.string(), z.unknown()).optional().describe('Receipt to verify without synthesizing a new island'),
       },
     },
@@ -38,6 +39,7 @@ export function registerToolsMetaSynth(server: McpServer): void {
         const result = synthesizeMetaOperator(problem, {
           allowCvc5: a.allowCvc5 === true,
           cvc5Bin: a.cvc5Bin,
+          pythonBin: a.pythonBin,
         });
         return ok({
           ...result,

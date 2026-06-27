@@ -92,6 +92,11 @@ const ENTRY = [
   'gates/artifact-hygiene-gate.ts',
   'gates/concurrency-lock-gate.ts',
   'gates/closure-meta-gate.ts',
+  'engine-synthesis-kernel.ts',
+  'engine-meta-synth.ts',
+  'engine-cvc5-sygus.ts',
+  'engine-theory-ladder.ts',
+  'engine-sygus.ts',
 ].map((f) => path.join(dir, f));
 const OUT = path.join(dir, 'dist');
 const BUILD_OUT = (() => { try { return fs.mkdtempSync(path.join(os.tmpdir(), `atomic-edit-dist-${process.pid}-`)); } catch (e) { return fs.mkdtempSync(path.join(dir, `.build-tmp-${process.pid}-`)); } })();

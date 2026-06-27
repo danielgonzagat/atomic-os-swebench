@@ -30,8 +30,16 @@ if (failures.length === 0) {
   check('heuristic receipt is not promotion eligible', result.receipts.some((receipt) => receipt.verdict === 'HEURISTIC_UNPROVEN') && result.promotionEligible === false, result.receipts);
   check('receipt hashes verify', result.receipts.every((receipt) => kernel.verifyProofReceipt(receipt).ok), result.receipts);
   check('SyGuS benchmark emitted', result.sygus?.program?.includes('synth-fun') && result.sygus?.program?.includes('str.replace'), result.sygus);
-  check('CVC5 absence explicit', cvc5.detectCvc5({ env: { PATH: '' }, candidatePaths: ['/definitely/not/cvc5'] }).verdict === 'ABSENT');
+  check('CVC5 absence explicit', cvc5.detectCvc5({ env: { PATH: '' }, candidatePaths: ['/definitely/not/cvc5'], pythonCandidates: [] }).verdict === 'ABSENT');
   check('theory ladder reports no formal promotion', result.ladder?.some((step) => step.level === 'formal-promotion' && step.status === 'blocked'), result.ladder);
+  const pythonBin = process.env.CVC5_PYTHON_BIN ?? (fs.existsSync('/opt/homebrew/bin/python3') ? '/opt/homebrew/bin/python3' : undefined);
+  if (pythonBin) {
+    const formal = meta.synthesizeMetaOperator(meta.DEFAULT_STRING_REPLACE_ISLAND, { allowCvc5: true, pythonBin });
+    const cvc5Receipt = formal.receipts.find((receipt) => receipt.backend === 'cvc5-sygus');
+    check('python cvc5 proves bounded island when configured', cvc5Receipt?.verdict === 'PROVEN' && cvc5Receipt?.authority === 'formal', cvc5Receipt);
+    check('formal cvc5 receipt is promotion eligible', formal.promotionEligible === true, formal.receipts);
+    check('theory ladder opens cvc5 and formal promotion levels', formal.ladder?.some((step) => step.level === 'cvc5-sygus' && step.status === 'proved') && formal.ladder?.some((step) => step.level === 'formal-promotion' && step.status === 'proved'), formal.ladder);
+  }
 }
 const output = { ok: failures.length === 0, total: results.length, failed: failures, results };
 if (json) console.log(JSON.stringify(output, null, 2)); else console.log(output.ok ? 'OK meta-synth-engine proof' : 'FAIL meta-synth-engine proof');

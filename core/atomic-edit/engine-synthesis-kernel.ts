@@ -64,6 +64,7 @@ export interface SynthesisKernelOptions {
   repoRoot?: string;
   allowCvc5?: boolean;
   cvc5Bin?: string;
+  pythonBin?: string;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -291,23 +292,60 @@ function runHeuristic(problem: SynthesisProblem): ProofReceipt {
   });
 }
 
+function inferStringReplaceCandidates(examples: Array<{ input: string; output: string }>): { needles: string[]; replacements: string[] } {
+  const first = examples[0];
+  if (!first) return { needles: [], replacements: [] };
+  const maxNeedle = Math.min(32, first.input.length);
+  const maxReplacement = Math.min(32, first.output.length);
+  const pairs = new Map<string, { needle: string; replacement: string }>();
+  for (let start = 0; start < first.input.length; start += 1) {
+    for (let end = start + 1; end <= Math.min(first.input.length, start + maxNeedle); end += 1) {
+      const needle = first.input.slice(start, end);
+      if (!needle) continue;
+      for (let rStart = 0; rStart <= first.output.length; rStart += 1) {
+        for (let rEnd = rStart; rEnd <= Math.min(first.output.length, rStart + maxReplacement); rEnd += 1) {
+          const replacement = first.output.slice(rStart, rEnd);
+          if (needle === replacement) continue;
+          if (examples.every((example) => example.input.split(needle).join(replacement) === example.output)) {
+            pairs.set(`${needle}\u0000${replacement}`, { needle, replacement });
+          }
+        }
+      }
+    }
+  }
+  const ordered = [...pairs.values()]
+    .sort((a, b) => (b.needle.length - a.needle.length) || (b.replacement.length - a.replacement.length) || a.needle.localeCompare(b.needle))
+    .slice(0, 1);
+  return { needles: ordered.map((pair) => pair.needle), replacements: ordered.map((pair) => pair.replacement) };
+}
+
 function runCvc5(problem: SynthesisProblem, options: SynthesisKernelOptions): ProofReceipt {
   const examples = exampleConstraints(problem);
+  const candidates = inferStringReplaceCandidates(examples);
   const sygus = examples.length
-    ? buildStringReplaceSyGuS({ name: String(problem.intent || 'atomic_synthesis'), examples })
+    ? buildStringReplaceSyGuS({
+        name: String(problem.intent || 'atomic_synthesis'),
+        examples,
+        candidateNeedles: candidates.needles,
+        candidateReplacements: candidates.replacements,
+      })
     : { program: '(check-synth)\n', exampleCount: 0, grammarOperators: [], constants: [], logic: 'ALL' as const };
   const attempt = runCvc5SyGuS(sygus.program, {
     allowRun: options.allowCvc5 === true,
     cvc5Bin: options.cvc5Bin,
+    pythonBin: options.pythonBin,
     timeoutMs: problem.limits.timeoutMs,
     env: options.env,
+    examples,
+    candidateNeedles: candidates.needles,
+    candidateReplacements: candidates.replacements,
   });
   return makeProofReceipt({
     problem,
     backend: 'cvc5-sygus',
     verdict: attempt.verdict,
     authority: attempt.verdict === 'PROVEN' ? 'formal' : 'none',
-    evidence: { ...attempt.evidence, sygus },
+    evidence: { ...attempt.evidence, sygus, inferredCandidates: candidates },
     candidates:
       attempt.verdict === 'PROVEN'
         ? [{ backend: 'cvc5-sygus', authority: 'formal', payload: { stdout: attempt.evidence.stdout } }]
