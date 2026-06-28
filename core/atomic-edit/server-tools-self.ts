@@ -149,6 +149,8 @@ const MANDATORY_SELF_EXPANSION_VALIDATORS: readonly SelfExpansionValidator[] = [
   // D.7 - continuous emergence: the corpus -> hypothesis -> autonomous-evolution -> observatory driver
   // must run as a verified cycle, emit a tamper-evident feed, and leave producer-independent receipts.
   { phase: 'continuous-emergence', command: 'node gates/continuous-emergence-loop.proof.mjs --json' },
+  // The live pulse is only real when the loop is reachable through MCP + atx, not only as a script.
+  { phase: 'emergence-cycle', command: 'node gates/emergence-cycle-mcp.proof.mjs --json' },
   // N2/A-G5 — atomic's disproof witness ⊇ Nidus's UNSAT-core (strictly more recomputable information): the
   // witness CONTAINS the core (projection), carries the byte-level counterexample the core loses (strict),
   // is digest-recomputable (forgery-caught), localizes repairs the core cannot. PSR is a general swappable
@@ -264,6 +266,7 @@ const MANDATORY_SELF_EXPANSION_VALIDATORS: readonly SelfExpansionValidator[] = [
   { phase: 'codex-memory', command: 'node gates/codex-memory-note-tool.proof.mjs --json' },
   // Memory becomes cognitive only when the byte-floor recalls it before mutation.
   { phase: 'semantic-memory-recall', command: 'node gates/semantic-memory-recall.proof.mjs --json' },
+  { phase: 'autopoietic-memory-activation', command: 'node gates/autopoietic-memory-activation.proof.mjs --json' },
   { phase: 'fixed-model-lift', command: 'node gates/fixed-model-lift.proof.mjs --json' },
   { phase: 'benchmark', command: 'node gates/atomic-agent-bench.proof.mjs' },
   { phase: 'test', command: 'node gates/test-execution-gate.proof.mjs --json' },
@@ -694,6 +697,7 @@ function proofCommandPriority(command: string): number {
     ['capability-genome-registry', 10],
     ['codex-entrypoint-contract', 11],
     ['semantic-memory-recall', 11],
+    ['autopoietic-memory-activation', 11],
     ['atomic-exec-readonly-usability', 11],
     ['atomic-exec-output-compact', 12],
     ['mcp-tool-list-compact.proof.mjs', 13],

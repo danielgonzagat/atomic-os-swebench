@@ -151,6 +151,7 @@ const COMMANDS = {
   verify:    { server: 'edit', resolve: verifyCommand },
   reentry:   { server: 'edit', resolve: reentryCommand },
   evolve:    { server: 'edit', tool: 'atomic_self_evolution', map: (a) => parseJson(a[0], { intent: a.join(' ') }) },
+  pulse:     { server: 'edit', tool: 'atomic_emergence_cycle', map: (a) => parseJson(a[0], { mode: a[0] || 'report' }) },
   // sibling servers (via mcpCall handshake)
   memory:    { server: 'memory', tool: 'memory_query',        map: (a) => ({ query: a.join(' ') }) },
   graph:     { server: 'memory', tool: 'memory_graph',        map: (a) => parseJson(a[0], { query: a.join(' ') || undefined }) },

@@ -48,6 +48,7 @@ const requiredCommands = [
   'node gates/self-evolution-lesson-rules.proof.mjs --json',
   'node gates/codex-memory-note-tool.proof.mjs --json',
   'node gates/semantic-memory-recall.proof.mjs --json',
+  'node gates/autopoietic-memory-activation.proof.mjs --json',
   'node gates/fixed-model-lift.proof.mjs --json',
   'node gates/self-host-slice.proof.mjs --json',
   'node gates/agent-trust-governance.proof.mjs --json',
@@ -71,6 +72,7 @@ const requiredCommands = [
   'node gates/y-certificate-mandatory-domains.proof.mjs --json',
   'node gates/meta-synth-engine.proof.mjs --json',
   'node gates/continuous-emergence-loop.proof.mjs --json',
+  'node gates/emergence-cycle-mcp.proof.mjs --json',
   'node gates/codex-entrypoint-contract.proof.mjs --json',
   'node gates/agent-hook-runtime-boundary.proof.mjs --json',
   'node gates/opencode-allin-permission-policy.proof.mjs --json',
@@ -126,6 +128,7 @@ const requiredPhases = [
   'self-evolution-lessons',
   'codex-memory',
   'semantic-memory-recall',
+  'autopoietic-memory-activation',
   'fixed-model-lift',
   'self-evolution-real',
   'benchmark',
@@ -139,6 +142,7 @@ const requiredPhases = [
   'certificate',
   'formal-synthesis',
   'continuous-emergence',
+  'emergence-cycle',
   'runtime',
   'health-audited',
   'agent-runtime',
@@ -207,8 +211,12 @@ function main() {
       source.includes('meta-synth-engine.proof.mjs') &&
       source.includes('continuous-emergence') &&
       source.includes('continuous-emergence-loop.proof.mjs') &&
+      source.includes('emergence-cycle') &&
+      source.includes('emergence-cycle-mcp.proof.mjs') &&
       source.includes('semantic-memory-recall') &&
       source.includes('semantic-memory-recall.proof.mjs') &&
+      source.includes('autopoietic-memory-activation') &&
+      source.includes('autopoietic-memory-activation.proof.mjs') &&
       source.includes('usability') &&
       source.includes('host-shell') &&
       source.includes('cli-surface') &&
@@ -238,8 +246,13 @@ function main() {
       hasMetaSynthEngine: source.includes('meta-synth-engine.proof.mjs'),
       hasContinuousEmergence: source.includes('continuous-emergence'),
       hasContinuousEmergenceLoop: source.includes('continuous-emergence-loop.proof.mjs'),
+      hasEmergenceCycle: source.includes('emergence-cycle'),
+      hasEmergenceCycleMcp: source.includes('emergence-cycle-mcp.proof.mjs'),
       hasSemanticMemoryRecall:
         source.includes('semantic-memory-recall') && source.includes('semantic-memory-recall.proof.mjs'),
+      hasAutopoieticMemoryActivation:
+        source.includes('autopoietic-memory-activation') &&
+        source.includes('autopoietic-memory-activation.proof.mjs'),
       hasUsability: source.includes('usability'),
       hasHostShell: source.includes('host-shell'),
       hasCliSurface: source.includes('cli-surface'),

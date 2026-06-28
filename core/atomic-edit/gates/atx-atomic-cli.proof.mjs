@@ -44,7 +44,7 @@ function runAtxSlow(args) {
 
 const listed = [...src.matchAll(/^  (\w+):\s+\{/gm)].map((m) => m[1]);
 const requiredAtxCommands = [
-  'read', 'outline', 'symbol', 'exec', 'edit', 'locate', 'converge', 'verify', 'reentry', 'evolve',
+  'read', 'outline', 'symbol', 'exec', 'edit', 'locate', 'converge', 'verify', 'reentry', 'evolve', 'pulse',
   'memory', 'graph', 'record', 'funnel', 'route', 'wavefront', 'search', 'fetch', 'lock', 'task', 'swarm', 'sentinel',
 ];
 const missingAtxCommands = requiredAtxCommands.filter((name) => !listed.includes(name));
@@ -59,6 +59,7 @@ const requiredToolMappings = [
   "tool: 'atomic_y_certificate'",
   "tool: 'atomic_host_reentry_receipt'",
   "tool: 'atomic_self_evolution'",
+  "tool: 'atomic_emergence_cycle'",
   "tool: 'memory_query'",
   "tool: 'memory_graph'",
   "tool: 'memory_record'",

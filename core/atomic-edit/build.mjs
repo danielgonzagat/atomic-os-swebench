@@ -44,6 +44,9 @@ const ENTRY = [
   'server-helpers-negative-proof.ts',
   'server-tools-self.ts',
   'server-tools-disproof.ts',
+  'server-helpers-capability-genome.ts',
+  'server-tools-capability-genome.ts',
+  'server-tools-emergence-cycle.ts',
   'server-tools-positive-bytes.ts',
   'server-tools-codex-config.ts',
   'engine.ts',
@@ -92,6 +95,11 @@ const ENTRY = [
   'gates/artifact-hygiene-gate.ts',
   'gates/concurrency-lock-gate.ts',
   'gates/closure-meta-gate.ts',
+  'engine-synthesis-kernel.ts',
+  'engine-meta-synth.ts',
+  'engine-cvc5-sygus.ts',
+  'engine-theory-ladder.ts',
+  'engine-sygus.ts',
 ].map((f) => path.join(dir, f));
 const OUT = path.join(dir, 'dist');
 const BUILD_OUT = (() => { try { return fs.mkdtempSync(path.join(os.tmpdir(), `atomic-edit-dist-${process.pid}-`)); } catch (e) { return fs.mkdtempSync(path.join(dir, `.build-tmp-${process.pid}-`)); } })();
@@ -105,6 +113,7 @@ const REQUIRED_DIST_ARTIFACTS = [
   'server-tools-disproof.js',
   'server-tools-y.js',
   'server-tools-codex-config.js',
+  'server-tools-emergence-cycle.js',
   'engine.js',
   'engine-undo.js',
   'trace.js',

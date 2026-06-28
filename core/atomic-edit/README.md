@@ -17,7 +17,7 @@ research identifies as defective.
 | **Aider edit-format study** | Edit format materially changes model output (lazy-coding 3×, pass 26%→61%). → strict pre-write validation + preview. |
 | **Diff-XYZ / Kiro** | Fragile line offsets bad; semantic rename must come from the language service, not LLM text guessing. → `atomic_rename_symbol_cross_file` via tsconfig. |
 
-## Tools (132)
+## Tools (134)
 
 **Read (address by name, not line guess):**
 - `code_browse` — structured directory listing
@@ -82,7 +82,7 @@ node scripts/mcp/atomic-edit/audit-atomicity.mjs --json
 # pass=true, atomic_edit_ratio=1, fallback_rate=0, coarse_unjustified=0
 
 node scripts/mcp/atomic-edit/gates/mcp-tool-list-compact.proof.mjs --json
-# live list_tools evidence: 132 tools, compact schemas, no nested schema descriptions
+# live list_tools evidence: 134 tools, compact schemas, no nested schema descriptions
 
 node scripts/mcp/atomic-edit/gates/lattice-completeness.proof.ts --json
 # machine-readable coverage of 10 failure dimensions plus non-empty proof inventory
@@ -149,5 +149,5 @@ Operating guidance: `docs/ai/ATOMIC_EDIT_OPERATING_GUIDE.md`.
 - **Named declarations:** selector-based AST replacement covers named declarations (function/class/method/interface/type/var) in all grammar-backed languages.
 - Cross-file rename requires a reachable `tsconfig.json`; falls back to a directory-scoped project if none is found.
 - **Z3 formal verification:** the edit algebra's confluence theorem is machine-checked by Z3 (`formal/atomic-algebra/confluence_z3.py` + `nway_induction_z3.py`) and Lean 4 (`formal/atomic-algebra/NwayConfluence.lean`). Refinement proof cross-checks runtime against the model.
-- **294 proof entrypoints** and **360 total gate files** under `gates/` covering exec sandbox, atomic writes, bypass honesty, connection byte-floor, snapshot ceilings, formal model lifts, public package tests, multi-language supply-chain resolution, doc honesty, multi-install drift, source-tree hygiene, self-application admission, observer-path-drift, external-git workspace binding, sandbox cross-language exec, supply-chain filedir resolution, cognitive emergence, continuous emergence loop wiring, self-expansion inter-process admission lock, self-expansion pending-write overlay, semantic-memory recall at the write floor, H2 fair-harness contract, executable verdict runner, deterministic H2 experiment harness, H2 ledger bridge, clean-checkout CLI bootstrap, Atomic Agent CLI self-expansion scope, lean agent prompt discipline, green-gate diff minimization, pre-edit topology choice, text-only topology decisions, final-value merge/update canonicity, Atomic sibling MCP lens scope, LSP router JS document-language routing, atsh host-boundary fail-closed proof, and dual stdio framing for MCP hosts.
+- **296 proof entrypoints** and **362 total gate files** under `gates/` covering exec sandbox, atomic writes, bypass honesty, connection byte-floor, snapshot ceilings, formal model lifts, public package tests, multi-language supply-chain resolution, doc honesty, multi-install drift, source-tree hygiene, self-application admission, observer-path-drift, external-git workspace binding, sandbox cross-language exec, supply-chain filedir resolution, cognitive emergence, continuous emergence loop wiring, self-expansion inter-process admission lock, self-expansion pending-write overlay, semantic-memory recall at the write floor, H2 fair-harness contract, executable verdict runner, deterministic H2 experiment harness, H2 ledger bridge, clean-checkout CLI bootstrap, Atomic Agent CLI self-expansion scope, lean agent prompt discipline, green-gate diff minimization, pre-edit topology choice, text-only topology decisions, final-value merge/update canonicity, Atomic sibling MCP lens scope, LSP router JS document-language routing, atsh host-boundary fail-closed proof, and dual stdio framing for MCP hosts.
 - Product-layer tools do not magically finish integrations. They force every CLI using this MCP to name the product behavior, reject facade/stub claims, demand runtime/API/DB/browser evidence, emit a no-code receipt, and resume from repository state.

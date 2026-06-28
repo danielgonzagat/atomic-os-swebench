@@ -62,6 +62,8 @@ import { registerToolsChromeDevtools } from './server-tools-chrome-devtools.js';
 import { registerToolsAffectedTests } from './server-tools-affected-tests.js';
 import { registerToolsLessonLedger } from './server-tools-lesson-ledger.js';
 import { registerToolsMetaSynth } from './server-tools-meta-synth.js';
+import { registerToolsCapabilityGenome } from './server-tools-capability-genome.js';
+import { registerToolsEmergenceCycle } from './server-tools-emergence-cycle.js';
 
 type RegisteredToolForList = {
   title?: string;
@@ -209,6 +211,8 @@ registerToolsChromeDevtools(server);
 registerToolsAffectedTests(server);
 registerToolsLessonLedger(server);
 registerToolsMetaSynth(server);
+registerToolsCapabilityGenome(server);
+registerToolsEmergenceCycle(server);
 installCodexSafeToolList(server);
 
 async function main(): Promise<void> {
