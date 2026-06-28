@@ -6,19 +6,20 @@ import assert from 'assert';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const serverPath = path.join(__dirname, 'server.mjs');
-const repoRoot = path.resolve(__dirname, '../../..');
+const repoRoot = path.join(__dirname, `.atomic-memory-test-repo-${process.pid}`);
 
-// Clean up any existing DB/ledger first to have a clean slate
+// Keep tests hermetic: never mutate the real Atomic repo memory ledger.
+fs.rmSync(repoRoot, { recursive: true, force: true });
+fs.mkdirSync(path.join(repoRoot, '.atomic'), { recursive: true });
+
 const ledgerFile = path.join(repoRoot, '.atomic', 'semantic-memory-ledger.jsonl');
 const dbFile = path.join(repoRoot, '.atomic', 'semantic-memory.db');
-
-try { fs.unlinkSync(ledgerFile); } catch {}
-try { fs.unlinkSync(dbFile); } catch {}
 
 const proc = spawn('node', ['--experimental-sqlite', serverPath], {
   cwd: repoRoot,
   env: {
     ...process.env,
+    ATOMIC_REPO_ROOT: repoRoot,
     ATOMIC_SWARM_REPO_ROOT: repoRoot
   }
 });
@@ -51,6 +52,16 @@ proc.stdout.on('data', (data) => {
 proc.stderr.on('data', (data) => {
   console.log('SERVER LOG/STDERR:', data.toString().trim());
 });
+
+function cleanup() {
+  try { proc.stdin.end(); } catch {}
+  try {
+    if (proc.exitCode === null && proc.signalCode === null) proc.kill();
+  } catch (error) {
+    if (!['EPERM', 'ESRCH'].includes(error?.code)) console.error('Failed to stop server:', error);
+  }
+  fs.rmSync(repoRoot, { recursive: true, force: true });
+}
 
 function sendRequest(method, params) {
   return new Promise((resolve, reject) => {
@@ -130,13 +141,24 @@ async function runTests() {
   const resQ5 = JSON.parse(q5.result.content[0].text).results;
   assert(resQ5.length === 0, 'query unknown-tag should be empty');
 
+  console.log('Querying unified memory graph...');
+  const graph = await sendRequest('tools/call', {
+    name: 'memory_graph',
+    arguments: { query: 'oauth2', limit: 50 }
+  });
+  const graphObj = JSON.parse(graph.result.content[0].text);
+  assert(graphObj.ok === true, 'memory_graph ok is not true');
+  assert(/^[0-9a-f]{64}$/.test(graphObj.graphSha256), 'graphSha256 missing');
+  assert(graphObj.nodes.some((node) => node.type === 'memory' && node.verified === true), 'memory node missing');
+  assert(graphObj.edges.some((edge) => edge.type === 'mentions_file'), 'memory file edge missing');
+
   console.log('All tests PASSED!');
-  proc.kill();
+  cleanup();
   process.exit(0);
 }
 
 runTests().catch(err => {
   console.error('Test failed:', err);
-  proc.kill();
+  cleanup();
   process.exit(1);
 });

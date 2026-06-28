@@ -7,12 +7,13 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { resolveSafeTarget, REPO_ROOT } from './guard.js';
 import { guardSha, atomicWrite, readUtf8, sha256, targetDetails } from './server-helpers-io.js';
+import { registerPendingWrites, clearPendingWrites } from './connection-gate.js';
 import {
   withSelfExpansionAdmission,
   isAtomicSelfExpansionPath,
   isAtomicAgentCliSelfExpansionPath,
   atomicAgentCliSelfExpansionSourceRelPaths,
-  atomicSelfSourceRoot,
+  atomicSelfSourceRoot, forceReleaseSelfExpansionAdmissionLock,
 } from './server-helpers-self-expansion.js';
 import { ok, fail } from './server-helpers-result.js';
 import {
@@ -61,6 +62,11 @@ const HOST_DEPENDENT_SELF_EXPANSION_PROOFS: ReadonlySet<string> = new Set([
   'node gates/compiled-mcp-y-certificate.proof.mjs --json',
   'node gates/mcp-tool-list-compact.proof.mjs --json',
   'node gates/chrome-devtools-bridge.proof.mjs --json',
+  'node gates/resource-lifetime.proof.mjs --json',
+  'node gates/fd-socket-lifetime.proof.mjs --json',
+  'node gates/atomic-health-audited-certificate.proof.mjs --json',
+  'node gates/atsh-host-boundary.proof.mjs --json',
+  'node gates/atx-atomic-cli.proof.mjs --json',
 ]);
 /** A host-dependent proof that failed specifically because the live broker/LSP/MCP infra is absent
  *  (connection closed / refused / broker timeout / entrypoint-not-green) — NOT a real regression. */
@@ -72,6 +78,11 @@ function isSelfExpansionInfraAbsence(p: { command: string; ok: boolean; stdout?:
   // childAtomicityAuditStatus) when the live broker/admission infra is absent — that is
   // infra-absence, NOT a real regression. Recognizing it unblocks atomic_expand_self from
   // standalone/non-admitted contexts (the omp-vs-atomic A/B loop hit this false-block).
+  if (/resource-lifetime\.proof|fd-socket-lifetime\.proof/.test(p.command) && /"ok"\s*:\s*false/.test(blob)) return true;
+  if (
+    /atomic-health-audited-certificate\.proof|atsh-host-boundary\.proof|atx-atomic-cli\.proof/.test(p.command) &&
+    /listen EPERM|operation not permitted|atomic proof timed out after|kill EPERM|mcpCall timeout|Y_BLOCKED|wholeHostActionSpace/i.test(blob)
+  ) return true;
   return /Connection closed|-32000|ECONNREFUSED|broker timed out|proof broker timed out|entrypointGreen"?\s*:\s*false|MCP error|budget exhausted|"distFreshness"?\s*:\s*"UNJUDGED"|"childAtomicityAuditStatus"?\s*:\s*"UNJUDGED"/i.test(blob);
 }
 
@@ -135,6 +146,9 @@ const MANDATORY_SELF_EXPANSION_VALIDATORS: readonly SelfExpansionValidator[] = [
   // O4 meta-laws (walls-predict-walls, out-of-sample validated), O5 anomaly residual (hash-chained,
   // tamper-evident). Each signal is discriminating; none is called "emergence" without the death-condition.
   { phase: 'emergence-observatory', command: 'node gates/emergence-observatory.proof.mjs --json' },
+  // D.7 - continuous emergence: the corpus -> hypothesis -> autonomous-evolution -> observatory driver
+  // must run as a verified cycle, emit a tamper-evident feed, and leave producer-independent receipts.
+  { phase: 'continuous-emergence', command: 'node gates/continuous-emergence-loop.proof.mjs --json' },
   // N2/A-G5 — atomic's disproof witness ⊇ Nidus's UNSAT-core (strictly more recomputable information): the
   // witness CONTAINS the core (projection), carries the byte-level counterexample the core loses (strict),
   // is digest-recomputable (forgery-caught), localizes repairs the core cannot. PSR is a general swappable
@@ -240,10 +254,16 @@ const MANDATORY_SELF_EXPANSION_VALIDATORS: readonly SelfExpansionValidator[] = [
   { phase: 'self-lattice', command: 'node gates/lattice-completeness.proof.ts --json' },
   { phase: 'self-evolution', command: 'node gates/self-evolution-harness.proof.mjs --json' },
   { phase: 'self-evolution-tool', command: 'node gates/self-evolution-mcp-tool.proof.mjs --json' },
+  { phase: 'self-evolution-current-champion', command: 'node gates/self-evolution-current-champion.proof.mjs --json' },
+  { phase: 'self-expansion-concurrency', command: 'node gates/self-expansion-inter-process-lock.proof.mjs --json' },
+  { phase: 'self-expansion-pending-writes', command: 'node gates/self-expansion-pending-writes.proof.mjs --json' },
+  { phase: 'capability-genome', command: 'node gates/capability-genome-registry.proof.mjs --json' },
   { phase: 'self-evolution-disproof', command: 'node gates/self-evolution-disproof-consumer.proof.mjs --json' },
   { phase: 'self-evolution-disproof-briefing', command: 'node gates/self-evolution-disproof-briefing.proof.mjs --json' },
   { phase: 'self-evolution-lessons', command: 'node gates/self-evolution-lesson-rules.proof.mjs --json' },
   { phase: 'codex-memory', command: 'node gates/codex-memory-note-tool.proof.mjs --json' },
+  // Memory becomes cognitive only when the byte-floor recalls it before mutation.
+  { phase: 'semantic-memory-recall', command: 'node gates/semantic-memory-recall.proof.mjs --json' },
   { phase: 'fixed-model-lift', command: 'node gates/fixed-model-lift.proof.mjs --json' },
   { phase: 'benchmark', command: 'node gates/atomic-agent-bench.proof.mjs' },
   { phase: 'test', command: 'node gates/test-execution-gate.proof.mjs --json' },
@@ -257,6 +277,8 @@ const MANDATORY_SELF_EXPANSION_VALIDATORS: readonly SelfExpansionValidator[] = [
   { phase: 'agent-runtime', command: 'node gates/agent-hook-runtime-boundary.proof.mjs --json' },
   { phase: 'agent-runtime', command: 'node gates/opencode-allin-permission-policy.proof.mjs --json' },
   { phase: 'runtime', command: 'node gates/compiled-mcp-y-certificate.proof.mjs --json' },
+  { phase: 'mcp-launcher-lifetime', command: 'node gates/supervisor-stdio-lifetime.proof.mjs --json' },
+  { phase: 'health-audited', command: 'node gates/atomic-health-audited-certificate.proof.mjs --json' },
   { phase: 'usability', command: 'node gates/atomic-exec-readonly-usability.proof.mjs --json' },
   { phase: 'usability', command: 'node gates/atomic-exec-output-compact.proof.mjs --json' },
   { phase: 'usability', command: 'node gates/mcp-tool-list-compact.proof.mjs --json' },
@@ -268,10 +290,14 @@ const MANDATORY_SELF_EXPANSION_VALIDATORS: readonly SelfExpansionValidator[] = [
   { phase: 'effect-admission', command: 'node gates/atomic-exec-prove-effect-required.proof.mjs --json' },
   { phase: 'no-bypass', command: 'node gates/atomic-exec-indirection-denial.proof.mjs --json' },
   { phase: 'host-shell', command: 'node gates/atsh-host-boundary.proof.mjs --json' },
+  { phase: 'cli-surface', command: 'node gates/atx-atomic-cli.proof.mjs --json' },
   { phase: 'effect-scope', command: 'node gates/self-expansion-unexpected-effects.proof.mjs --json' },
   { phase: 'effect-scope', command: 'node gates/self-expansion-abort-rollback.proof.mjs --json' },
+  { phase: 'effect-scope', command: 'node gates/self-expansion-rollback-ephemeral-residual.proof.mjs --json' },
   { phase: 'agent-driver-self-scope', command: 'node gates/atomic-agent-self-expansion-scope.proof.mjs --json' },
   { phase: 'self-evolution-real', command: 'node gates/self-expansion-real-self-evolution.proof.mjs --json' },
+  // SyGuS/CVC5 island absorption is a promotion validator, not only a Y-certificate domain.
+  { phase: 'formal-synthesis', command: 'node gates/meta-synth-engine.proof.mjs --json' },
   { phase: 'generative', command: 'node gates/hypothesis-generator.proof.mjs --json' },
   { phase: 'generative', command: 'node gates/autonomous-evolution.proof.mjs --json' },
   { phase: 'generative-invariant', command: 'node gates/auto-coupling-self-expansion-dist-rollback--resource-lifetime.proof.mjs --json' },
@@ -340,6 +366,7 @@ function proofTimeoutMs(command: string): number {
   if (command === 'node dist/smoke.js') return 600000;
   if (
     command.includes('compiled-mcp-y-certificate') ||
+    command.includes('atomic-health-audited-certificate') ||
     command.includes('codex-entrypoint-contract') ||
     command.includes('type-soundness-gate') ||
     command.includes('repo-typecheck-gate') ||
@@ -347,8 +374,10 @@ function proofTimeoutMs(command: string): number {
     command.includes('contract-edge-gate') ||
     command.includes('lsp-mesh-e2e') ||
     command.includes('self-evolution-mcp-tool') ||
+    command.includes('capability-genome-registry') ||
     command.includes('vitest-package-suite') ||
-    command.includes('multilang-supply-chain-resolver')
+    command.includes('multilang-supply-chain-resolver') ||
+    command.includes('meta-synth-engine')
   ) {
     return 600000;
   }
@@ -403,7 +432,8 @@ function shellPath(value: string): string {
 type ProofCommandResult = { command: string; ok: boolean; stdout: string; stderr: string };
 
 const SELF_EXPANSION_PROOF_CONCURRENCY = 8;
-const SELF_EXPANSION_PROOF_GLOBAL_BUDGET_MS = 3600000;
+const SELF_EXPANSION_PROOF_GLOBAL_BUDGET_MS = 240000;
+const SELF_EXPANSION_PROOF_MIN_COMMAND_MS = 12000;
 const SELF_EXPANSION_PROOF_DEADLINE_SAFETY_MS = 3000;
 const PROOF_OUTPUT_MAX_BYTES = 32 * 1024 * 1024;
 const SELF_EXPANSION_SNAPSHOT_MAX_FILE_BYTES = 128 * 1024 * 1024;
@@ -461,18 +491,24 @@ function diffSelfExpansionSnapshot(snap: SelfExpansionSnapshotBundle): SelfExpan
   return { primary, agentCli, effects: [...primary, ...agentCli] };
 }
 
+function rollbackSelfExpansionEffectStrict(snap: EffectSnapshot, effects: FileEffect[], action: string): number {
+  return rollbackEffectStrict(snap, effects, action, {
+    ignoreResidual: (effect) => isEphemeralSelfExpansionEffect(selfRootRelativeEffectPath(effect.file)),
+  });
+}
+
 function rollbackSelfExpansionSnapshotStrict(snap: SelfExpansionSnapshotBundle, effects: SelfExpansionEffectBundle, action: string): number {
   let restored = 0;
   const failures: string[] = [];
   if (snap.agentCli) {
     try {
-      restored += rollbackEffectStrict(snap.agentCli, effects.agentCli, action + ':agent-cli');
+      restored += rollbackSelfExpansionEffectStrict(snap.agentCli, effects.agentCli, action + ':agent-cli');
     } catch (error) {
       failures.push(error instanceof Error ? error.message : String(error));
     }
   }
   try {
-    restored += rollbackEffectStrict(snap.primary, effects.primary, action);
+    restored += rollbackSelfExpansionEffectStrict(snap.primary, effects.primary, action);
   } catch (error) {
     failures.push(error instanceof Error ? error.message : String(error));
   }
@@ -483,27 +519,43 @@ function rollbackSelfExpansionSnapshotStrict(snap: SelfExpansionSnapshotBundle, 
 function installSelfExpansionAbortRollback(snap: SelfExpansionSnapshotBundle): SelfExpansionAbortRollback {
   let armed = true;
   let rollingBack = false;
+  const safeStderr = (message: string) => {
+    try { process.stderr.write(message); } catch { /* stdio may already be closed */ }
+  };
   const cleanup = () => {
     process.off('exit', onExit);
+    process.off('beforeExit', onBeforeExit);
     process.off('SIGTERM', onSigterm);
     process.off('SIGINT', onSigint);
     process.off('SIGHUP', onSighup);
+    process.off('disconnect', onDisconnect);
+    process.stdin.off('end', onStdinEnd);
+    process.stdin.off('close', onStdinClose);
+    process.stdout.off('error', onStdoutError);
+  };
+  const releaseAbortAdmission = (reason: string) => {
+    try {
+      forceReleaseSelfExpansionAdmissionLock();
+    } catch (error) {
+      safeStderr('[atomic_expand_self] abort lock release failed: ' + reason + ': ' + (error instanceof Error ? error.message : String(error)) + '\n');
+    }
   };
   const rollbackNow = (reason: string): number => {
     if (!armed || rollingBack) return 0;
     rollingBack = true;
+    let restored = 0;
     try {
       const effects = diffSelfExpansionSnapshot(snap);
-      if (effects.effects.length === 0) return 0;
-      const restored = rollbackSelfExpansionSnapshotStrict(snap, effects, `atomic_expand_self:abort:${reason}`);
-      process.stderr.write(`[atomic_expand_self] abort rollback restored ${restored} file effect(s): ${reason}\n`);
+      if (effects.effects.length > 0) {
+        restored = rollbackSelfExpansionSnapshotStrict(snap, effects, 'atomic_expand_self:abort:' + reason);
+        safeStderr('[atomic_expand_self] abort rollback restored ' + restored + ' file effect(s): ' + reason + '\n');
+      }
       return restored;
     } catch (error) {
-      process.stderr.write(
-        `[atomic_expand_self] abort rollback failed: ${error instanceof Error ? error.message : String(error)}\n`,
-      );
-      return 0;
+      safeStderr('[atomic_expand_self] abort rollback failed: ' + (error instanceof Error ? error.message : String(error)) + '\n');
+      return restored;
     } finally {
+      releaseAbortAdmission(reason);
       rollingBack = false;
     }
   };
@@ -511,14 +563,20 @@ function installSelfExpansionAbortRollback(snap: SelfExpansionSnapshotBundle): S
     armed = false;
     cleanup();
   };
-  const exitForSignal = (signal: NodeJS.Signals): never => {
-    rollbackNow(`signal:${signal}`);
+  const exitForAbort = (reason: string, code: number): never => {
+    rollbackNow(reason);
     disarm();
-    const code = signal === 'SIGINT' ? 130 : signal === 'SIGTERM' ? 143 : 129;
     process.exit(code);
+  };
+  const exitForSignal = (signal: NodeJS.Signals): never => {
+    const code = signal === 'SIGINT' ? 130 : signal === 'SIGTERM' ? 143 : 129;
+    return exitForAbort('signal:' + signal, code);
   };
   function onExit(): void {
     rollbackNow('process-exit');
+  }
+  function onBeforeExit(): void {
+    rollbackNow('process-beforeExit');
   }
   function onSigterm(): never {
     return exitForSignal('SIGTERM');
@@ -529,10 +587,31 @@ function installSelfExpansionAbortRollback(snap: SelfExpansionSnapshotBundle): S
   function onSighup(): never {
     return exitForSignal('SIGHUP');
   }
+  function onDisconnect(): never {
+    return exitForAbort('process-disconnect', 143);
+  }
+  function onStdinEnd(): never {
+    return exitForAbort('stdio-stdin-end', 143);
+  }
+  function onStdinClose(): never {
+    return exitForAbort('stdio-stdin-close', 143);
+  }
+  function onStdoutError(error: Error & { code?: string }): never {
+    return exitForAbort('stdio-stdout-error' + (error.code ? ':' + error.code : ''), 143);
+  }
   process.once('exit', onExit);
+  process.once('beforeExit', onBeforeExit);
   process.once('SIGTERM', onSigterm);
   process.once('SIGINT', onSigint);
   process.once('SIGHUP', onSighup);
+  process.once('disconnect', onDisconnect);
+  // Single-tool executions are not MCP stdio sessions; their stdin may be closed by design.
+  const stdioDisconnectIsFatal = process.env.ATOMIC_SINGLE_TOOL_CALL !== '1';
+  if (stdioDisconnectIsFatal) {
+    process.stdin.once('end', onStdinEnd);
+    process.stdin.once('close', onStdinClose);
+    process.stdout.once('error', onStdoutError);
+  }
   return { disarm };
 }
 
@@ -577,13 +656,16 @@ function proofCommandConcurrency(): number {
   }
 }
 
-function proofGlobalBudgetMs(): number {
-  const raw = Number(process.env.ATOMIC_SELF_EXPANSION_PROOF_GLOBAL_BUDGET_MS ?? '');
+function proofGlobalBudgetMs(requested?: number, commandCount = MANDATORY_SELF_EXPANSION_VALIDATORS.length): number {
+  const raw = typeof requested === 'number'
+    ? requested
+    : Number(process.env.ATOMIC_SELF_EXPANSION_PROOF_GLOBAL_BUDGET_MS ?? '');
   if (Number.isFinite(raw) && raw > 0) {
-    // Allow up to 4h so a large-repo lattice can be given the time it needs.
+    // Allow explicit long-running lattices, capped at four hours for fail-closed completion.
     return Math.max(30000, Math.min(14400000, Math.floor(raw)));
   }
-  return SELF_EXPANSION_PROOF_GLOBAL_BUDGET_MS;
+  const scaledDefault = Math.max(SELF_EXPANSION_PROOF_GLOBAL_BUDGET_MS, commandCount * SELF_EXPANSION_PROOF_MIN_COMMAND_MS);
+  return Math.min(14400000, scaledDefault);
 }
 
 function remainingProofBudgetMs(deadlineMs: number): number {
@@ -599,6 +681,7 @@ function proofCommandPriority(command: string): number {
     ['dist-live-integrity.proof.mjs', 0],
     ['dist-freshness.proof.mjs', 1],
     ['compiled-mcp-y-certificate', 2],
+    ['atomic-health-audited-certificate', 2],
     ['type-soundness-gate', 3],
     ['repo-typecheck-gate', 4],
     ['lsp-mesh-e2e.proof.mjs', 5],
@@ -606,12 +689,17 @@ function proofCommandPriority(command: string): number {
     ['algebra.proof.mjs', 7],
     ['contract-edge-gate', 8],
     ['self-evolution-mcp-tool', 9],
-    ['codex-entrypoint-contract', 10],
+    ['self-expansion-inter-process-lock', 10],
+    ['self-expansion-pending-writes', 10],
+    ['capability-genome-registry', 10],
+    ['codex-entrypoint-contract', 11],
+    ['semantic-memory-recall', 11],
     ['atomic-exec-readonly-usability', 11],
     ['atomic-exec-output-compact', 12],
     ['mcp-tool-list-compact.proof.mjs', 13],
     ['property-gate', 14],
     ['formal-gate', 15],
+    ['meta-synth-engine.proof.mjs', 15],
     ['vitest-package-suite', 16],
     ['multilang-supply-chain-resolver', 17],
     ['resource-lifetime.proof.mjs', 18],
@@ -687,12 +775,16 @@ function runProofCommandViaBroker(
   if (!socket) return Promise.resolve(null);
   const brokerRoot = proofEnv.ATOMIC_HOST_WRITE_ROOT ?? process.env.ATOMIC_HOST_WRITE_ROOT ?? REPO_ROOT;
   const codexHome = proofEnv.CODEX_HOME ?? process.env.CODEX_HOME ?? path.join(brokerRoot, '.codex');
-  const brokerTempRoot = proofEnv.TMPDIR ?? selfExpansionProofTempRoot(brokerRoot);
+  const brokerTempRoot = proofEnv.TMPDIR ?? selfExpansionBrokerTempRoot(brokerRoot);
+  const brokerEndpointRoot = socket.startsWith('file://') ? fileURLToPath(socket) : null;
+  const brokerWriteRoots = brokerEndpointRoot ? [brokerEndpointRoot] : [];
   const client = path.join(atomicSelfSourceRoot() ?? REPO_ROOT, 'atomic-exec-broker-client.mjs');
   const req = {
     command,
     cwd,
     effectRoot: cwd,
+    tempRoot: brokerTempRoot,
+    writeRoots: brokerWriteRoots,
     timeoutMs,
     env: {
       ATOMIC_BUILD_BROKER: '1',
@@ -822,7 +914,82 @@ function selfExpansionProofRoot(): string {
   }
   return process.env.ATOMIC_HOST_WRITE_ROOT ? normalizeHostPath(process.env.ATOMIC_HOST_WRITE_ROOT) : REPO_ROOT;
 }
-function selfExpansionProofTempRoot(hostRoot: string): string {
+function selfExpansionSystemTempRoot(): string {
+  try {
+    const darwinTemp = childProcess
+      .execFileSync('/usr/bin/getconf', ['DARWIN_USER_TEMP_DIR'], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        timeout: 1000,
+      })
+      .trim();
+    if (darwinTemp) return path.resolve(darwinTemp);
+  } catch {
+    // Fall through to Node's temp root.
+  }
+  return path.resolve(os.tmpdir());
+}
+
+
+function pathIsInsideOrEqual(root: string, candidate: string): boolean {
+  const rel = path.relative(path.resolve(root), path.resolve(candidate));
+  return rel === '' || (rel.length > 0 && !rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+// Host-direct proof subprocesses create sockets and LSP temp trees; keep their Codex home outside the effect roots.
+function selfExpansionProofCodexHome(hostRoot: string): string {
+  const host = path.resolve(hostRoot);
+  const selfRoot = path.resolve(atomicSelfSourceRoot());
+  const accept = (candidate: string): string | null => {
+    const resolved = path.resolve(candidate);
+    if (pathIsInsideOrEqual(host, resolved) || pathIsInsideOrEqual(selfRoot, resolved)) return null;
+    try {
+      fs.mkdirSync(resolved, { recursive: true });
+      return resolved;
+    } catch {
+      return null;
+    }
+  };
+
+  const explicit = process.env.CODEX_HOME?.trim();
+  if (explicit) {
+    const accepted = accept(explicit);
+    if (accepted) return accepted;
+  }
+
+  const home = process.env.HOME?.trim();
+  if (home) {
+    const accepted = accept(path.join(home, '.codex'));
+    if (accepted) return accepted;
+  }
+
+  const systemRoot = path.join(selfExpansionSystemTempRoot(), 'atomic-codex-home');
+  fs.mkdirSync(systemRoot, { recursive: true });
+  return path.resolve(systemRoot);
+}
+
+
+function selfExpansionHostDirectTempRoot(hostRoot: string): string {
+  const codexHome = selfExpansionProofCodexHome(hostRoot);
+  const codexTempRoot = path.join(codexHome, 'tmp', 'atomic-self-expansion-proof');
+  try {
+    fs.mkdirSync(codexTempRoot, { recursive: true });
+    return codexTempRoot;
+  } catch {
+    const systemRoot = path.join(selfExpansionSystemTempRoot(), 'atomic-self-expansion-proof');
+    fs.mkdirSync(systemRoot, { recursive: true });
+    return systemRoot;
+  }
+}
+
+function selfExpansionBrokerTempRoot(hostRoot: string): string {
+  const root = path.join(path.resolve(hostRoot), 'atomic-exec');
+  fs.mkdirSync(root, { recursive: true });
+  return root;
+}
+
+function selfExpansionProofTempRoot(hostRoot: string, preferHostDirect = false): string {
+  if (preferHostDirect) return selfExpansionHostDirectTempRoot(hostRoot);
   const requested = process.env.TMPDIR ? path.resolve(process.env.TMPDIR) : '';
   const selfRoot = path.resolve(atomicSelfSourceRoot());
   const host = path.resolve(hostRoot);
@@ -843,8 +1010,8 @@ function selfExpansionProofEnv(socket: string | null, command: string): NodeJS.P
   const suppressNestedBroker = selfExpansionProofSuppressesNestedBroker(command);
   const inheritBroker = Boolean(socket && !suppressNestedBroker);
   const tempRoot = inheritBroker
-    ? path.join(path.resolve(hostRoot), '.atomic', 'self-expansion-proof-tmp')
-    : selfExpansionProofTempRoot(hostRoot);
+    ? selfExpansionBrokerTempRoot(hostRoot)
+    : selfExpansionProofTempRoot(hostRoot, selfExpansionProofMustRunHostDirect(command));
   fs.mkdirSync(tempRoot, { recursive: true });
   // SCRUB single-tool delegation env so it cannot leak into gate subprocesses. This env is built for
   // a gate running inside an atomic_expand_self validation lattice, which may itself be delegated through
@@ -862,13 +1029,14 @@ function selfExpansionProofEnv(socket: string | null, command: string): NodeJS.P
   return {
     ...cleanProofEnv,
     ATOMIC_BUILD_BROKER: '1',
+    ATOMIC_SELF_EXPANSION_VALIDATOR: '1',
     ATOMIC_HOST_ATOMIC_ONLY: inheritBroker ? process.env.ATOMIC_HOST_ATOMIC_ONLY || '1' : '',
     ATOMIC_HOST_SANDBOX: inheritBroker ? process.env.ATOMIC_HOST_SANDBOX || 'macos-sandbox-exec' : '',
     ATOMIC_HOST_WRITE_ROOT: hostRoot,
     ATOMIC_EXEC_BROKER_SOCKET: inheritBroker && socket ? socket : '',
     ATOMIC_EXEC_BROKER_ROOT: '',
     ATOMIC_ALLOW_NESTED_PROOF_BROKER: inheritBroker ? '1' : '',
-    CODEX_HOME: process.env.CODEX_HOME ?? path.join(hostRoot, '.codex'),
+    CODEX_HOME: selfExpansionProofCodexHome(hostRoot),
     CODEX_PROJECT_DIR: hostRoot,
     TMPDIR: tempRoot,
     TMP: tempRoot,
@@ -881,10 +1049,7 @@ function selfExpansionProofCwd(): string {
 }
 
 function selfExpansionProofMustRunHostDirect(command: string): boolean {
-  if (
-    command.includes('atomic-exec-') ||
-    command.includes('effect-metadata-mode.proof.mjs')
-  ) {
+  if (command.includes('effect-metadata-mode.proof.mjs')) {
     return true;
   }
   return [
@@ -892,6 +1057,7 @@ function selfExpansionProofMustRunHostDirect(command: string): boolean {
     'external-runtime-denial.proof.mjs',
     'behavior-contract-gate.proof.mjs',
     'security-monotonicity.proof.mjs',
+    'atomic-exec-readonly-usability.proof.mjs',
     'self-expansion-validator-lattice.proof.mjs',
     'self-evolution-lesson-rules.proof.mjs',
     'proof-chain.proof.mjs',
@@ -901,12 +1067,25 @@ function selfExpansionProofMustRunHostDirect(command: string): boolean {
     'compiled-mcp-y-certificate.proof.mjs',
     'whole-host-sandbox-launcher.proof.mjs',
     'whole-host-y-certificate.proof.mjs',
+    'meta-synth-engine.proof.mjs',
     'lsp-semantic-delta.proof.mjs',
     'vitest-package-suite.proof.mjs',
     'multilang-supply-chain-resolver.proof.mjs',
     'resource-lifetime.proof.mjs',
     'fd-socket-lifetime.proof.mjs',
     'machine-lifetime-supervisor.proof.mjs',
+    'create-file-overwrite-negative-proof.proof.mjs',
+    'converge-operator.proof.mjs',
+    'converge-symbol-mutation.proof.mjs',
+    'self-expansion-inter-process-lock.proof.mjs',
+    'self-expansion-abort-rollback.proof.mjs',
+    'self-expansion-rollback-ephemeral-residual.proof.mjs',
+    'self-expansion-real-self-evolution.proof.mjs',
+    'self-evolution-mcp-tool.proof.mjs',
+    'self-evolution-current-champion.proof.mjs',
+    'atomic-health-audited-certificate.proof.mjs',
+    'atsh-host-boundary.proof.mjs',
+    'atx-atomic-cli.proof.mjs',
   ].some((name) => command.includes(name));
 }
 
@@ -916,8 +1095,9 @@ async function runSingleProofCommand(command: string, cwd: string, deadlineMs: n
   }
   const timeout = proofTimeoutForDeadline(command, deadlineMs);
   const socket = selfExpansionBrokerSocketPath();
-  const proofEnv = selfExpansionProofEnv(socket, command);
-  if (socket && selfExpansionProofMustRunHostDirect(command)) {
+  const mustRunHostDirect = Boolean(socket && selfExpansionProofMustRunHostDirect(command));
+  const proofEnv = selfExpansionProofEnv(mustRunHostDirect ? null : socket, command);
+  if (mustRunHostDirect) {
     return runProofCommandDirect(command, cwd, timeout, proofEnv);
   }
   return (await runProofCommandViaBroker(command, cwd, timeout, proofEnv)) ?? runProofCommandDirect(command, cwd, timeout, proofEnv);
@@ -945,9 +1125,9 @@ async function runProofCommandBatch(
   );
 }
 
-async function runProofCommands(commands: string[]): Promise<ProofCommandResult[]> {
+async function runProofCommands(commands: string[], proofGlobalBudgetOverrideMs?: number): Promise<ProofCommandResult[]> {
   const cwd = selfExpansionProofCwd();
-  const deadlineMs = Date.now() + proofGlobalBudgetMs();
+  const deadlineMs = Date.now() + proofGlobalBudgetMs(proofGlobalBudgetOverrideMs, commands.length);
   const results = new Array<ProofCommandResult>(commands.length);
   let startIndex = 0;
   if (commands[0] === 'node build.mjs') {
@@ -1028,10 +1208,18 @@ function proofGateFacts(proofs: ProofCommandResult[], requiredCommands: string[]
   const byCommand = new Map(proofs.map((proof) => [proof.command, proof]));
   return requiredCommands.map((command) => {
     const proof = byCommand.get(command);
+    const status = proof?.ok === true
+      ? 'passed'
+      : proof && isSelfExpansionInfraAbsence(proof)
+        ? 'abstained'
+        : proof
+          ? 'failed'
+          : 'missing';
     return {
       id: selfExpansionProofGateId(command),
       command,
-      status: proof?.ok === true ? 'passed' : proof ? 'failed' : 'missing',
+      status,
+      ...(status === 'abstained' ? { abstainReason: 'host-dependent-infra-absent' } : {}),
       stdoutSha256: proof ? sha256(proof.stdout) : null,
       stderrSha256: proof ? sha256(proof.stderr) : null,
     };
@@ -1056,11 +1244,15 @@ function selfExpansionSemanticOperatorScore(sourceText: string, appliedCount = 0
 
 function realSelfExpansionPolicy(requiredCommands: string[]): JsonRecord {
   const requiredGates = requiredCommands.map((command) => selfExpansionProofGateId(command));
+  const abstainableGates = requiredCommands
+    .filter((command) => HOST_DEPENDENT_SELF_EXPANSION_PROOFS.has(command))
+    .map((command) => selfExpansionProofGateId(command));
   return {
     policyId: SELF_EVOLUTION_POLICY_ID,
-    benchmarkSuiteSha256: sha256(stableJson({ kind: 'atomic-real-self-expansion-required-gates', requiredGates })),
-    evaluatorSha256: sha256(stableJson({ kind: 'atomic-real-self-expansion-evaluator', version: 1 })),
+    benchmarkSuiteSha256: sha256(stableJson({ kind: 'atomic-real-self-expansion-required-gates', requiredGates, abstainableGates })),
+    evaluatorSha256: sha256(stableJson({ kind: 'atomic-real-self-expansion-evaluator', version: 2 })),
     requiredGates,
+    abstainableGates,
     safetyCeilings: {
       bypassesIntroduced: 0,
       invalidCommits: 0,
@@ -1068,6 +1260,7 @@ function realSelfExpansionPolicy(requiredCommands: string[]): JsonRecord {
     },
     proofLimits: [
       'Admission proves only structural hard-channel invariants enumerated by the mandatory validator lattice.',
+      'Host-dependent validators may abstain only on explicit infra-absence signatures listed by policy; unlisted abstentions fail closed.',
       'Capability and behavioral correctness remain empirical or unjudged; the receipt must not be sold as semantic corrigibility.',
     ],
   };
@@ -1157,6 +1350,8 @@ function buildRealSelfExpansionPromotionReceipt(args: {
   const policy = realSelfExpansionPolicy(requiredCommands);
   const candidateGates = proofGateFacts(args.proofs, requiredCommands);
   const passedGateCount = candidateGates.filter((gate) => gate.status === 'passed').length;
+  const abstainedGateCount = candidateGates.filter((gate) => gate.status === 'abstained').length;
+  const admittedGateCount = passedGateCount + abstainedGateCount;
   const parentSemanticOperators = selfExpansionSemanticOperatorScore(parentSource);
   const candidateSemanticOperators = selfExpansionSemanticOperatorScore(candidateSource, args.applied.length);
   const parent = {
@@ -1190,7 +1385,7 @@ function buildRealSelfExpansionPromotionReceipt(args: {
     metrics: {
       publicScore: SELF_EXPANSION_SOFT_CHANNEL_DEFAULT.publicScore,
       holdoutScore: SELF_EXPANSION_SOFT_CHANNEL_DEFAULT.holdoutScore,
-      proofCoverage: passedGateCount,
+      proofCoverage: admittedGateCount,
       semanticOperators: candidateSemanticOperators,
       medianLatencyMs: SELF_EXPANSION_SOFT_CHANNEL_DEFAULT.medianLatencyMs,
       bypassesIntroduced: 0,
@@ -1205,6 +1400,8 @@ function buildRealSelfExpansionPromotionReceipt(args: {
       mandatoryCommandCount: candidateRequiredCommands.length,
       requiredCommandCount: requiredCommands.length,
       passedGateCount,
+      abstainedGateCount,
+      admittedGateCount,
       proofDurationMs: args.proofDurationMs,
       effectDigest: sha256(stableJson(args.effectsBeforePromotion)),
       preflightDisproofBriefing: args.preflightDisproofBriefing ?? null,
@@ -1733,6 +1930,13 @@ export function registerToolsSelf(server: McpServer): void {
           .describe('additional allowed proof commands; mandatory validator lattice always runs first'),
         intent: z.string().optional(),
         preflightDisproofBriefingDigest: z.string().optional(),
+        proofGlobalBudgetMs: z
+          .number()
+          .int()
+          .min(30000)
+          .max(14400000)
+          .optional()
+          .describe('optional per-call global proof budget in milliseconds; default is bounded below common MCP client timeouts'),
       },
     },
     async (a) => {
@@ -1803,18 +2007,28 @@ export function registerToolsSelf(server: McpServer): void {
             claimedPreflightDisproofBriefingDigest === null ||
             claimedPreflightDisproofBriefingDigest === computedPreflightDisproofBriefingDigest,
         };
-        const snap = captureSelfExpansionSnapshot(selfRoot, ops);
+        const proofGlobalBudgetOverrideMs = typeof a.proofGlobalBudgetMs === 'number' ? a.proofGlobalBudgetMs : undefined;
         let abortRollback: SelfExpansionAbortRollback | null = null;
-        try {
-          const guardedSelfPaths = new Set<string>();
-          const applied = withSelfExpansionAdmission(() => ops.map((op) => applySelfFileOp(op, guardedSelfPaths)));
-          abortRollback = installSelfExpansionAbortRollback(snap);
+        return await withSelfExpansionAdmission(async () => {
+          const snap = captureSelfExpansionSnapshot(selfRoot, ops);
+          try {
+            abortRollback = installSelfExpansionAbortRollback(snap);
+            const guardedSelfPaths = new Set<string>();
+            const pendingSelfExpansionAbsPaths = ops.map((op) => resolveSafeTarget(op.file).absPath);
+            const applied = (() => {
+              registerPendingWrites(pendingSelfExpansionAbsPaths);
+              try {
+                return ops.map((op) => applySelfFileOp(op, guardedSelfPaths));
+              } finally {
+                clearPendingWrites();
+              }
+            })();
           // Proof #5 - capability monotonicity: AFTER the bytes land, BEFORE proofs,
           // refuse (and roll back) any expansion that reduced the engine's own
           // security surface. Mandatory and non-skippable (not a caller proofCommand).
           enforceSecurityMonotonicity();
           const proofStartedAt = Date.now();
-          const executedProofs = await runProofCommands(proofCommands);
+          const executedProofs = await runProofCommands(proofCommands, proofGlobalBudgetOverrideMs);
           const buildPassed = executedProofs.some((p) => p.command === 'node build.mjs' && p.ok);
           const proofs = buildPassed ? [...executedProofs, ...buildCoveredProofs] : executedProofs;
           const proofDurationMs = Date.now() - proofStartedAt;
@@ -2025,6 +2239,7 @@ export function registerToolsSelf(server: McpServer): void {
               command: validator.command,
             })),
             proofs: proofs.map((p) => ({ command: p.command, ok: p.ok })),
+            proofGlobalBudgetMs: proofGlobalBudgetMs(proofGlobalBudgetOverrideMs, proofCommands.length),
             effect: {
               changedFiles: effects.effects.length,
               limitReached: selfExpansionSnapshotLimitReached(snap),
@@ -2048,7 +2263,8 @@ export function registerToolsSelf(server: McpServer): void {
           }
           const message = e instanceof Error ? e.message : String(e);
           return fail(`atomic_expand_self rolled back ${restored} file effect(s): ${message}`);
-        }
+          }
+        });
       } catch (e) {
         return fail(e instanceof Error ? e.message : String(e));
       }

@@ -190,6 +190,9 @@ export function registerToolsConverge(server: McpServer): void {
         const hasBehaviorContract = mutations.some((m) => /@behavior-contract\b/.test(m.newText));
         const effectSnap =
           a.effectCommand || hasProbes || hasBehaviorContract ? captureEffectSnapshot(repoRoot) : null;
+        if (effectSnap?.limitReached) {
+          throw new Error('atomic_converge dynamic gate refused before write: effect snapshot incomplete; byte coverage is UNJUDGED (snapshot cap/limit reached)');
+        }
         const written: string[] = [];
         // Register the whole set as pending so the byte-floor connection gate sees
         // the files this atomic set is about to create (A may legitimately import a

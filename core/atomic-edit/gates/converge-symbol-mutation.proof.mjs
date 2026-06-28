@@ -46,12 +46,11 @@ function parseToolResult(result) {
 }
 
 function safeExternalTmpRoot() {
-  const tmp = path.resolve(os.tmpdir());
-  const source = path.resolve(sourceDir);
-  const repo = path.resolve(repoRoot);
-  const insideSource = tmp === source || tmp.startsWith(source + path.sep);
-  const insideRepo = tmp === repo || tmp.startsWith(repo + path.sep);
-  return insideSource || insideRepo ? fs.realpathSync('/tmp') : tmp;
+  // FASE-0 unfreeze: trust the proof TMPDIR. Under atomic_expand_self the broker
+  // sandbox sets TMPDIR to a repo-internal, sandbox-writable .atomic proof dir;
+  // escaping to /private/tmp there is DENIED (EPERM) and was the converge-symbol
+  // RED. Standalone/host-direct runs keep os.tmpdir() (writable without a sandbox).
+  return path.resolve(os.tmpdir());
 }
 
 function sourceAssertions() {
@@ -75,6 +74,11 @@ function sourceAssertions() {
       converge.includes('convergeStatic(repoRoot, mutations)') &&
       converge.includes('targetUnit: t.targetUnit') &&
       converge.includes('inlinePreview: t.inlinePreview'),
+    convergeRefusesIncompleteDynamicSnapshotBeforeWrite:
+      converge.includes('effectSnap?.limitReached') &&
+      converge.includes('atomic_converge dynamic gate refused before write') &&
+      converge.indexOf('effectSnap?.limitReached') > converge.indexOf('const effectSnap =') &&
+      converge.indexOf('effectSnap?.limitReached') < converge.indexOf('for (const t of targets) {'),
   };
 }
 

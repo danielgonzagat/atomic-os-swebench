@@ -20,6 +20,7 @@ import securityGate from './gates/security-gate.js';
 import { makeContext, type GateModule } from './gates/contract.js';
 import { assertSelfExpansionAdmission, atomicSelfSourceRoot } from './server-helpers-self-expansion.js';
 import { recordEmergenceEvent } from './emergence-feed.js';
+import { recallSemanticMemory } from './server-helpers-semantic-memory.js';
 // ── self-improving Gate Lattice (GAP #2) — the ADMITTED registry gates, run additively at the byte floor ──
 // The frozen SYNC_WRITE_GATES above are atomic's BUILT-IN floor. The lattice lets
 // the system self-extend that floor: a gate detected from the "all-gates-passed vs
@@ -197,6 +198,13 @@ export function atomicWrite(absPath: string, content: string): void {
   const relPath = path.relative(repoRoot, absPath).split(path.sep).join('/');
   assertIntentMutationAllowed(absPath, 'atomicWrite');
   assertSelfExpansionAdmission(repoRoot, absPath, content);
+  let priorBytes = '';
+  try {
+    priorBytes = fs.existsSync(absPath) && fs.statSync(absPath).isFile() ? fs.readFileSync(absPath, 'utf8') : '';
+  } catch {
+    priorBytes = ''; // unreadable prior -> treat as new file (every fact is this write's claim)
+  }
+  const semanticMemoryRecall = recallSemanticMemory(repoRoot, relPath, priorBytes, content);
   const multiFileInFlight = pendingWriteCount() > 1;
   const syncVerdict = runSyncWriteGatesAt(repoRoot, relPath, content);
   for (const r of syncVerdict.reds) {
@@ -225,12 +233,6 @@ export function atomicWrite(absPath: string, content: string): void {
   // disk bytes as `before`, so it judges only the wire/scheme/contract THIS write
   // introduces. Additive: an empty/absent registry runs zero gates (a transparent
   // no-op); a red here is a real BLOCK, identical in force to the built-in floor.
-  let priorBytes = '';
-  try {
-    priorBytes = fs.existsSync(absPath) && fs.statSync(absPath).isFile() ? fs.readFileSync(absPath, 'utf8') : '';
-  } catch {
-    priorBytes = ''; // unreadable prior → treat as new file (every fact is this write's claim)
-  }
   const registryVerdict = runRegistryGatesOverEditSync({
     file: relPath,
     before: priorBytes,
@@ -272,14 +274,14 @@ export function atomicWrite(absPath: string, content: string): void {
     }
     if (canUseBrokerAtomicWrite(e)) {
       writeAtomicBytesViaBroker(absPath, tmp, content, mode);
-      recordEmergenceEvent({ repoRoot, kind: 'edit', op: 'atomicWrite', file: relPath, before: priorBytes, after: content });
+      recordEmergenceEvent({ repoRoot, kind: 'edit', op: 'atomicWrite', file: relPath, before: priorBytes, after: content, semanticMemoryRecall });
       return;
     }
     throw e;
   }
   // LIVE emergence feed (PART D.6): every successful byte write feeds the
   // observatory with a real, hash-chained event. Fail-safe — never blocks the write.
-  recordEmergenceEvent({ repoRoot, kind: 'edit', op: 'atomicWrite', file: relPath, before: priorBytes, after: content });
+  recordEmergenceEvent({ repoRoot, kind: 'edit', op: 'atomicWrite', file: relPath, before: priorBytes, after: content, semanticMemoryRecall });
 }
 
 export function readUtf8(absPath: string): string {

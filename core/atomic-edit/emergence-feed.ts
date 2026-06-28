@@ -19,6 +19,15 @@ import { createHash } from 'node:crypto';
 
 const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex');
 
+export interface SemanticMemoryRecallEvidence {
+  status: 'hit' | 'miss' | 'unavailable';
+  query: { file: string; beforeSha256: string; afterSha256: string; tokens: string[] };
+  sources: string[];
+  matches: unknown[];
+  digest: string;
+  note?: string;
+}
+
 export interface EmergenceEvent {
   v: 1;
   kind: 'edit' | 'wall-hit';
@@ -29,6 +38,7 @@ export interface EmergenceEvent {
   diff?: string;
   invariantId?: string;
   locus?: { file: string; region?: string };
+  semanticMemoryRecall?: SemanticMemoryRecallEvidence;
   previousSha: string | null;
   recordSha: string;
 }
@@ -79,6 +89,7 @@ export function recordEmergenceEvent(input: {
   after?: string;
   invariantId?: string;
   locus?: { file: string; region?: string };
+  semanticMemoryRecall?: SemanticMemoryRecallEvidence | null;
   ts?: number;
 }): string | null {
   try {
@@ -102,6 +113,7 @@ export function recordEmergenceEvent(input: {
     if (input.kind === 'edit') body.diff = diffSignature(input.before ?? '', input.after ?? '');
     if (input.invariantId) body.invariantId = input.invariantId;
     if (input.locus) body.locus = input.locus;
+    if (input.semanticMemoryRecall) body.semanticMemoryRecall = input.semanticMemoryRecall;
     const recordSha = sha256(JSON.stringify({ event: body, previousSha: prev }));
     fs.appendFileSync(jsonl, JSON.stringify({ ...body, previousSha: prev, recordSha }) + '\n');
     fs.writeFileSync(head, recordSha + '\n');
